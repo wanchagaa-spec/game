@@ -1,0 +1,30 @@
+# ---- Roblox place / model files (build output) ----
+# ห้าม commit — เป็นไฟล์ที่ build ออกมาจาก source เสมอ
+*.rbxl
+*.rbxlx
+*.rbxl.lock
+*.rbxlx.lock
+*.rbxm
+*.rbxmx
+
+# ---- Rojo ----
+# ไฟล์ project ส่วนตัว/ทดลอง (default.project.json ต้อง commit)
+*.local.project.json
+sourcemap.json
+/build/
+/out/
+
+# ---- Toolchain (Aftman / Foreman / Wally) ----
+/.aftman/
+/.foreman/
+/Packages/
+/ServerPackages/
+/DevPackages/
+wally.lock
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

@@ -42,7 +42,10 @@ export type HatchEntry = {
 export type EggType = {
 	id: string, -- คีย์อ้างอิง (ห้ามเปลี่ยนพร่ำเพรื่อ)
 	name: string, -- ชื่อไทยสำหรับโชว์ใน UI
-	price: number, -- ราคาซื้อ (ยังไม่หักจริงใน Phase 1 — ระบบ currency อยู่ Phase 4)
+	-- ⚠️ ไม่มีฟิลด์ price โดยตั้งใจ — ไข่ซื้อด้วยเงินในเกมไม่ได้เลย
+	-- ไข่ปกติได้จากการแย่งในรังบอส · ไข่ตำนานซื้อด้วย Robux ผ่าน Developer Product
+	-- เงินในเกมใช้ซื้อได้แค่ อาวุธ · อัปเกรดอาวุธ · อัปเกรดคอก
+	source: string, -- "boss" = แย่งจากรังบอส | "robux" = Developer Product
 	hatchTime: number, -- เวลาฟักเป็นวินาที นับฝั่ง server เท่านั้น
 	-- ⚠️ Color3 เซฟลง DataStore ไม่ได้ ห้ามให้ค่านี้หลุดเข้าไปใน PlayerData
 	color: Color3, -- สีของก้อนไข่ตอนวางในฟาร์ม (ชั่วคราว ไว้ดูด้วยตาตอนเทสต์)
@@ -81,6 +84,26 @@ export type WeightTier = {
 	min: number, -- น้ำหนักต่ำสุดในชั้นนี้ (kg, จำนวนเต็ม)
 	max: number, -- น้ำหนักสูงสุดในชั้นนี้ (kg, จำนวนเต็ม) — ชั้นบนสุด min = max
 	weight: number, -- น้ำหนักการสุ่ม ต่อ Config.Weight.TIER_ROLL_MAX
+}
+
+-- ค่าประจำด่าน 1 ด่าน
+export type StageDef = {
+	id: number,
+	defenders: number, -- จำนวนทหารฝ่ายรับ
+	turretDps: number, -- damage/วินาที ที่อาวุธป้องกันของกำแพงยิงใส่กองทัพเรา
+}
+
+-- ของที่ซื้อด้วย Robux ผ่าน MarketplaceService
+-- ⚠️ ห้ามเก็บราคา Robux ที่นี่ ราคาจริงตั้งใน Creator Dashboard เท่านั้น
+-- ถ้าเก็บไว้สองที่ วันที่ปรับราคาแล้วลืมแก้ Config ผู้ใช้จะเห็นราคาผิด
+export type DeveloperProduct = {
+	id: string,
+	name: string, -- ชื่อไทยสำหรับปุ่มในร้าน
+	description: string,
+	productId: number, -- เลขจาก Creator Dashboard (0 = ยังไม่ได้สร้าง)
+	grantEggId: string, -- ซื้อแล้วได้ไข่ชนิดไหน
+	grantAmount: number, -- ได้กี่ฟองต่อการซื้อ 1 ครั้ง
+	enabled: boolean,
 }
 
 -- คลาสของตัวละคร (SS/S/A/B/C) — ตัวคูณใช้กับทั้ง damage และ HP
@@ -212,6 +235,20 @@ local WeightTiers: { WeightTier } = {
 	{ id = 6, min = 10000000, max = 99999999, weight = 9 }, -- 0.0009%   111,111
 	{ id = 7, min = 100000000, max = 100000000, weight = 1 }, -- 0.0001%   1,000,000
 }
+
+-- ตารางสุ่มน้ำหนักแยกตามด่านของบอสที่ไข่ฟองนั้นมาจาก
+-- ⚠️ บอสด่านสูง = ไข่ดีกว่า แต่ยังไม่ได้กำหนดตัวเลขของด่าน 2-9
+-- ตอนนี้เว้นเป็น nil ไว้ → getWeightTiers() จะถอยไปใช้ด่านที่ต่ำกว่าที่ใกล้ที่สุด
+-- เติมด่านไหนก็ใส่ตารางของด่านนั้นลงไป ไม่ต้องแก้โค้ดที่อื่น
+local StageWeightTiers: { [number]: { WeightTier } } = {
+	[1] = WeightTiers,
+	-- [2] = { ... },  ← รอกำหนด
+	-- [3] = { ... },
+	-- ...
+	-- [9] = { ... },
+}
+
+Config.StageWeightTiers = StageWeightTiers
 
 Config.Weight = {
 	-- ลูกหนัก 1% ของแม่เสมอ
@@ -597,11 +634,31 @@ Config.Hatchery = {
 -- เก็บเป็น "HP รวม" ค่าเดียว แล้วแสดงโมเดลประกอบ DISPLAY_MODELS_MIN..MAX ตัว
 -- ที่ค่อย ๆ หายไปตามสัดส่วน HP ที่ลดลง (ดู Config.getDisplayModelCount)
 
+-- ตารางประจำด่าน — แก้ทีละด่านได้โดยไม่กระทบด่านอื่น
+-- จำนวนทหารมาจากกติกา ×10 ต่อด่าน แต่เก็บเป็นตารางไม่ใช่สูตร
+-- เพื่อให้ปรับด่านใดด่านหนึ่งตอน balance ได้โดยไม่ต้องรื้อทั้งแถว
+--
+-- turretDps = อาวุธป้องกันของกำแพง ยิงใส่กองทัพเราตลอดเวลาที่ตี
+-- ตั้งไว้ที่ 10% ของ damage รวมที่ทหารฝ่ายรับทำได้ (ทหาร N ตัว × 10 × 10%)
+-- ⚠️ ค่านี้ผมตั้งเอง รอยืนยัน
+local Stages: { StageDef } = {
+	-- id  ทหารฝ่ายรับ          turretDps
+	{ id = 1, defenders = 10, turretDps = 10 },
+	{ id = 2, defenders = 100, turretDps = 100 },
+	{ id = 3, defenders = 1000, turretDps = 1000 },
+	{ id = 4, defenders = 10000, turretDps = 10000 },
+	{ id = 5, defenders = 100000, turretDps = 100000 },
+	{ id = 6, defenders = 1000000, turretDps = 1000000 },
+	{ id = 7, defenders = 10000000, turretDps = 10000000 },
+	{ id = 8, defenders = 100000000, turretDps = 100000000 },
+	{ id = 9, defenders = 1000000000, turretDps = 1000000000 },
+}
+
+Config.Stages = Stages
+
 Config.Stage = {
 	COUNT = 9,
 
-	DEFENDER_BASE = 10, -- จำนวนทหารฝ่ายรับด่าน 1
-	DEFENDER_MULTIPLIER = 10, -- คูณต่อด่าน
 	DEFENDER_HP = 100, -- HP ต่อทหารฝ่ายรับ 1 ตัว
 	DEFENDER_DAMAGE = 10, -- damage ที่ทหารฝ่ายรับ 1 ตัวตีกลับใส่กองทัพเรา
 
@@ -629,6 +686,37 @@ Config.Boss = {
 
 	HP_BASE = 100, -- HP บอสด่าน 1
 	HP_MULTIPLIER = 10, -- คูณต่อด่าน
+}
+
+--------------------------------------------------------------------------------
+-- ของที่ซื้อด้วย Robux (Developer Product)
+--------------------------------------------------------------------------------
+-- ⚠️ ห้ามเก็บราคา Robux ที่นี่ — ราคาจริงอยู่ใน Creator Dashboard ที่เดียว
+-- ฝั่ง client ให้ดึงราคามาโชว์ด้วย MarketplaceService:GetProductInfo()
+--
+-- ไข่ตำนานเป็นของที่ซื้อด้วย Robux เท่านั้น ซื้อซ้ำได้ (Developer Product
+-- ไม่ใช่ Gamepass) การให้ของต้องผ่าน ProcessReceipt ซึ่งต้องทน retry ได้
+-- รายละเอียดวิธีทำให้ปลอดภัยอยู่ใน docs/data-schema.md
+
+local DeveloperProducts: { [string]: DeveloperProduct } = {
+	legendary_egg = {
+		id = "legendary_egg",
+		name = "ไข่ตำนาน",
+		description = "ไข่ที่ออกตัวละครระดับ S และ SS ได้ ซื้อด้วย Robux เท่านั้น",
+		productId = 0, -- ⚠️ ใส่เลขจริงจาก Creator Dashboard ก่อน publish
+		grantEggId = "egg_legendary",
+		grantAmount = 1,
+		enabled = false, -- เปิดตอน Phase 6 หลังสร้าง product จริงแล้ว
+	},
+}
+
+Config.DeveloperProducts = DeveloperProducts
+
+-- คีย์ที่ใช้เก็บ log ธุรกรรมใน DataStore (แยกจาก PlayerData)
+Config.PurchaseLog = {
+	STORE_NAME = "PurchaseLog_v1",
+	-- key = "receipt_<PurchaseId>" ใช้กันการให้ของซ้ำตอน Roblox retry
+	RECEIPT_PREFIX = "receipt_",
 }
 
 --------------------------------------------------------------------------------
@@ -724,7 +812,7 @@ local EggTypes: { [string]: EggType } = {
 		id = "egg_common",
 		enabled = true,
 		name = "ไข่ธรรมดา",
-		price = 100,
+		source = "boss",
 		hatchTime = 30,
 		color = Color3.fromRGB(235, 235, 225),
 		hatchTable = {
@@ -738,7 +826,7 @@ local EggTypes: { [string]: EggType } = {
 		id = "egg_rare",
 		enabled = true,
 		name = "ไข่หายาก",
-		price = 500,
+		source = "boss",
 		hatchTime = 120,
 		color = Color3.fromRGB(90, 160, 235),
 		hatchTable = {
@@ -753,7 +841,7 @@ local EggTypes: { [string]: EggType } = {
 		id = "egg_legendary",
 		enabled = true,
 		name = "ไข่ตำนาน",
-		price = 2500,
+		source = "robux",
 		hatchTime = 300,
 		color = Color3.fromRGB(240, 185, 60),
 		hatchTable = {
@@ -780,6 +868,20 @@ end
 
 function Config.getEgg(eggId: string): EggType?
 	return EggTypes[eggId]
+end
+
+function Config.getDeveloperProduct(productKey: string): DeveloperProduct?
+	return DeveloperProducts[productKey]
+end
+
+-- หา Developer Product จากเลข productId ที่ Roblox ส่งมาใน ProcessReceipt
+function Config.findProductByRobloxId(productId: number): DeveloperProduct?
+	for _, product in DeveloperProducts do
+		if product.enabled and product.productId == productId then
+			return product
+		end
+	end
+	return nil
 end
 
 function Config.getStatus(statusId: string): StatusType?
@@ -847,12 +949,28 @@ end
 -- สุ่ม 2 ขั้นตามที่อธิบายไว้ข้างบน: เลือก tier ก่อน แล้วค่อยสุ่มในช่วงของ tier นั้น
 -- rng ส่งเข้ามาจากข้างนอกเพื่อให้เทสต์ซ้ำได้ด้วย seed เดิม
 
-function Config.rollMotherWeight(rng: Random): number
+-- ตารางสุ่มน้ำหนักของด่านนั้น ถ้ายังไม่กำหนดให้ถอยไปใช้ด่านที่ต่ำกว่าที่ใกล้ที่สุด
+-- (ด่าน 1 กำหนดไว้แล้วเสมอ จึงมีของให้ถอยไปใช้แน่นอน)
+function Config.getWeightTiers(stage: number): { WeightTier }
+	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
+	for index = clamped, 1, -1 do
+		local tiers = StageWeightTiers[index]
+		if tiers then
+			return tiers
+		end
+	end
+	return WeightTiers
+end
+
+-- stage = ด่านของบอสที่ไข่ฟองนี้มาจาก (ไข่ตำนานที่ซื้อด้วย Robux ใช้ด่านสูงสุด)
+function Config.rollMotherWeight(rng: Random, stage: number?): number
+	local tiers = Config.getWeightTiers(stage or 1)
+
 	-- ขั้น 1: สุ่ม tier — ใช้จำนวนเต็มล้วน ไม่มี float เข้ามาเกี่ยวเลย
 	local roll = rng:NextInteger(1, Config.Weight.TIER_ROLL_MAX)
 	local acc = 0
 
-	for _, tier in WeightTiers do
+	for _, tier in tiers do
 		acc += tier.weight
 		if roll <= acc then
 			-- ขั้น 2: สุ่มน้ำหนักภายใน tier แบบ uniform
@@ -862,7 +980,7 @@ function Config.rollMotherWeight(rng: Random): number
 
 	-- ตกมาถึงตรงนี้ไม่ได้ถ้า validate() ผ่าน (ผลรวม weight = TIER_ROLL_MAX)
 	-- แต่กันไว้ให้คืนค่าที่ใช้งานได้เสมอ
-	local last = WeightTiers[#WeightTiers]
+	local last = tiers[#tiers]
 	return rng:NextInteger(last.min, last.max)
 end
 
@@ -1102,9 +1220,18 @@ end
 -- ด่าน กำแพง บอส
 --------------------------------------------------------------------------------
 
-function Config.getStageDefenderCount(stage: number): number
+function Config.getStage(stage: number): StageDef
 	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
-	return Config.Stage.DEFENDER_BASE * Config.Stage.DEFENDER_MULTIPLIER ^ (clamped - 1)
+	return Stages[clamped]
+end
+
+function Config.getStageDefenderCount(stage: number): number
+	return Config.getStage(stage).defenders
+end
+
+-- damage/วินาที ที่อาวุธป้องกันของกำแพงยิงใส่กองทัพเรา
+function Config.getStageTurretDps(stage: number): number
+	return Config.getStage(stage).turretDps
 end
 
 function Config.getStageDefenderHp(stage: number): number
@@ -1223,6 +1350,23 @@ function Config.validate()
 	----------------------------------------------------------------------------
 	-- ข้อที่สำคัญที่สุดคือผลรวม weight ต้องเท่ากับ TIER_ROLL_MAX พอดี
 	-- ถ้าน้อยกว่า จะมีช่วงเลขที่สุ่มออกมาแล้วไม่ตรงกับ tier ไหนเลย
+	-- เช็คทุกตารางที่กำหนดไว้ ไม่ใช่แค่ด่าน 1
+	assert(StageWeightTiers[1] ~= nil, "Config: ต้องมีตาราง tier ของด่าน 1 เสมอ (ใช้เป็นค่าถอยกลับ)")
+	for stageId, tiers in StageWeightTiers do
+		assert(
+			stageId >= 1 and stageId <= Config.Stage.COUNT and stageId % 1 == 0,
+			`Config: StageWeightTiers มีด่าน {stageId} ที่อยู่นอกช่วง 1..{Config.Stage.COUNT}`
+		)
+		local total = 0
+		for _, tier in tiers do
+			total += tier.weight
+		end
+		assert(
+			total == Config.Weight.TIER_ROLL_MAX,
+			`Config: ตาราง tier ของด่าน {stageId} มีผลรวม weight = {total} แต่ต้องเป็น {Config.Weight.TIER_ROLL_MAX}`
+		)
+	end
+
 	local tierTotal = 0
 	local previousMax = 0
 
@@ -1436,9 +1580,18 @@ function Config.validate()
 	assert(economy.BASE_PER_MINUTE > 0, "Config: BASE_PER_MINUTE ต้องมากกว่า 0")
 	assert(economy.REFERENCE_WEIGHT > 0, "Config: REFERENCE_WEIGHT ต้องมากกว่า 0")
 	assert(economy.EXPONENT > 0 and economy.EXPONENT < 1, "Config: EXPONENT ของเงินต้องอยู่ระหว่าง 0 กับ 1 (ต้องถดถอย)")
+	-- ตัวคูณเงินต่อด่านต้องไม่น้อยกว่าอัตราที่ด่านยากขึ้นจริง
+	-- ไม่งั้นรายได้จะโตช้ากว่าความยาก แล้วผู้เล่นจะซื้อของขั้นสูงไม่ได้เลย
+	local steepestStageStep = 1
+	for index = 2, #Stages do
+		local step = Stages[index].defenders / Stages[index - 1].defenders
+		if step > steepestStageStep then
+			steepestStageStep = step
+		end
+	end
 	assert(
-		economy.STAGE_MULTIPLIER >= Config.Stage.DEFENDER_MULTIPLIER,
-		"Config: ตัวคูณเงินต่อด่านต้องไม่น้อยกว่าอัตราที่ด่านยากขึ้น ไม่งั้นผู้เล่นจะซื้อของขั้นสูงไม่ได้"
+		economy.STAGE_MULTIPLIER >= steepestStageStep,
+		`Config: ตัวคูณเงินต่อด่าน (×{economy.STAGE_MULTIPLIER}) น้อยกว่าอัตราที่ด่านยากขึ้นสูงสุด (×{steepestStageStep}) — ผู้เล่นจะซื้อของขั้นสูงไม่ได้`
 	)
 	assert(economy.SELL_MOTHER_MINUTES > 0, "Config: SELL_MOTHER_MINUTES ต้องมากกว่า 0")
 
@@ -1457,8 +1610,21 @@ function Config.validate()
 	----------------------------------------------------------------------------
 	local stage = Config.Stage
 	assert(stage.COUNT > 0, "Config: จำนวนด่านต้องมากกว่า 0")
-	assert(stage.DEFENDER_BASE > 0 and stage.DEFENDER_MULTIPLIER > 1, "Config: ค่าทหารฝ่ายรับไม่ถูกต้อง")
 	assert(stage.DEFENDER_HP > 0 and stage.DEFENDER_DAMAGE > 0, "Config: HP/damage ของทหารฝ่ายรับต้องมากกว่า 0")
+
+	-- ตารางด่านต้องครบทุกด่าน เรียงตาม id และยากขึ้นเรื่อย ๆ
+	assert(#Stages == stage.COUNT, `Config: ตารางด่านมี {#Stages} แถว แต่ COUNT = {stage.COUNT}`)
+	local previousDefenders = 0
+	for index, def in Stages do
+		assert(def.id == index, `Config: ตารางด่านแถวที่ {index} มี id = {def.id} (ต้องตรงกับลำดับ)`)
+		assert(def.defenders > 0, `Config: ด่าน {def.id} มีทหารฝ่ายรับ <= 0`)
+		assert(def.turretDps >= 0, `Config: ด่าน {def.id} มี turretDps ติดลบ`)
+		assert(
+			def.defenders > previousDefenders,
+			`Config: ด่าน {def.id} มีทหารน้อยกว่าหรือเท่าด่านก่อนหน้า — ด่านต้องยากขึ้นเรื่อย ๆ`
+		)
+		previousDefenders = def.defenders
+	end
 	assert(stage.WALL_HP_RATIO > 0, "Config: WALL_HP_RATIO ต้องมากกว่า 0")
 	assert(
 		stage.DISPLAY_MODELS_MIN > 0 and stage.DISPLAY_MODELS_MIN <= stage.DISPLAY_MODELS_MAX,
@@ -1476,6 +1642,43 @@ function Config.validate()
 		"Config: ตัวคูณ damage อาวุธกับตัวคูณ HP บอสต้องเท่ากัน ไม่งั้นจำนวนครั้งที่ตีบอสจะเพี้ยนตามด่าน"
 	)
 	assert(Config.Weapon.MAX_LEVEL >= stage.COUNT, "Config: ขั้นอาวุธต้องมีอย่างน้อยเท่าจำนวนด่าน")
+
+	----------------------------------------------------------------------------
+	-- แหล่งที่มาของไข่ + Developer Product
+	----------------------------------------------------------------------------
+	for eggId, egg in EggTypes do
+		assert(
+			egg.source == "boss" or egg.source == "robux",
+			`Config: ไข่ "{eggId}" มี source = "{egg.source}" ที่ไม่รู้จัก (ต้องเป็น "boss" หรือ "robux")`
+		)
+	end
+
+	local seenProductId: { [number]: string } = {}
+	for productKey, product in DeveloperProducts do
+		assert(product.id == productKey, `Config: DeveloperProducts["{productKey}"].id ไม่ตรงกับคีย์`)
+		assert(product.grantAmount > 0, `Config: product "{productKey}" ให้ของ <= 0 ชิ้น`)
+
+		local egg = EggTypes[product.grantEggId]
+		assert(egg ~= nil, `Config: product "{productKey}" ให้ไข่ "{product.grantEggId}" ที่ไม่มีอยู่`)
+		assert(
+			(egg :: EggType).source == "robux",
+			`Config: product "{productKey}" ให้ไข่ "{product.grantEggId}" ที่ source ไม่ใช่ "robux"`
+		)
+
+		if product.enabled then
+			-- เปิดขายแล้วต้องมีเลข productId จริง ไม่งั้น ProcessReceipt จะจับคู่ไม่ได้
+			assert(
+				product.productId > 0,
+				`Config: product "{productKey}" เปิดขายแล้วแต่ productId ยังเป็น 0 — ต้องใส่เลขจาก Creator Dashboard ก่อน`
+			)
+			local owner = seenProductId[product.productId]
+			assert(
+				owner == nil,
+				`Config: productId {product.productId} ถูกใช้ทั้งใน "{owner}" และ "{productKey}"`
+			)
+			seenProductId[product.productId] = productKey
+		end
+	end
 
 	----------------------------------------------------------------------------
 	-- upgrade อัตราผลิต

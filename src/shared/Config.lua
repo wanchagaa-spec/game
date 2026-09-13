@@ -47,6 +47,11 @@ export type EggType = {
 	-- เงินในเกมใช้ซื้อได้แค่ อาวุธ · อัปเกรดอาวุธ · อัปเกรดคอก
 	source: string, -- "boss" = แย่งจากรังบอส | "robux" = Developer Product
 	hatchTime: number, -- เวลาฟักเป็นวินาที นับฝั่ง server เท่านั้น
+
+	-- รับประกัน tier น้ำหนักขั้นต่ำ (nil = ไม่รับประกัน สุ่มตามตารางล้วน)
+	-- สุ่มตามตารางปกติก่อน ถ้าได้ต่ำกว่านี้ค่อยดันขึ้นมา — ยังลุ้นตัวใหญ่กว่าได้
+	-- ใช้กับไข่ที่จ่ายเงินจริง เพื่อให้ "จ่ายแล้วไม่มีทางเสียใจ"
+	guaranteedTier: number?,
 	-- ⚠️ Color3 เซฟลง DataStore ไม่ได้ ห้ามให้ค่านี้หลุดเข้าไปใน PlayerData
 	color: Color3, -- สีของก้อนไข่ตอนวางในฟาร์ม (ชั่วคราว ไว้ดูด้วยตาตอนเทสต์)
 	hatchTable: { HatchEntry }, -- ตารางน้ำหนักการสุ่มว่าฟักแล้วออกทหารตัวไหน
@@ -534,8 +539,11 @@ Config.Characters = Characters
 -- ไข่ทุกชนิดใช้ "ตาราง tier น้ำหนักชุดเดียวกัน" (Config.Weight.TIERS)
 -- ความต่างของไข่อยู่ที่คลาสตัวละครที่ออกได้ ซึ่งเป็นตัวคูณ damage/HP โดยตรง
 --
--- ตามที่ตกลง: ไข่ธรรมดาไม่มี S/SS · ไข่หายากตัด C ออกและไม่มี S/SS ·
--- ไข่ตำนานตัด C ออกและเพิ่ม S/SS
+-- กติกา:
+--   ไข่จากบอส   ออกได้ตั้งแต่ C ถึง S — **ไม่มี SS**
+--                ไข่ธรรมดา C/B/A · ไข่หายากตัด C ออกและเพิ่ม S
+--   ไข่ตำนาน    (Robux) ตัด C ออก · มีทั้ง S และ SS
+--                **SS ออกได้จากไข่ตำนานเท่านั้น**
 --
 -- weight เป็นจำนวนเต็มต่อ 10,000 (validate() บังคับผลรวมให้เท่ากับ CLASS_ROLL_MAX)
 -- สุ่ม 2 ขั้นเหมือนน้ำหนัก: สุ่มคลาสก่อน แล้วค่อยสุ่มตัวละครในคลาสนั้นแบบเท่า ๆ กัน
@@ -549,14 +557,15 @@ local EggCharacterPools: { [string]: { ClassChance } } = {
 		{ class = "A", weight = 200 }, -- 2%
 	},
 	egg_rare = {
-		{ class = "B", weight = 8000 }, -- 80%
-		{ class = "A", weight = 2000 }, -- 20%
+		{ class = "B", weight = 7000 }, -- 70%
+		{ class = "A", weight = 2700 }, -- 27%
+		{ class = "S", weight = 300 }, -- 3%   ← เพดานของไข่จากบอส
 	},
 	egg_legendary = {
-		{ class = "B", weight = 5000 }, -- 50%
-		{ class = "A", weight = 4000 }, -- 40%
-		{ class = "S", weight = 950 }, -- 9.5%
-		{ class = "SS", weight = 50 }, -- 0.5%
+		{ class = "B", weight = 3500 }, -- 35%
+		{ class = "A", weight = 4500 }, -- 45%
+		{ class = "S", weight = 1800 }, -- 18%
+		{ class = "SS", weight = 200 }, -- 2%   ← ออกได้จากไข่ตำนานเท่านั้น
 	},
 }
 
@@ -811,6 +820,7 @@ local EggTypes: { [string]: EggType } = {
 	egg_common = {
 		id = "egg_common",
 		enabled = true,
+		guaranteedTier = nil,
 		name = "ไข่ธรรมดา",
 		source = "boss",
 		hatchTime = 30,
@@ -825,6 +835,7 @@ local EggTypes: { [string]: EggType } = {
 	egg_rare = {
 		id = "egg_rare",
 		enabled = true,
+		guaranteedTier = nil,
 		name = "ไข่หายาก",
 		source = "boss",
 		hatchTime = 120,
@@ -840,6 +851,7 @@ local EggTypes: { [string]: EggType } = {
 	egg_legendary = {
 		id = "egg_legendary",
 		enabled = true,
+		guaranteedTier = 3,
 		name = "ไข่ตำนาน",
 		source = "robux",
 		hatchTime = 300,
@@ -963,25 +975,43 @@ function Config.getWeightTiers(stage: number): { WeightTier }
 end
 
 -- stage = ด่านของบอสที่ไข่ฟองนี้มาจาก (ไข่ตำนานที่ซื้อด้วย Robux ใช้ด่านสูงสุด)
-function Config.rollMotherWeight(rng: Random, stage: number?): number
+function Config.rollMotherWeight(rng: Random, stage: number?, guaranteedTier: number?): number
 	local tiers = Config.getWeightTiers(stage or 1)
 
 	-- ขั้น 1: สุ่ม tier — ใช้จำนวนเต็มล้วน ไม่มี float เข้ามาเกี่ยวเลย
 	local roll = rng:NextInteger(1, Config.Weight.TIER_ROLL_MAX)
 	local acc = 0
+	local chosenIndex = #tiers -- ตกมาถึงค่านี้ไม่ได้ถ้า validate() ผ่าน แต่กันไว้
 
-	for _, tier in tiers do
+	for index, tier in tiers do
 		acc += tier.weight
 		if roll <= acc then
-			-- ขั้น 2: สุ่มน้ำหนักภายใน tier แบบ uniform
-			return rng:NextInteger(tier.min, tier.max)
+			chosenIndex = index
+			break
 		end
 	end
 
-	-- ตกมาถึงตรงนี้ไม่ได้ถ้า validate() ผ่าน (ผลรวม weight = TIER_ROLL_MAX)
-	-- แต่กันไว้ให้คืนค่าที่ใช้งานได้เสมอ
-	local last = tiers[#tiers]
-	return rng:NextInteger(last.min, last.max)
+	-- ขั้น 1.5: ดันขึ้นถ้าได้ต่ำกว่าที่รับประกันไว้
+	-- ทำหลังสุ่มไม่ใช่ก่อน เพื่อให้ยังลุ้น tier ที่สูงกว่าการรับประกันได้ตามปกติ
+	if guaranteedTier then
+		local floorIndex = math.clamp(math.floor(guaranteedTier), 1, #tiers)
+		if chosenIndex < floorIndex then
+			chosenIndex = floorIndex
+		end
+	end
+
+	-- ขั้น 2: สุ่มน้ำหนักภายใน tier ที่ได้ แบบ uniform
+	local tier = tiers[chosenIndex]
+	return rng:NextInteger(tier.min, tier.max)
+end
+
+-- สุ่มน้ำหนักโดยอ่านการรับประกันจากตัวไข่เอง — ใช้ตัวนี้เป็นหลัก
+function Config.rollMotherWeightForEgg(eggId: string, rng: Random, stage: number?): number?
+	local egg = EggTypes[eggId]
+	if not egg then
+		return nil
+	end
+	return Config.rollMotherWeight(rng, stage, egg.guaranteedTier)
 end
 
 --------------------------------------------------------------------------------
@@ -1651,6 +1681,31 @@ function Config.validate()
 			egg.source == "boss" or egg.source == "robux",
 			`Config: ไข่ "{eggId}" มี source = "{egg.source}" ที่ไม่รู้จัก (ต้องเป็น "boss" หรือ "robux")`
 		)
+	end
+
+	-- guaranteedTier ต้องชี้ไปที่ tier ที่มีอยู่จริง
+	for eggId, egg in EggTypes do
+		if egg.guaranteedTier ~= nil then
+			local tier = egg.guaranteedTier :: number
+			assert(
+				tier >= 1 and tier <= #WeightTiers and tier % 1 == 0,
+				`Config: ไข่ "{eggId}" รับประกัน tier {tier} ซึ่งอยู่นอกช่วง 1..{#WeightTiers}`
+			)
+		end
+	end
+
+	-- SS ต้องออกได้จากไข่ที่จ่ายเงินจริงเท่านั้น
+	-- ถ้าไข่จากบอสให้ SS ได้เมื่อไหร่ ไข่ตำนานจะขายไม่ออกทันที
+	for eggId, pool in EggCharacterPools do
+		local egg = EggTypes[eggId]
+		if egg and egg.source == "boss" then
+			for _, entry in pool do
+				assert(
+					entry.class ~= "SS",
+					`Config: ไข่ "{eggId}" มาจากบอสแต่ออกคลาส SS ได้ — SS ต้องมาจากไข่ Robux เท่านั้น`
+				)
+			end
+		end
 	end
 
 	local seenProductId: { [number]: string } = {}

@@ -28,11 +28,15 @@ rojo build -o game.rbxl   # build ไฟล์ place
 ```
 src/
   server/   → ServerScriptService (logic ฟักไข่, คลังทหาร, combat, DataStore)
-    Main.server.lua      → ServerScriptService.Main (entry point)
+    Main.server.lua      → ServerScriptService.Main (entry point, ต่อสายอย่างเดียว)
+    PlotService.lua      → จอง/คืน farm plot + สร้างโลก
+    EggService.lua       → วางไข่ จับเวลา ฟัก สุ่มทหาร คลังทหาร (memory)
   client/   → StarterPlayerScripts (UI ทั้งหมด)
     Main.client.lua      → StarterPlayerScripts.Main (entry point)
   shared/   → ReplicatedStorage.Shared (config, constants, type ที่ใช้ร่วมกัน)
-    init.lua             → ตัว Shared เองเป็น ModuleScript
+    init.lua             → ตัว Shared เองเป็น ModuleScript (เป็นแค่ฝา)
+    Config.lua           → ⚠️ โครงหลัก: ตารางไข่/ทหาร ค่าตั้งฟาร์ม ชื่อ RemoteEvent
+    Remotes.lua          → สร้าง/รอหา RemoteEvent
 default.project.json   → mapping ของ Rojo
 ```
 
@@ -45,7 +49,7 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 ทำทีละเฟส **อย่าข้ามไปทำเฟสถัดไปเองถ้ายังไม่สั่ง**
 
 - **Phase 0** — โครงโปรเจกต์ + Rojo + README + .gitignore ✅
-- **Phase 1** — ระบบไข่ & ฟาร์ม (data model ไข่, จุดวางไข่, ตัวจับเวลาฟัก, สุ่มผลทหาร)
+- **Phase 1** — ระบบไข่ & ฟาร์ม (data model ไข่, จุดวางไข่, ตัวจับเวลาฟัก, สุ่มผลทหาร) ✅
 - **Phase 2** — คลังทหาร & DataStore (บันทึกทหาร/ไข่/currency, UI คลัง, จัดทีม)
 - **Phase 3** — สนามรบ auto-battle (เริ่มจาก PvE ฐานบอทก่อน, ระบบ HP/damage/target)
 - **Phase 4** — เศรษฐกิจ & progression (รางวัลชนะ, shop ไข่, อัปเกรดทหาร)
@@ -73,4 +77,10 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 - commit เป็นก้อนย่อยตามงานที่ทำเสร็จ ข้อความ commit ภาษาอังกฤษสั้น ๆ
 
 ## สถานะปัจจุบัน
-Phase 0 เสร็จแล้ว (อัปเดตบรรทัดนี้เมื่อจบแต่ละเฟส)
+Phase 1 เสร็จแล้ว (อัปเดตบรรทัดนี้เมื่อจบแต่ละเฟส)
+
+ค้างไว้ให้ Phase 2:
+- คลังทหารกับสถานะไข่อยู่ใน memory ฝั่ง server ผู้เล่นออกเกม = ข้อมูลหาย ยังไม่มี DataStore
+- `price` ของไข่มีใน Config แล้วแต่ยังไม่หักจริง (ระบบ currency อยู่ Phase 4)
+- ไข่ที่ฟักค้างอยู่ตอนผู้เล่นออก ยังไม่ได้เก็บเวลาไว้ฟักต่อ
+- UI ฝั่ง client เป็นแผงเทสต์ชั่วคราว ยังไม่ใช่ UI จริง

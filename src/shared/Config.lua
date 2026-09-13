@@ -698,6 +698,62 @@ Config.Boss = {
 }
 
 --------------------------------------------------------------------------------
+-- ตัวคูณ damage ตามความคืบหน้ากำแพง
+--------------------------------------------------------------------------------
+-- ⚠️ เรื่อง off-by-one ที่พลาดง่ายที่สุดในไฟล์นี้
+--
+--   ตอนผู้เล่น "กำลังตีด่าน N" เขาพังกำแพงมาแล้ว N-1 ด่าน
+--   ดังนั้น wallProgress = N และตัวคูณ = BASE ^ (wallProgress - 1)
+--
+--   ด่าน 1 (ยังไม่เคยพังอะไร)  → wallProgress = 1 → ตัวคูณ = BASE^0 = 1
+--   ด่าน 9 (พังมาแล้ว 8 ด่าน)  → wallProgress = 9 → ตัวคูณ = BASE^8
+--
+--   ถ้าเผลอใช้ BASE^wallProgress ด่านแรกจะได้ตัวคูณฟรีทันที
+--   และช่องว่างจะเลื่อนไปทั้งเส้น ไม่ได้หายไป — มี unit test ยืนยันจุดนี้
+--
+-- ใช้กับ "ทั้งตัวแม่และตัวลูก" ที่ส่งไปรบ และ **คำนวณตอนเข้ารบ** จาก
+-- wallProgress ปัจจุบันของผู้เล่น ไม่เก็บตัวคูณติดไปกับกองลูก
+-- ผลข้างเคียงที่ตั้งใจ: ลูกที่สะสมไว้ตั้งแต่ด่านต้นแรงขึ้นตามผู้เล่น ไม่มีกองที่ตกยุค
+--
+--------------------------------------------------------------------------------
+-- ⚠️ ทำไม BASE = 1 ไม่ใช่ 8
+--------------------------------------------------------------------------------
+-- damage/วันของกองทัพโตอยู่แล้ว ×7.05 ต่อด่าน โดยไม่ต้องมีตัวคูณนี้เลย:
+--     น้ำหนักแม่ที่หาได้โตขึ้น ×3.96/ด่าน → damage ×1.99 (sqrt บีบครึ่ง)
+--     ขนาดคอกโตขึ้น                        → ×1.18/ด่าน
+--     upgrade อัตราผลิต                    → ×3/ด่าน
+-- ส่วน HP ของด่านโตแค่ ×10 ต่อด่าน
+--
+-- 7.05 < 10 → เกมยากขึ้นเรื่อย ๆ อยู่แล้ว (ด่าน 1 = 2.2 ชม. → ด่าน 9 = 17.8 ชม.)
+-- ถ้าตั้ง BASE = 8 จะกลายเป็น 56 ต่อด่าน ซึ่งมากกว่า 10 → **เกมง่ายลงเรื่อย ๆ**
+-- ด่าน 4 เป็นต้นไปจะจบทันที และด่าน 9 จะเร็วกว่าด่าน 1 ราวสองล้านเท่า
+--
+-- assertProgressionIsSane() ข้างล่างจะไม่ยอมให้เซิร์ฟบูตถ้าตั้งค่าที่ทำให้เป็นแบบนั้น
+
+Config.Combat = {
+	-- ฐานของตัวคูณ damage ต่อ 1 กำแพงที่พังได้
+	-- 1 = ปิด (ให้ upgrade อัตราผลิตเป็นตัวขับอย่างเดียว)
+	STAGE_DAMAGE_BASE = 1,
+}
+
+--------------------------------------------------------------------------------
+-- ยามเฝ้าสมดุล
+--------------------------------------------------------------------------------
+-- ค่าอ้างอิงของ "ผู้เล่นชั้นกลาง" ที่แต่ละด่าน ใช้เป็นไม้บรรทัดวัดว่าเกมยังเล่นจบได้
+-- ไม่ใช่ข้อมูลเกม — ไม่มีใครอ่านค่านี้ตอนเล่นจริง มีไว้ให้ validate() ใช้อย่างเดียว
+
+Config.BalanceCheck = {
+	-- เวลาสะสมกองทัพต่อ 1 ด่านต้องอยู่ในช่วงนี้
+	MIN_HOURS_PER_STAGE = 0.5, -- เร็วกว่านี้ = ด่านไม่มีความหมาย
+	MAX_HOURS_PER_STAGE = 72, -- ช้ากว่านี้ = ผู้เล่นเลิกเล่น
+
+	-- น้ำหนักแม่ที่ผู้เล่นทั่วไปหาได้ตอนอยู่ด่านนั้น
+	REFERENCE_WEIGHT = { 500, 2000, 8000, 30000, 120000, 500000, 2000000, 8000000, 30000000 },
+	-- คลาสที่ผู้เล่นทั่วไปมีตอนอยู่ด่านนั้น
+	REFERENCE_CLASS = { "C", "C", "B", "B", "A", "A", "S", "S", "S" },
+}
+
+--------------------------------------------------------------------------------
 -- ของที่ซื้อด้วย Robux (Developer Product)
 --------------------------------------------------------------------------------
 -- ⚠️ ห้ามเก็บราคา Robux ที่นี่ — ราคาจริงอยู่ใน Creator Dashboard ที่เดียว
@@ -1197,6 +1253,28 @@ function Config.computePower(weight: number, charId: string?, statuses: { string
 end
 
 --------------------------------------------------------------------------------
+-- ตัวคูณ damage ตามด่าน
+--------------------------------------------------------------------------------
+
+-- wallProgress = ด่านที่ผู้เล่นกำลังตีอยู่ (= จำนวนกำแพงที่พังแล้ว + 1)
+-- คืนตัวคูณ = BASE ^ (wallProgress - 1) — ดูคำอธิบาย off-by-one ข้างบน
+function Config.getStageDamageMultiplier(wallProgress: number): number
+	local clamped = math.clamp(math.floor(wallProgress), 1, Config.Stage.COUNT)
+	return Config.Combat.STAGE_DAMAGE_BASE ^ (clamped - 1)
+end
+
+-- damage/HP ของหน่วย 1 ตัวตอนเข้ารบ = พลังพื้นฐาน × ตัวคูณตามด่าน
+-- ใช้ได้ทั้งแม่และลูก ส่ง weight ของตัวนั้นเข้ามา
+function Config.computeBattlePower(
+	weight: number,
+	charId: string?,
+	statuses: { string }?,
+	wallProgress: number
+): number
+	return Config.computePower(weight, charId, statuses) * Config.getStageDamageMultiplier(wallProgress)
+end
+
+--------------------------------------------------------------------------------
 -- คอก / กระเป๋า
 --------------------------------------------------------------------------------
 
@@ -1344,6 +1422,92 @@ function Config.formatWeight(kg: number): string
 	local text = string.format("%.2f", kg)
 	text = string.gsub(text, "%.?0+$", "")
 	return text
+end
+
+--------------------------------------------------------------------------------
+-- ยามเฝ้าสมดุล: เกมยังเล่นจบได้ไหม
+--------------------------------------------------------------------------------
+-- ⚠️ ยามตัวนี้กันปัญหาที่เคยเกิดมาแล้วสองรอบ และมองไม่เห็นด้วยตาเปล่า:
+--
+--   รอบแรก  ราคาของโต ×10 ต่อขั้น แต่รายได้โตแค่ ×1,000 ตลอดเกม
+--           → ผู้เล่นซื้อของขั้นกลางขึ้นไปไม่ได้เลย (แก้ด้วยตัวคูณเงินตามด่าน)
+--   รอบสอง  เกือบใส่ตัวคูณ damage ×8 ต่อด่าน ทั้งที่กองทัพโตอยู่แล้ว ×7 ต่อด่าน
+--           → ด่าน 4 เป็นต้นไปจะจบทันที เกมง่ายลงเรื่อย ๆ แทนที่จะไต่ระดับ
+--
+-- ทั้งสองรอบเกิดจากเรื่องเดียวกัน: "อัตราการโต" ของสองฝั่งไม่แมตช์กัน
+-- ซึ่งดูจากตัวเลขตรง ๆ ไม่ออก ต้องคำนวณเป็นเวลาถึงจะเห็น
+--
+-- ยามตัวนี้จึงคำนวณ "ผู้เล่นชั้นกลางใช้เวลากี่ชั่วโมงกว่าจะพังกำแพงด่าน N"
+-- แล้วบังคับให้อยู่ในช่วงที่ยอมรับได้ **ทั้งสองด้าน**
+-- ช้าไป = ผู้เล่นเลิกเล่น · เร็วไป = ด่านนั้นไม่มีความหมาย
+local function assertProgressionIsSane()
+	local check = Config.BalanceCheck
+
+	for stage = 1, Config.Stage.COUNT do
+		local weight = check.REFERENCE_WEIGHT[stage]
+		local class = check.REFERENCE_CLASS[stage]
+		assert(weight ~= nil and class ~= nil, `Config: BalanceCheck ขาดค่าอ้างอิงของด่าน {stage}`)
+
+		-- หาตัวละครสักตัวในคลาสอ้างอิง (คลาสเดียวกันพลังเท่ากันหมด)
+		local charId: string? = nil
+		for id, character in Characters do
+			if character.class == class then
+				charId = id
+				break
+			end
+		end
+		assert(charId ~= nil, `Config: BalanceCheck อ้างคลาส "{class}" ที่ไม่มีตัวละครอยู่เลย`)
+
+		-- ผู้เล่นชั้นกลางที่ด่าน N: คอกเลเวล N · upgrade อัตราผลิตขั้น N-1
+		local penCapacity = Config.getPenCapacity(stage)
+		local productionRate = Config.getProductionMultiplier(stage - 1)
+		local childrenPerDay = penCapacity * 60 * 24 * Config.Production.ONLINE_PER_MINUTE * productionRate
+
+		local perChild = Config.computeBattlePower(Config.getChildWeight(weight), charId, nil, stage)
+		local damagePerDay = childrenPerDay * perChild
+		assert(damagePerDay > 0, `Config: ด่าน {stage} คำนวณ damage/วัน ได้ 0`)
+
+		local hours = Config.getStageTotalHp(stage) / (damagePerDay / 24)
+
+		assert(
+			hours <= check.MAX_HOURS_PER_STAGE,
+			`Config: ด่าน {stage} ต้องสะสมกองทัพ {math.floor(hours)} ชั่วโมง (เพดาน {check.MAX_HOURS_PER_STAGE}) `
+				.. `— ยากเกินจนผู้เล่นเลิกเล่น ลอง HP ด่านลง หรือดัน damage ขึ้น`
+		)
+		assert(
+			hours >= check.MIN_HOURS_PER_STAGE,
+			`Config: ด่าน {stage} ใช้เวลาแค่ {string.format("%.2f", hours)} ชั่วโมง (ขั้นต่ำ {check.MIN_HOURS_PER_STAGE}) `
+				.. `— เร็วเกินจนด่านไม่มีความหมาย มักเกิดจากตัวคูณฝั่ง damage โตเร็วกว่า HP ของด่าน`
+		)
+	end
+
+	-- เกมควร "ยากขึ้น" เรื่อย ๆ ไม่ใช่ง่ายลง
+	-- เทียบด่านสุดท้ายกับด่านแรก ถ้าด่านท้ายเร็วกว่าด่านแรก แปลว่าสเกลกลับทาง
+	local function hoursAt(stage: number): number
+		local weight = check.REFERENCE_WEIGHT[stage]
+		local class = check.REFERENCE_CLASS[stage]
+		local charId: string? = nil
+		for id, character in Characters do
+			if character.class == class then
+				charId = id
+				break
+			end
+		end
+		local childrenPerDay = Config.getPenCapacity(stage)
+			* 60
+			* 24
+			* Config.Production.ONLINE_PER_MINUTE
+			* Config.getProductionMultiplier(stage - 1)
+		local perChild = Config.computeBattlePower(Config.getChildWeight(weight), charId, nil, stage)
+		return Config.getStageTotalHp(stage) / (childrenPerDay * perChild / 24)
+	end
+
+	local first, last = hoursAt(1), hoursAt(Config.Stage.COUNT)
+	assert(
+		last >= first,
+		`Config: ด่านสุดท้ายใช้เวลา {string.format("%.2f", last)} ชม. น้อยกว่าด่านแรก {string.format("%.2f", first)} ชม. `
+			.. `— เกมง่ายลงเรื่อย ๆ แทนที่จะไต่ระดับ ตรวจ Config.Combat.STAGE_DAMAGE_BASE`
+	)
 end
 
 -- เช็คความถูกต้องของตารางตอนเซิร์ฟเวอร์บูต
@@ -1746,6 +1910,29 @@ function Config.validate()
 	)
 	assert(Config.DataStore.AUTOSAVE_INTERVAL >= 10, "Config: AUTOSAVE_INTERVAL ถี่เกินไป เสี่ยงโดน throttle")
 	assert(Config.SCHEMA_VERSION >= 1 and Config.SCHEMA_VERSION % 1 == 0, "Config: SCHEMA_VERSION ต้องเป็นจำนวนเต็มตั้งแต่ 1")
+
+	----------------------------------------------------------------------------
+	-- ตัวคูณ damage ตามด่าน
+	----------------------------------------------------------------------------
+	assert(Config.Combat.STAGE_DAMAGE_BASE > 0, "Config: STAGE_DAMAGE_BASE ต้องมากกว่า 0 (1 = ปิด)")
+	-- ด่านแรกต้องไม่ได้ตัวคูณฟรี — ดักกรณีเผลอเขียน BASE^wallProgress แทน BASE^(wallProgress-1)
+	assert(
+		Config.getStageDamageMultiplier(1) == 1,
+		"Config: ตัวคูณ damage ของด่าน 1 ต้องเป็น 1 พอดี — น่าจะพลาด off-by-one ในสูตรยกกำลัง"
+	)
+
+	assert(
+		#Config.BalanceCheck.REFERENCE_WEIGHT == Config.Stage.COUNT
+			and #Config.BalanceCheck.REFERENCE_CLASS == Config.Stage.COUNT,
+		"Config: ตารางอ้างอิงของ BalanceCheck ต้องมีครบทุกด่าน"
+	)
+	assert(
+		Config.BalanceCheck.MIN_HOURS_PER_STAGE < Config.BalanceCheck.MAX_HOURS_PER_STAGE,
+		"Config: ช่วงเวลาที่ยอมรับได้ของ BalanceCheck กลับหัว"
+	)
+
+	-- ทำท้ายสุด เพราะต้องใช้ค่าที่เช็คไปแล้วข้างบนทั้งหมด
+	assertProgressionIsSane()
 end
 
 return Config

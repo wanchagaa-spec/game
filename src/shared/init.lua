@@ -1,20 +1,14 @@
 --!strict
--- egg-army-game :: Shared config / constants
+-- egg-army-game :: ReplicatedStorage.Shared
 --
--- ModuleScript ตัวนี้ถูก map ไปที่ ReplicatedStorage.Shared
--- ทั้ง server และ client require ตัวเดียวกันนี้ เพื่อไม่ให้ค่าคงที่หลุดออกจากกัน
+-- ตัวนี้เป็น ModuleScript ที่ทำหน้าที่เป็น "ฝา" ของโฟลเดอร์ shared เฉย ๆ
+-- ของจริงอยู่ในโมดูลลูก require ตรงเข้าไปได้เลย ไม่ต้องผ่านไฟล์นี้:
 --
--- Phase 0: โครงเปล่า ยังไม่ใส่ค่าจริง
+--   ReplicatedStorage.Shared.Config   → ตารางไข่/ทหาร ค่าตั้งฟาร์ม ชื่อ RemoteEvent
+--   ReplicatedStorage.Shared.Remotes  → สร้าง/รอหา RemoteEvent
 --
--- ของที่จะมาอยู่ในนี้ตามแผนเฟส:
---   - ตาราง rarity ของไข่ และอัตราการสุ่ม
---   - ค่าสถิติทหารแต่ละชนิด (HP, damage, speed)
---   - สูตรคำนวณ currency และรางวัล
---   - ชื่อ RemoteEvent / RemoteFunction ที่ client-server ตกลงกัน
---   - type definitions ที่ใช้ร่วมกัน
---
--- หมายเหตุ: ของในไฟล์นี้ถือเป็น "โครงหลัก" ของโปรเจกต์
--- การแก้ค่าที่ผู้เล่นเดิมพึ่งพาอยู่ต้องทวนก่อนเสมอ
+-- ตัวอย่าง:
+--   local Config = require(ReplicatedStorage.Shared.Config)
 
 local Shared = {}
 

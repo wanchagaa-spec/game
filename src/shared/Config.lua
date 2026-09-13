@@ -55,7 +55,24 @@ export type StatusType = {
 	id: string, -- ตัวอักษรเล็กภาษาอังกฤษเท่านั้น เพราะถูกใช้ประกอบ stack key
 	name: string, -- ชื่อไทยสำหรับ UI
 	order: number, -- ลำดับที่ใช้เรียงตอนแสดงผล (ไม่เกี่ยวกับการเรียงใน stack key)
-	enabled: boolean,
+	enabled: boolean, -- false = ยังไม่เปิดใช้ ตัวคูณทั้งหมดจะถูกข้าม
+
+	-- ตัวคูณ 3 ตัวนี้ 1 = ไม่มีผล แม่ติดหลายสถานะ = คูณสะสมกัน
+	damageMultiplier: number, -- คูณ damage และ HP
+	coinMultiplier: number, -- คูณรายได้เงิน
+	productionMultiplier: number, -- คูณความเร็วในการผลิตลูก
+
+	-- บวกเข้ากับ Config.Weight.CHILD_RATIO (0.01)
+	-- เช่น +0.01 → ลูกหนัก 2% ของแม่แทนที่จะเป็น 1%
+	childRatioBonus: number,
+}
+
+-- ผลรวมของทุกสถานะที่แม่ติดอยู่ คำนวณด้วย Config.getStatusEffects()
+export type StatusEffects = {
+	damageMultiplier: number,
+	coinMultiplier: number,
+	productionMultiplier: number,
+	childRatio: number, -- สัดส่วนน้ำหนักลูกต่อแม่ หลังรวมโบนัสแล้ว
 }
 
 -- หนึ่งชั้นน้ำหนักของตัวแม่
@@ -202,6 +219,10 @@ Config.Weight = {
 	-- จึงห้ามเอาน้ำหนักลูกไปสร้าง stack key ให้ใช้น้ำหนัก "แม่" ซึ่งเป็นจำนวนเต็มเสมอ
 	CHILD_RATIO = 0.01,
 
+	-- เพดานสัดส่วนน้ำหนักลูกหลังรวมโบนัสจากสถานะแล้ว
+	-- 1.0 = ลูกหนักเท่าแม่ได้มากสุด ห้ามเกินเพราะจะขัดกับกติกา "ลูกคือลูกของแม่"
+	MAX_CHILD_RATIO = 1,
+
 	-- ผลรวม weight ของทุก tier ต้องเท่ากับค่านี้พอดี (validate() เช็คให้)
 	TIER_ROLL_MAX = 1000000,
 
@@ -249,9 +270,29 @@ Config.Production = {
 -- และ "ห้ามเปลี่ยน id หลังจากมีผู้เล่นถือลูกที่ติดสถานะนั้นแล้ว"
 -- เพราะ id ฝังอยู่ใน stack key ที่เซฟลง DataStore ไปแล้ว
 
+-- ⚠️ ตัวเลขตัวคูณข้างล่างเป็น "ตัวอย่างรอปรับ" — ยังไม่มีผลเพราะ enabled = false
+-- โครงพร้อมรับแล้ว ตอน Phase 6 แค่เปิด enabled แล้วปรับตัวเลข ไม่ต้องแตะ schema
 local Statuses: { [string]: StatusType } = {
-	gold = { id = "gold", name = "ทอง", order = 1, enabled = false },
-	silver = { id = "silver", name = "เงิน", order = 2, enabled = false },
+	gold = {
+		id = "gold",
+		name = "ทอง",
+		order = 1,
+		enabled = false,
+		damageMultiplier = 2,
+		coinMultiplier = 2,
+		productionMultiplier = 1.5,
+		childRatioBonus = 0.01, -- 1% → 2%
+	},
+	silver = {
+		id = "silver",
+		name = "เงิน",
+		order = 2,
+		enabled = false,
+		damageMultiplier = 1.5,
+		coinMultiplier = 1.5,
+		productionMultiplier = 1.2,
+		childRatioBonus = 0,
+	},
 }
 
 Config.Statuses = Statuses
@@ -276,6 +317,24 @@ Config.Statuses = Statuses
 Config.Stack = {
 	FIELD_SEPARATOR = "|",
 	STATUS_SEPARATOR = ",",
+}
+
+--------------------------------------------------------------------------------
+-- uid ของตัวแม่
+--------------------------------------------------------------------------------
+-- ⚠️ โครงหลัก: uid เป็น **string แบบ global** ไม่ใช่ number ที่ไม่ซ้ำแค่ในผู้เล่นคนเดียว
+--
+-- รูปแบบ: "<UserId>-<เลขนับของเจ้าของคนแรก>"  เช่น "1234567-42"
+--
+-- ทำไมต้อง global: มีแผนจะทำเทรดแม่ระหว่างผู้เล่น
+-- ถ้า uid ไม่ซ้ำแค่ในคนเดียว พอแม่ย้ายเจ้าของแล้ว uid จะไปชนกับแม่ของคนรับ
+-- → ทีมที่จัดไว้จะชี้ผิดตัวทันที และแก้ทีหลังไม่ได้เพราะ uid ฝังอยู่ในทีมที่เซฟแล้ว
+--
+-- UserId ในนี้คือ "ผู้เล่นที่ฟักแม่ตัวนี้ออกมาครั้งแรก" ไม่ใช่เจ้าของปัจจุบัน
+-- ห้ามเปลี่ยนตอนเทรด เพราะจุดประสงค์คือความไม่ซ้ำ ไม่ใช่การบอกเจ้าของ
+
+Config.Uid = {
+	SEPARATOR = "-",
 }
 
 --------------------------------------------------------------------------------
@@ -736,9 +795,50 @@ function Config.getActiveDamageFormula(): DamageFormula?
 	return DamageFormulas[id]
 end
 
+--------------------------------------------------------------------------------
+-- ผลรวมของสถานะ
+--------------------------------------------------------------------------------
+-- แม่ติดหลายสถานะ = ตัวคูณคูณสะสมกัน ส่วนโบนัสน้ำหนักลูกบวกกัน
+-- สถานะที่ enabled = false จะถูกข้าม (Phase 1-5 ยังไม่เปิดสักตัว ผลจึงเป็นกลางหมด)
+--
+-- ⚠️ โบนัสน้ำหนักลูก "ไม่" กระทบ stack key เพราะ key เก็บน้ำหนัก "แม่"
+-- ลูกในกองเดียวกันมีชุดสถานะเดียวกันอยู่แล้ว จึงมีสัดส่วนน้ำหนักเท่ากันเสมอ
+
+function Config.getStatusEffects(statuses: { string }?): StatusEffects
+	local effects: StatusEffects = {
+		damageMultiplier = 1,
+		coinMultiplier = 1,
+		productionMultiplier = 1,
+		childRatio = Config.Weight.CHILD_RATIO,
+	}
+
+	if not statuses then
+		return effects
+	end
+
+	local seen: { [string]: boolean } = {}
+	for _, statusId in statuses do
+		if not seen[statusId] then
+			seen[statusId] = true
+			local status = Statuses[statusId]
+			if status and status.enabled then
+				effects.damageMultiplier *= status.damageMultiplier
+				effects.coinMultiplier *= status.coinMultiplier
+				effects.productionMultiplier *= status.productionMultiplier
+				effects.childRatio += status.childRatioBonus
+			end
+		end
+	end
+
+	-- กันลูกหนักเกินแม่
+	effects.childRatio = math.min(effects.childRatio, Config.Weight.MAX_CHILD_RATIO)
+
+	return effects
+end
+
 -- น้ำหนักลูกจากน้ำหนักแม่ (อาจเป็นทศนิยม — ห้ามเอาไปทำ stack key)
-function Config.getChildWeight(motherWeight: number): number
-	return motherWeight * Config.Weight.CHILD_RATIO
+function Config.getChildWeight(motherWeight: number, statuses: { string }?): number
+	return motherWeight * Config.getStatusEffects(statuses).childRatio
 end
 
 --------------------------------------------------------------------------------
@@ -764,6 +864,31 @@ function Config.rollMotherWeight(rng: Random): number
 	-- แต่กันไว้ให้คืนค่าที่ใช้งานได้เสมอ
 	local last = WeightTiers[#WeightTiers]
 	return rng:NextInteger(last.min, last.max)
+end
+
+--------------------------------------------------------------------------------
+-- uid
+--------------------------------------------------------------------------------
+-- ห้ามประกอบ/แยก uid ด้วยมือที่อื่น ใช้สองฟังก์ชันนี้เท่านั้น
+
+function Config.makeUid(userId: number, counter: number): string
+	return string.format("%d", userId) .. Config.Uid.SEPARATOR .. string.format("%d", counter)
+end
+
+-- คืน (userId ของผู้ฟักคนแรก, เลขนับ) หรือ nil ทั้งคู่ถ้า uid ผิดรูป
+function Config.parseUid(uid: string): (number?, number?)
+	local at = string.find(uid, Config.Uid.SEPARATOR, 1, true)
+	if not at then
+		return nil, nil
+	end
+
+	local userId = tonumber(string.sub(uid, 1, at - 1))
+	local counter = tonumber(string.sub(uid, at + 1))
+	if userId == nil or counter == nil then
+		return nil, nil
+	end
+
+	return userId, counter
 end
 
 --------------------------------------------------------------------------------
@@ -897,7 +1022,7 @@ end
 -- HP ของตัวเรา = damage ของตัวเรา (ตกลงกันไว้แบบนั้น) จึงใช้ฟังก์ชันเดียวกัน
 -- ใช้ได้ทั้งกับแม่ (ส่งน้ำหนักแม่) และลูก (ส่งน้ำหนักลูก = 1% ของแม่)
 
-function Config.computePower(weight: number, charId: string?): number
+function Config.computePower(weight: number, charId: string?, statuses: { string }?): number
 	local formula = Config.getActiveDamageFormula()
 	if not formula then
 		return 0
@@ -914,6 +1039,10 @@ function Config.computePower(weight: number, charId: string?): number
 
 	if charId then
 		value *= Config.getCharacterMultiplier(charId)
+	end
+
+	if statuses then
+		value *= Config.getStatusEffects(statuses).damageMultiplier
 	end
 
 	return math.max(formula.minDamage, value)
@@ -1018,19 +1147,22 @@ end
 -- stage = ด่านสูงสุดที่ผู้เล่นพังกำแพงได้แล้ว (เริ่มที่ 1)
 -- แม่ในกระเป๋าไม่ผลิตเงิน ผู้เรียกต้องกรองเอาเฉพาะแม่ในคอกก่อนเรียกฟังก์ชันนี้
 
-function Config.getCoinsPerMinute(motherWeight: number, stage: number): number
+function Config.getCoinsPerMinute(motherWeight: number, stage: number, statuses: { string }?): number
 	local economy = Config.Economy
 	local clampedStage = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
 
 	local byWeight = economy.BASE_PER_MINUTE * (motherWeight / economy.REFERENCE_WEIGHT) ^ economy.EXPONENT
 	local byStage = economy.STAGE_MULTIPLIER ^ (clampedStage - 1)
+	local byStatus = if statuses then Config.getStatusEffects(statuses).coinMultiplier else 1
 
-	return byWeight * byStage
+	return byWeight * byStage * byStatus
 end
 
 -- ราคาขายแม่ = รายได้ของแม่ตัวนั้น × SELL_MOTHER_MINUTES
-function Config.getMotherSellPrice(motherWeight: number, stage: number): number
-	return math.floor(Config.getCoinsPerMinute(motherWeight, stage) * Config.Economy.SELL_MOTHER_MINUTES)
+function Config.getMotherSellPrice(motherWeight: number, stage: number, statuses: { string }?): number
+	return math.floor(
+		Config.getCoinsPerMinute(motherWeight, stage, statuses) * Config.Economy.SELL_MOTHER_MINUTES
+	)
 end
 
 --------------------------------------------------------------------------------
@@ -1110,6 +1242,10 @@ function Config.validate()
 		`Config: ผลรวม weight ของ tier = {tierTotal} แต่ TIER_ROLL_MAX = {Config.Weight.TIER_ROLL_MAX} (ต้องเท่ากันพอดี)`
 	)
 	assert(Config.Weight.CHILD_RATIO > 0 and Config.Weight.CHILD_RATIO < 1, "Config: CHILD_RATIO ต้องอยู่ระหว่าง 0 กับ 1")
+	assert(
+		Config.Weight.MAX_CHILD_RATIO >= Config.Weight.CHILD_RATIO and Config.Weight.MAX_CHILD_RATIO <= 1,
+		"Config: MAX_CHILD_RATIO ต้องอยู่ระหว่าง CHILD_RATIO กับ 1"
+	)
 
 	----------------------------------------------------------------------------
 	-- อัตราผลิต
@@ -1148,7 +1284,30 @@ function Config.validate()
 		)
 		assert(not seenOrder[status.order], `Config: status "{statusId}" มี order ซ้ำกับตัวอื่น`)
 		seenOrder[status.order] = true
+
+		-- ตัวคูณต้องไม่ทำให้ค่าติดลบหรือกลายเป็นศูนย์ และโบนัสน้ำหนักลูกต้องไม่ติดลบ
+		assert(status.damageMultiplier > 0, `Config: status "{statusId}" มี damageMultiplier <= 0`)
+		assert(status.coinMultiplier > 0, `Config: status "{statusId}" มี coinMultiplier <= 0`)
+		assert(status.productionMultiplier > 0, `Config: status "{statusId}" มี productionMultiplier <= 0`)
+		assert(status.childRatioBonus >= 0, `Config: status "{statusId}" มี childRatioBonus ติดลบ`)
 	end
+
+	-- ถ้าเปิดทุกสถานะพร้อมกัน น้ำหนักลูกต้องยังไม่เกินแม่
+	local maxChildRatio = Config.Weight.CHILD_RATIO
+	for _, status in Statuses do
+		maxChildRatio += status.childRatioBonus
+	end
+	assert(
+		maxChildRatio <= Config.Weight.MAX_CHILD_RATIO,
+		`Config: ติดทุกสถานะพร้อมกันแล้วลูกหนัก {maxChildRatio * 100}% ของแม่ ซึ่งเกินเพดาน {Config.Weight.MAX_CHILD_RATIO * 100}%`
+	)
+
+	-- ตัวคั่นของ uid ต้องไม่ชนกับตัวคั่นของ stack key
+	assert(#Config.Uid.SEPARATOR == 1, "Config: ตัวคั่นของ uid ต้องยาว 1 ตัวอักษร")
+	assert(
+		Config.Uid.SEPARATOR ~= fieldSep and Config.Uid.SEPARATOR ~= statusSep,
+		"Config: ตัวคั่นของ uid ห้ามซ้ำกับตัวคั่นของ stack key"
+	)
 
 	----------------------------------------------------------------------------
 	-- สูตร damage

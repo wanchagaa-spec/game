@@ -66,6 +66,27 @@ export type WeightTier = {
 	weight: number, -- น้ำหนักการสุ่ม ต่อ Config.Weight.TIER_ROLL_MAX
 }
 
+-- คลาสของตัวละคร (SS/S/A/B/C) — ตัวคูณใช้กับทั้ง damage และ HP
+export type CharacterClass = {
+	id: string,
+	multiplier: number, -- ตัวคูณ damage/HP ของตัวละครคลาสนี้
+	order: number, -- ลำดับแสดงผล 1 = เก่งสุด
+}
+
+-- ตัวละคร 1 ตัว (แทนที่ UnitTypes เดิมตั้งแต่ Phase 2 เป็นต้นไป)
+export type Character = {
+	id: string, -- ⚠️ ฝังอยู่ใน stack key ที่เซฟลง DataStore ห้ามเปลี่ยน
+	name: string, -- ชื่อไทยสำหรับ UI
+	class: string, -- คีย์ใน Config.CharacterClasses
+	enabled: boolean,
+}
+
+-- หนึ่งแถวในตารางสุ่มคลาสของไข่
+export type ClassChance = {
+	class: string,
+	weight: number,
+}
+
 -- ชุดค่าคงที่ของสูตรแปลงน้ำหนัก → damage
 export type DamageFormula = {
 	id: string,
@@ -207,8 +228,17 @@ Config.Production = {
 	-- ถ้าคำนวณได้เกินนี้ในการ settle ครั้งเดียว ให้ตัดที่ค่านี้แล้ว warn
 	MAX_PER_SETTLE = 100000,
 
-	-- Phase 4 จะมี upgrade มาคูณอัตราผลิต (ตัวคูณเก็บใน PlayerData ไม่ใช่ที่นี่)
-	MAX_RATE_MULTIPLIER = 100,
+	-- upgrade อัตราผลิต: 10 ขั้น ราคาโต ×10 แต่ผลโต ×3
+	--
+	-- ทำไมผลเป็น ×3 ไม่ใช่ ×10 ทั้งที่ราคาเป็น ×10:
+	-- ถ้าผลเป็น ×10 ด้วย อัตราผลิตรวมจะโต ×10^10 ซึ่งแรงกว่าความยากของด่าน
+	-- (ที่โต ×10^8) ทำให้ตั้งแต่ด่าน 5 ขึ้นไปสะสมกองทัพเสร็จทันที กำแพงหมดความหมาย
+	-- ที่ ×3 กองทัพยังต้องใช้เวลาสะสมจริงทุกด่าน (ไม่กี่ชั่วโมงถึงหนึ่งวัน)
+	-- การที่จ่ายแพงขึ้นแต่ได้ผลน้อยกว่ายังทำให้ผู้เล่นต้องเลือกว่าจะอัปอะไรก่อน
+	UPGRADE_MAX_LEVEL = 10,
+	UPGRADE_BASE_COST = 1000,
+	UPGRADE_COST_MULTIPLIER = 10,
+	UPGRADE_RATE_MULTIPLIER = 3,
 }
 
 --------------------------------------------------------------------------------
@@ -232,10 +262,10 @@ Config.Statuses = Statuses
 -- ⚠️ โครงหลัก: รูปแบบ key นี้คือคีย์ของ dictionary ที่เซฟลง DataStore
 -- เปลี่ยนรูปแบบเมื่อไหร่ = กองลูกเดิมของผู้เล่นทุกคนอ่านไม่ออก ต้อง migrate
 --
--- รูปแบบ:  "<น้ำหนักแม่><FIELD_SEPARATOR><สถานะเรียงแล้ว คั่นด้วย STATUS_SEPARATOR>"
---   ไม่มีสถานะ   → "1500|"
---   สถานะเดียว   → "1500|gold"
---   หลายสถานะ    → "1500|gold,silver"
+-- รูปแบบ:  "<ตัวละคร>|<น้ำหนักแม่>|<สถานะเรียงแล้ว คั่นด้วยจุลภาค>"
+--   ไม่มีสถานะ   → "wukong|1500|"
+--   สถานะเดียว   → "wukong|1500|gold"
+--   หลายสถานะ    → "wukong|1500|gold,silver"
 --
 -- กฎที่ห้ามพลาด (ใช้ Config.makeStackKey เสมอ ห้ามต่อ string เอง):
 --   1. ใช้น้ำหนัก "แม่" (จำนวนเต็ม) ไม่ใช่น้ำหนักลูก (ทศนิยม → key เพี้ยน)
@@ -251,9 +281,11 @@ Config.Stack = {
 --------------------------------------------------------------------------------
 -- สูตรแปลงน้ำหนัก → damage
 --------------------------------------------------------------------------------
--- ⚠️ ยังไม่ได้เลือกสูตร — ACTIVE_FORMULA เป็น nil โดยตั้งใจ
--- ตารางเปรียบเทียบทั้ง 3 สูตรอยู่ใน docs/data-schema.md
--- เลือกแล้วค่อยใส่ id ลงไป แล้วเขียนตัวคำนวณจริงใน Phase 3
+-- ใช้สูตรเดียวกันทั้ง damage และ HP: **HP ของตัวเรา = damage ของตัวเรา**
+-- (ทั้งแม่และลูก) ตัวคูณคลาสของตัวละครคูณทั้งสองค่าพร้อมกัน
+--
+-- ตารางเปรียบเทียบ 3 สูตรที่เคยพิจารณาอยู่ใน docs/data-schema.md
+-- เก็บอีก 2 สูตรไว้เพื่อให้สลับกลับได้โดยไม่ต้องหาตัวเลขใหม่
 --
 -- ทุกสูตรตั้งให้แม่ 100 kg = 10 damage เท่ากัน จะได้เทียบความชันกันตรง ๆ
 -- ทุกสูตรเป็นแบบถดถอย (ยิ่งหนักยิ่งได้ damage เพิ่มในอัตราที่ลดลง)
@@ -294,7 +326,8 @@ local DamageFormulas: { [string]: DamageFormula } = {
 }
 
 local Damage: { ACTIVE_FORMULA: string?, FORMULAS: { [string]: DamageFormula } } = {
-	ACTIVE_FORMULA = nil, -- ⚠️ รอเลือก: "sqrt" | "cbrt" | "log10"
+	-- เลือกแล้ว: รากที่สอง (ช่วงพลังทั้งเกม ×1,000 · ลูกแรง 10% ของแม่คงที่ทุกน้ำหนัก)
+	ACTIVE_FORMULA = "sqrt",
 	FORMULAS = DamageFormulas,
 }
 
@@ -307,9 +340,18 @@ Config.Damage = Damage
 -- ต้องมีตั้งแต่วันแรก เพราะ "เพิ่ม" เพดานทีหลังง่าย แต่ "ลด" ทีหลังแปลว่าต้องยึดของผู้เล่น
 
 Config.Inventory = {
-	MAX_MOTHERS = 200, -- แม่คือเครื่องผลิต จำกัดไว้เพื่อคุมทั้งขนาดข้อมูลและอัตราผลิตรวม
-	MAX_CHILD_STACKS = 500, -- จำนวน "กอง" ไม่ใช่จำนวนลูก (ลูกในกองเดียวมีได้เป็นล้าน)
-	MAX_CHILDREN_PER_STACK = 1000000000, -- กันเลขล้นตอนบวกสะสม
+	-- จำนวนแม่ทั้งหมดที่ถือได้ = Config.Bag.CAPACITY + ความจุคอกตามเลเวล
+	-- (ค่าสองตัวนั้นเป็นแหล่งความจริง ตัวนี้เป็นเพดานกันพลาดอีกชั้น)
+	MAX_MOTHERS = 200,
+
+	-- จำนวน "กอง" ไม่ใช่จำนวนลูก
+	-- กองแตกตาม (ตัวละคร 12 × น้ำหนักแม่ × ชุดสถานะ) จึงต้องเผื่อไว้เยอะกว่าเดิม
+	MAX_CHILD_STACKS = 2000,
+
+	-- ⚠️ ที่ด่าน 9 อัตราผลิตเต็ม ผู้เล่นผลิตลูกได้ระดับแสนล้านตัวต่อวัน
+	-- ค่าเดิม 1e9 ล้นแน่นอน ตั้งที่ 1e15 เพราะ Luau เก็บจำนวนเต็มแม่นยำถึง 9e15
+	MAX_CHILDREN_PER_STACK = 1000000000000000,
+
 	MAX_HELD_EGGS_PER_TYPE = 999,
 
 	MAX_TEAMS = 1, -- Phase 3 เริ่มที่ทีมเดียว โครงเป็น array ไว้เผื่อขยาย
@@ -344,6 +386,209 @@ Config.NewPlayer = {
 local Rarities: { Rarity } = { "Common", "Rare", "Epic", "Legendary" }
 
 Config.Rarities = Rarities
+
+--------------------------------------------------------------------------------
+-- ตัวละคร
+--------------------------------------------------------------------------------
+-- ⚠️ โครงหลัก: id ของตัวละครฝังอยู่ใน stack key ของกองลูกที่เซฟลง DataStore
+-- เปลี่ยน id เมื่อไหร่ = กองลูกของผู้เล่นทุกคนอ่านไม่ออก
+--
+-- คลาสเป็นตัวคูณ damage และ HP (HP = damage ตามที่ตกลงกัน)
+-- คลาสไม่มีผลต่อรายได้เงิน — เงินคิดจากน้ำหนักแม่กับด่านเท่านั้น
+
+local CharacterClasses: { [string]: CharacterClass } = {
+	SS = { id = "SS", multiplier = 5, order = 1 },
+	S = { id = "S", multiplier = 3, order = 2 },
+	A = { id = "A", multiplier = 2, order = 3 },
+	B = { id = "B", multiplier = 1.5, order = 4 },
+	C = { id = "C", multiplier = 1, order = 5 },
+}
+
+Config.CharacterClasses = CharacterClasses
+
+local Characters: { [string]: Character } = {
+	-- SS ×5
+	yulai = { id = "yulai", name = "องค์ยูไล", class = "SS", enabled = true },
+
+	-- S ×3
+	guanyin = { id = "guanyin", name = "พระแม่กวนอิม", class = "S", enabled = true },
+	jade_emperor = { id = "jade_emperor", name = "เง็กเซียนฮ่องเต้", class = "S", enabled = true },
+
+	-- A ×2
+	tang = { id = "tang", name = "พระถังซัมจั๋ง", class = "A", enabled = true },
+	wukong = { id = "wukong", name = "ซุนหงอคง", class = "A", enabled = true },
+
+	-- B ×1.5
+	bajie = { id = "bajie", name = "ตือโป๊ยก่าย", class = "B", enabled = true },
+	wujing = { id = "wujing", name = "ซัวเจ๋ง", class = "B", enabled = true },
+	dragon_horse = { id = "dragon_horse", name = "ม้าขาวมังกร", class = "B", enabled = true },
+
+	-- C ×1
+	monkey = { id = "monkey", name = "ลิง", class = "C", enabled = true },
+	pig = { id = "pig", name = "หมู", class = "C", enabled = true },
+	horse = { id = "horse", name = "ม้า", class = "C", enabled = true },
+	fish = { id = "fish", name = "ปลา", class = "C", enabled = true },
+}
+
+Config.Characters = Characters
+
+--------------------------------------------------------------------------------
+-- ไข่ชนิดไหนออกตัวละครคลาสไหนได้
+--------------------------------------------------------------------------------
+-- ไข่ทุกชนิดใช้ "ตาราง tier น้ำหนักชุดเดียวกัน" (Config.Weight.TIERS)
+-- ความต่างของไข่อยู่ที่คลาสตัวละครที่ออกได้ ซึ่งเป็นตัวคูณ damage/HP โดยตรง
+--
+-- ตามที่ตกลง: ไข่ธรรมดาไม่มี S/SS · ไข่หายากตัด C ออกและไม่มี S/SS ·
+-- ไข่ตำนานตัด C ออกและเพิ่ม S/SS
+--
+-- weight เป็นจำนวนเต็มต่อ 10,000 (validate() บังคับผลรวมให้เท่ากับ CLASS_ROLL_MAX)
+-- สุ่ม 2 ขั้นเหมือนน้ำหนัก: สุ่มคลาสก่อน แล้วค่อยสุ่มตัวละครในคลาสนั้นแบบเท่า ๆ กัน
+
+Config.CLASS_ROLL_MAX = 10000
+
+local EggCharacterPools: { [string]: { ClassChance } } = {
+	egg_common = {
+		{ class = "C", weight = 8000 }, -- 80%
+		{ class = "B", weight = 1800 }, -- 18%
+		{ class = "A", weight = 200 }, -- 2%
+	},
+	egg_rare = {
+		{ class = "B", weight = 8000 }, -- 80%
+		{ class = "A", weight = 2000 }, -- 20%
+	},
+	egg_legendary = {
+		{ class = "B", weight = 5000 }, -- 50%
+		{ class = "A", weight = 4000 }, -- 40%
+		{ class = "S", weight = 950 }, -- 9.5%
+		{ class = "SS", weight = 50 }, -- 0.5%
+	},
+}
+
+Config.EggCharacterPools = EggCharacterPools
+
+--------------------------------------------------------------------------------
+-- เศรษฐกิจ (เงิน)
+--------------------------------------------------------------------------------
+-- เงินมาจาก "แม่ที่วางในคอก" เท่านั้น แม่ในกระเป๋าไม่ผลิตอะไรเลย
+--
+-- สูตร:  coins/นาที = BASE_PER_MINUTE × (น้ำหนักแม่ / REFERENCE_WEIGHT)^EXPONENT
+--                     × STAGE_MULTIPLIER ^ (ด่านที่พังกำแพงแล้ว - 1)
+--
+-- ⚠️ ตัวคูณตามด่านคือหัวใจของเศรษฐกิจเกมนี้ ห้ามตัดทิ้ง
+-- เหตุผล: ราคาของทุกอย่าง (คอก อาวุธ อัตราผลิต) โต ×10 ต่อขั้น
+-- แต่รายได้จากน้ำหนักโตแค่ ×1,000 ตลอดเกม (เพราะ sqrt บีบไว้)
+-- และคอกเพิ่มความจุทีละ 1 ตัว (+6% ถึง +20% ต่อเลเวล)
+-- ถ้าไม่มีตัวคูณตามด่าน ผู้เล่นจะซื้อของขั้นกลาง ๆ ขึ้นไปไม่ได้เลย
+-- ไม่ว่าจะดันค่าเริ่มต้นขึ้นเท่าไหร่ก็ตาม (คูณค่าเริ่มต้นแค่ "เลื่อน" กำแพง ไม่ได้ลบกำแพง)
+
+Config.Economy = {
+	BASE_PER_MINUTE = 1, -- แม่น้ำหนัก REFERENCE_WEIGHT ที่ด่าน 1 ได้กี่ coins/นาที
+	REFERENCE_WEIGHT = 100,
+	EXPONENT = 0.5, -- ถดถอยแบบรากที่สอง (ชุดเดียวกับสูตร damage)
+	STAGE_MULTIPLIER = 10, -- ตัวคูณเงินต่อ 1 ด่านที่พังกำแพงได้
+
+	-- ราคาขายแม่ = รายได้ของแม่ตัวนั้นคูณจำนวนนาทีนี้
+	-- ผูกกับสูตรเงินอัตโนมัติ ไม่ต้องตั้งตารางแยก
+	SELL_MOTHER_MINUTES = 30,
+}
+
+--------------------------------------------------------------------------------
+-- คอก (Pen) — ที่วางแม่ให้ผลิตลูกและผลิตเงิน
+--------------------------------------------------------------------------------
+-- ความจุ = BASE_CAPACITY + (level - 1)   →  Lv1 = 5 ตัว, Lv15 = 19 ตัว
+-- ค่าอัปเกรด Lv N → N+1 = UPGRADE_BASE_COST × UPGRADE_COST_MULTIPLIER ^ (N-1)
+
+Config.Pen = {
+	BASE_CAPACITY = 5,
+	CAPACITY_PER_LEVEL = 1,
+	MAX_LEVEL = 15,
+	UPGRADE_BASE_COST = 1000,
+	UPGRADE_COST_MULTIPLIER = 10,
+}
+
+--------------------------------------------------------------------------------
+-- กระเป๋า (Bag) — ที่เก็บแม่ที่ไม่ได้วาง ไม่ผลิตอะไรเลย
+--------------------------------------------------------------------------------
+-- นับแยกจากคอก: ถือได้รวมสูงสุด CAPACITY + ความจุคอก
+
+Config.Bag = {
+	CAPACITY = 100,
+}
+
+--------------------------------------------------------------------------------
+-- สวนฟักไข่ (Hatchery)
+--------------------------------------------------------------------------------
+-- ไข่ที่แย่งมาจากรังบอสเอามาฟักที่นี่ ฟักพร้อมกันได้สูงสุด MAX_EGGS ฟอง
+-- เต็มแล้วหยิบไข่เพิ่มไม่ได้ ต้องแจ้งเตือนผู้เล่น
+
+Config.Hatchery = {
+	MAX_EGGS = 50,
+}
+
+--------------------------------------------------------------------------------
+-- ด่านและกำแพง
+--------------------------------------------------------------------------------
+-- แมพเป็นเส้นตรง มี STAGE_COUNT ด่าน กำแพงเป็นของแต่ละผู้เล่นแยกกัน
+-- พังแล้วเปิดถาวรสำหรับคนนั้น (เก็บใน PlayerData ไม่ใช่ per-server)
+--
+-- ทหารฝ่ายรับด่าน N = DEFENDER_BASE × DEFENDER_MULTIPLIER ^ (N-1)
+--   ด่าน 1 = 10 ตัว ... ด่าน 9 = 1,000,000,000 ตัว
+--
+-- ⚠️ performance: ห้าม spawn ทหารเป็น Model จริงทั้งหมด
+-- เก็บเป็น "HP รวม" ค่าเดียว แล้วแสดงโมเดลประกอบ DISPLAY_MODELS_MIN..MAX ตัว
+-- ที่ค่อย ๆ หายไปตามสัดส่วน HP ที่ลดลง (ดู Config.getDisplayModelCount)
+
+Config.Stage = {
+	COUNT = 9,
+
+	DEFENDER_BASE = 10, -- จำนวนทหารฝ่ายรับด่าน 1
+	DEFENDER_MULTIPLIER = 10, -- คูณต่อด่าน
+	DEFENDER_HP = 100, -- HP ต่อทหารฝ่ายรับ 1 ตัว
+	DEFENDER_DAMAGE = 10, -- damage ที่ทหารฝ่ายรับ 1 ตัวตีกลับใส่กองทัพเรา
+
+	WALL_HP_RATIO = 0.5, -- HP กำแพง = สัดส่วนนี้ของ HP ทหารรวมในด่านนั้น
+
+	-- ลำดับการตี: ทหารฝ่ายรับหมดก่อน แล้วค่อยตีกำแพงได้
+	SEQUENTIAL_TARGETING = true,
+
+	DISPLAY_MODELS_MIN = 20, -- จำนวนโมเดลที่แสดงตอน HP เหลือน้อยสุด (แต่ยังไม่หมด)
+	DISPLAY_MODELS_MAX = 50, -- จำนวนโมเดลที่แสดงตอน HP เต็ม
+}
+
+--------------------------------------------------------------------------------
+-- บอสและการแย่งไข่
+--------------------------------------------------------------------------------
+-- บอสอยู่ในพื้นที่รังของแต่ละด่าน ใช้ร่วมกันทั้งเซิร์ฟเวอร์
+-- แต่เข้าได้เฉพาะคนที่พังกำแพงถึงด่านนั้นแล้ว
+--
+-- ⚠️ server เป็นคนตัดสินเจ้าของไข่เท่านั้น ห้าม client ตัดสินเด็ดขาด
+
+Config.Boss = {
+	RESPAWN_SECONDS = 300, -- รีเกิดทุก 5 นาที
+	EGGS_PER_SPAWN = 5, -- ไข่ที่วางในรังตอนบอสเกิด
+	EGG_GRAB_HOLD_SECONDS = 3, -- กดค้างกี่วินาทีถึงจะได้ไข่ (โดนตีแล้วนับใหม่)
+
+	HP_BASE = 100, -- HP บอสด่าน 1
+	HP_MULTIPLIER = 10, -- คูณต่อด่าน
+}
+
+--------------------------------------------------------------------------------
+-- อาวุธของผู้เล่น (ใช้ตีบอส ไม่เกี่ยวกับกองทัพ)
+--------------------------------------------------------------------------------
+-- damage ขั้น N = DAMAGE_BASE × DAMAGE_MULTIPLIER ^ (N-1)
+-- ราคาขั้น N → N+1 = UPGRADE_BASE_COST × UPGRADE_COST_MULTIPLIER ^ (N-1)
+--
+-- สเกลนี้ตั้งใจให้ "อาวุธขั้น N ตีบอสด่าน N ตายใน 10 ครั้งพอดี" ทุกด่าน
+-- (HP บอส 100×10^(N-1) ÷ damage 10×10^(N-1) = 10 เสมอ)
+-- ห้ามแก้ DAMAGE_BASE หรือ HP_BASE ของบอสข้างเดียว ไม่งั้นความรู้สึกจะเพี้ยนทั้งเกม
+
+Config.Weapon = {
+	MAX_LEVEL = 10,
+	DAMAGE_BASE = 10,
+	DAMAGE_MULTIPLIER = 10,
+	UPGRADE_BASE_COST = 1000,
+	UPGRADE_COST_MULTIPLIER = 10,
+}
 
 --------------------------------------------------------------------------------
 -- ทหาร
@@ -527,8 +772,9 @@ end
 -- ⚠️ ห้ามต่อ string เองที่อื่น ใช้สองฟังก์ชันนี้เท่านั้น
 -- ถ้ามีที่ไหนสร้าง key เองแล้วเรียงสถานะคนละแบบ กองลูกจะแตกโดยไม่มีใครรู้ตัว
 
--- motherWeight ต้องเป็นจำนวนเต็ม (น้ำหนักแม่) ไม่ใช่น้ำหนักลูก
-function Config.makeStackKey(motherWeight: number, statuses: { string }?): string
+-- charId       = ตัวละครของแม่ (Config.Characters)
+-- motherWeight = น้ำหนัก "แม่" จำนวนเต็ม ไม่ใช่น้ำหนักลูกซึ่งเป็นทศนิยม
+function Config.makeStackKey(charId: string, motherWeight: number, statuses: { string }?): string
 	local unique: { string } = {}
 	local seen: { [string]: boolean } = {}
 
@@ -544,30 +790,247 @@ function Config.makeStackKey(motherWeight: number, statuses: { string }?): strin
 	-- เรียงตายตัวเสมอ นี่คือหัวใจของการรวมกอง
 	table.sort(unique)
 
-	return string.format("%d", motherWeight)
-		.. Config.Stack.FIELD_SEPARATOR
+	local sep = Config.Stack.FIELD_SEPARATOR
+	return charId
+		.. sep
+		.. string.format("%d", motherWeight)
+		.. sep
 		.. table.concat(unique, Config.Stack.STATUS_SEPARATOR)
 end
 
--- แยก stack key กลับเป็น (น้ำหนักแม่, รายการสถานะ)
+-- แยก stack key กลับเป็น (ตัวละคร, น้ำหนักแม่, รายการสถานะ)
 -- คืน nil เป็นค่าแรกถ้า key ผิดรูป — ผู้เรียกต้องเช็ค
-function Config.parseStackKey(key: string): (number?, { string })
-	local at = string.find(key, Config.Stack.FIELD_SEPARATOR, 1, true)
-	if not at then
-		return nil, {}
+function Config.parseStackKey(key: string): (string?, number?, { string })
+	local sep = Config.Stack.FIELD_SEPARATOR
+
+	local firstAt = string.find(key, sep, 1, true)
+	if not firstAt then
+		return nil, nil, {}
+	end
+	local secondAt = string.find(key, sep, firstAt + 1, true)
+	if not secondAt then
+		return nil, nil, {}
 	end
 
-	local motherWeight = tonumber(string.sub(key, 1, at - 1))
-	local rest = string.sub(key, at + 1)
-	local statuses: { string } = {}
+	local charId = string.sub(key, 1, firstAt - 1)
+	local motherWeight = tonumber(string.sub(key, firstAt + 1, secondAt - 1))
+	local rest = string.sub(key, secondAt + 1)
 
+	if charId == "" or motherWeight == nil then
+		return nil, nil, {}
+	end
+
+	local statuses: { string } = {}
 	if rest ~= "" then
 		for id in string.gmatch(rest, "[^" .. Config.Stack.STATUS_SEPARATOR .. "]+") do
 			table.insert(statuses, id)
 		end
 	end
 
-	return motherWeight, statuses
+	return charId, motherWeight, statuses
+end
+
+--------------------------------------------------------------------------------
+-- ตัวละครและคลาส
+--------------------------------------------------------------------------------
+
+function Config.getCharacter(charId: string): Character?
+	return Characters[charId]
+end
+
+function Config.getCharacterClass(classId: string): CharacterClass?
+	return CharacterClasses[classId]
+end
+
+-- ตัวคูณ damage/HP ของตัวละคร คืน 1 ถ้าหาไม่เจอ (ปลอดภัยกว่าพัง)
+function Config.getCharacterMultiplier(charId: string): number
+	local character = Characters[charId]
+	if not character then
+		return 1
+	end
+	local class = CharacterClasses[character.class]
+	return if class then class.multiplier else 1
+end
+
+-- สุ่มตัวละครจากไข่: สุ่มคลาสตามน้ำหนักก่อน แล้วค่อยสุ่มตัวในคลาสนั้นแบบเท่า ๆ กัน
+-- คืน nil ถ้า eggId ไม่มีตารางคลาส (ผู้เรียกต้องเช็ค)
+function Config.rollCharacter(eggId: string, rng: Random): string?
+	local pool = EggCharacterPools[eggId]
+	if not pool then
+		return nil
+	end
+
+	-- ขั้น 1: สุ่มคลาส
+	local roll = rng:NextInteger(1, Config.CLASS_ROLL_MAX)
+	local acc = 0
+	local chosenClass: string? = nil
+	for _, entry in pool do
+		acc += entry.weight
+		if roll <= acc then
+			chosenClass = entry.class
+			break
+		end
+	end
+	if not chosenClass then
+		chosenClass = pool[#pool].class
+	end
+
+	-- ขั้น 2: สุ่มตัวละครในคลาสนั้น
+	-- เรียง id ก่อนเพื่อให้ลำดับคงที่ ผลการสุ่มด้วย seed เดิมจะได้ซ้ำได้ตอนเทสต์
+	local candidates: { string } = {}
+	for charId, character in Characters do
+		if character.class == chosenClass and character.enabled then
+			table.insert(candidates, charId)
+		end
+	end
+	if #candidates == 0 then
+		return nil
+	end
+	table.sort(candidates)
+
+	return candidates[rng:NextInteger(1, #candidates)]
+end
+
+--------------------------------------------------------------------------------
+-- damage และ HP
+--------------------------------------------------------------------------------
+-- HP ของตัวเรา = damage ของตัวเรา (ตกลงกันไว้แบบนั้น) จึงใช้ฟังก์ชันเดียวกัน
+-- ใช้ได้ทั้งกับแม่ (ส่งน้ำหนักแม่) และลูก (ส่งน้ำหนักลูก = 1% ของแม่)
+
+function Config.computePower(weight: number, charId: string?): number
+	local formula = Config.getActiveDamageFormula()
+	if not formula then
+		return 0
+	end
+
+	local ratio = weight / formula.referenceWeight
+	local value: number
+
+	if formula.kind == "power" then
+		value = formula.baseDamage * ratio ^ (formula.exponent :: number)
+	else
+		value = formula.baseDamage * (1 + math.log10(ratio))
+	end
+
+	if charId then
+		value *= Config.getCharacterMultiplier(charId)
+	end
+
+	return math.max(formula.minDamage, value)
+end
+
+--------------------------------------------------------------------------------
+-- คอก / กระเป๋า
+--------------------------------------------------------------------------------
+
+function Config.getPenCapacity(level: number): number
+	local clamped = math.clamp(math.floor(level), 1, Config.Pen.MAX_LEVEL)
+	return Config.Pen.BASE_CAPACITY + (clamped - 1) * Config.Pen.CAPACITY_PER_LEVEL
+end
+
+-- ราคาอัปเกรดจาก level → level+1 คืน nil ถ้าเต็มเลเวลแล้ว
+function Config.getPenUpgradeCost(level: number): number?
+	if level >= Config.Pen.MAX_LEVEL then
+		return nil
+	end
+	return Config.Pen.UPGRADE_BASE_COST * Config.Pen.UPGRADE_COST_MULTIPLIER ^ (level - 1)
+end
+
+--------------------------------------------------------------------------------
+-- อาวุธ
+--------------------------------------------------------------------------------
+
+function Config.getWeaponDamage(level: number): number
+	local clamped = math.clamp(math.floor(level), 1, Config.Weapon.MAX_LEVEL)
+	return Config.Weapon.DAMAGE_BASE * Config.Weapon.DAMAGE_MULTIPLIER ^ (clamped - 1)
+end
+
+function Config.getWeaponUpgradeCost(level: number): number?
+	if level >= Config.Weapon.MAX_LEVEL then
+		return nil
+	end
+	return Config.Weapon.UPGRADE_BASE_COST * Config.Weapon.UPGRADE_COST_MULTIPLIER ^ (level - 1)
+end
+
+--------------------------------------------------------------------------------
+-- อัตราผลิตลูก
+--------------------------------------------------------------------------------
+-- level 0 = ยังไม่อัป (×1) ถึง UPGRADE_MAX_LEVEL
+
+function Config.getProductionMultiplier(level: number): number
+	local clamped = math.clamp(math.floor(level), 0, Config.Production.UPGRADE_MAX_LEVEL)
+	return Config.Production.UPGRADE_RATE_MULTIPLIER ^ clamped
+end
+
+function Config.getProductionUpgradeCost(level: number): number?
+	if level >= Config.Production.UPGRADE_MAX_LEVEL then
+		return nil
+	end
+	return Config.Production.UPGRADE_BASE_COST * Config.Production.UPGRADE_COST_MULTIPLIER ^ level
+end
+
+--------------------------------------------------------------------------------
+-- ด่าน กำแพง บอส
+--------------------------------------------------------------------------------
+
+function Config.getStageDefenderCount(stage: number): number
+	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
+	return Config.Stage.DEFENDER_BASE * Config.Stage.DEFENDER_MULTIPLIER ^ (clamped - 1)
+end
+
+function Config.getStageDefenderHp(stage: number): number
+	return Config.getStageDefenderCount(stage) * Config.Stage.DEFENDER_HP
+end
+
+function Config.getStageWallHp(stage: number): number
+	return Config.getStageDefenderHp(stage) * Config.Stage.WALL_HP_RATIO
+end
+
+-- damage ที่กองทัพต้องทำรวมทั้งหมดเพื่อผ่านด่านนี้ (ทหาร + กำแพง)
+function Config.getStageTotalHp(stage: number): number
+	return Config.getStageDefenderHp(stage) + Config.getStageWallHp(stage)
+end
+
+function Config.getBossHp(stage: number): number
+	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
+	return Config.Boss.HP_BASE * Config.Boss.HP_MULTIPLIER ^ (clamped - 1)
+end
+
+-- แปลงสัดส่วน HP ที่เหลือ → จำนวนโมเดลทหารที่ควรแสดงในแมพ
+-- HP เต็ม  → DISPLAY_MODELS_MAX ตัว
+-- HP หมด   → 0 ตัว
+-- ระหว่างนั้นไล่ลงเป็นเส้นตรง แต่ตราบใดที่ยังมี HP เหลือจะไม่ต่ำกว่า DISPLAY_MODELS_MIN
+-- เพื่อไม่ให้ด่านดูว่างเปล่าทั้งที่ยังตีไม่จบ
+function Config.getDisplayModelCount(hpRatio: number): number
+	local ratio = math.clamp(hpRatio, 0, 1)
+	if ratio <= 0 then
+		return 0
+	end
+
+	local min = Config.Stage.DISPLAY_MODELS_MIN
+	local max = Config.Stage.DISPLAY_MODELS_MAX
+	return math.max(min, math.ceil(max * ratio))
+end
+
+--------------------------------------------------------------------------------
+-- เงิน
+--------------------------------------------------------------------------------
+-- stage = ด่านสูงสุดที่ผู้เล่นพังกำแพงได้แล้ว (เริ่มที่ 1)
+-- แม่ในกระเป๋าไม่ผลิตเงิน ผู้เรียกต้องกรองเอาเฉพาะแม่ในคอกก่อนเรียกฟังก์ชันนี้
+
+function Config.getCoinsPerMinute(motherWeight: number, stage: number): number
+	local economy = Config.Economy
+	local clampedStage = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
+
+	local byWeight = economy.BASE_PER_MINUTE * (motherWeight / economy.REFERENCE_WEIGHT) ^ economy.EXPONENT
+	local byStage = economy.STAGE_MULTIPLIER ^ (clampedStage - 1)
+
+	return byWeight * byStage
+end
+
+-- ราคาขายแม่ = รายได้ของแม่ตัวนั้น × SELL_MOTHER_MINUTES
+function Config.getMotherSellPrice(motherWeight: number, stage: number): number
+	return math.floor(Config.getCoinsPerMinute(motherWeight, stage) * Config.Economy.SELL_MOTHER_MINUTES)
 end
 
 --------------------------------------------------------------------------------
@@ -744,6 +1207,126 @@ function Config.validate()
 	----------------------------------------------------------------------------
 	-- key เต็มยาวได้ไม่เกิน 50 ตัวอักษร UserId ยาวสุดที่เป็นไปได้ตอนนี้ ~10 หลัก
 	assert(#Config.DataStore.KEY_PREFIX + 20 <= 50, "Config: KEY_PREFIX ยาวเกินไป เสี่ยงชนลิมิต 50 ตัวอักษรของ DataStore key")
+
+	----------------------------------------------------------------------------
+	-- ตัวละครและคลาส
+	----------------------------------------------------------------------------
+	local seenClassOrder: { [number]: boolean } = {}
+	for classId, class in CharacterClasses do
+		assert(class.id == classId, `Config: CharacterClasses["{classId}"].id ไม่ตรงกับคีย์`)
+		assert(class.multiplier > 0, `Config: คลาส "{classId}" มีตัวคูณ <= 0`)
+		assert(not seenClassOrder[class.order], `Config: คลาส "{classId}" มี order ซ้ำ`)
+		seenClassOrder[class.order] = true
+	end
+
+	local classHasCharacter: { [string]: boolean } = {}
+	for charId, character in Characters do
+		assert(character.id == charId, `Config: Characters["{charId}"].id ไม่ตรงกับคีย์ ({character.id})`)
+		assert(
+			string.match(charId, "^[a-z][a-z0-9_]*$") ~= nil,
+			`Config: character id "{charId}" ต้องเป็นตัวเล็ก a-z ขึ้นต้น ตามด้วย a-z 0-9 _ เท่านั้น`
+		)
+		-- id อยู่ใน stack key จึงห้ามมีอักขระคั่นปนอยู่
+		assert(
+			not string.find(charId, fieldSep, 1, true) and not string.find(charId, statusSep, 1, true),
+			`Config: character id "{charId}" มีอักขระคั่นของ stack key ปนอยู่`
+		)
+		assert(
+			CharacterClasses[character.class] ~= nil,
+			`Config: ตัวละคร "{charId}" อยู่คลาส "{character.class}" ที่ไม่มีอยู่`
+		)
+		if character.enabled then
+			classHasCharacter[character.class] = true
+		end
+	end
+
+	----------------------------------------------------------------------------
+	-- ตารางคลาสของไข่
+	----------------------------------------------------------------------------
+	for eggId, pool in EggCharacterPools do
+		assert(EggTypes[eggId] ~= nil, `Config: EggCharacterPools อ้างถึงไข่ "{eggId}" ที่ไม่มีอยู่`)
+		assert(#pool > 0, `Config: ไข่ "{eggId}" ไม่มีตารางคลาส`)
+
+		local classTotal = 0
+		for _, entry in pool do
+			assert(
+				CharacterClasses[entry.class] ~= nil,
+				`Config: ไข่ "{eggId}" อ้างถึงคลาส "{entry.class}" ที่ไม่มีอยู่`
+			)
+			assert(
+				classHasCharacter[entry.class],
+				`Config: ไข่ "{eggId}" สุ่มคลาส "{entry.class}" ได้ แต่ไม่มีตัวละครที่ enabled ในคลาสนั้นเลย`
+			)
+			assert(entry.weight > 0 and entry.weight % 1 == 0, `Config: ไข่ "{eggId}" คลาส "{entry.class}" มี weight ที่ไม่ใช่จำนวนเต็มบวก`)
+			classTotal += entry.weight
+		end
+		assert(
+			classTotal == Config.CLASS_ROLL_MAX,
+			`Config: ไข่ "{eggId}" มีผลรวม weight คลาส = {classTotal} แต่ CLASS_ROLL_MAX = {Config.CLASS_ROLL_MAX}`
+		)
+	end
+
+	for eggId in EggTypes do
+		assert(EggCharacterPools[eggId] ~= nil, `Config: ไข่ "{eggId}" ยังไม่มีตารางคลาสใน EggCharacterPools`)
+	end
+
+	----------------------------------------------------------------------------
+	-- เศรษฐกิจ คอก กระเป๋า สวนฟัก
+	----------------------------------------------------------------------------
+	local economy = Config.Economy
+	assert(economy.BASE_PER_MINUTE > 0, "Config: BASE_PER_MINUTE ต้องมากกว่า 0")
+	assert(economy.REFERENCE_WEIGHT > 0, "Config: REFERENCE_WEIGHT ต้องมากกว่า 0")
+	assert(economy.EXPONENT > 0 and economy.EXPONENT < 1, "Config: EXPONENT ของเงินต้องอยู่ระหว่าง 0 กับ 1 (ต้องถดถอย)")
+	assert(
+		economy.STAGE_MULTIPLIER >= Config.Stage.DEFENDER_MULTIPLIER,
+		"Config: ตัวคูณเงินต่อด่านต้องไม่น้อยกว่าอัตราที่ด่านยากขึ้น ไม่งั้นผู้เล่นจะซื้อของขั้นสูงไม่ได้"
+	)
+	assert(economy.SELL_MOTHER_MINUTES > 0, "Config: SELL_MOTHER_MINUTES ต้องมากกว่า 0")
+
+	assert(Config.Pen.BASE_CAPACITY > 0, "Config: BASE_CAPACITY ของคอกต้องมากกว่า 0")
+	assert(Config.Pen.MAX_LEVEL >= 1, "Config: MAX_LEVEL ของคอกต้องอย่างน้อย 1")
+	assert(Config.Pen.UPGRADE_COST_MULTIPLIER > 1, "Config: ตัวคูณราคาคอกต้องมากกว่า 1")
+	assert(Config.Bag.CAPACITY > 0, "Config: ความจุกระเป๋าต้องมากกว่า 0")
+	assert(Config.Hatchery.MAX_EGGS > 0, "Config: MAX_EGGS ของสวนฟักต้องมากกว่า 0")
+	assert(
+		Config.Inventory.MAX_MOTHERS >= Config.Bag.CAPACITY + Config.getPenCapacity(Config.Pen.MAX_LEVEL),
+		"Config: MAX_MOTHERS น้อยกว่ากระเป๋า + คอกเต็มเลเวล ผู้เล่นจะเก็บของที่ควรเก็บได้ไม่ครบ"
+	)
+
+	----------------------------------------------------------------------------
+	-- ด่าน บอส อาวุธ
+	----------------------------------------------------------------------------
+	local stage = Config.Stage
+	assert(stage.COUNT > 0, "Config: จำนวนด่านต้องมากกว่า 0")
+	assert(stage.DEFENDER_BASE > 0 and stage.DEFENDER_MULTIPLIER > 1, "Config: ค่าทหารฝ่ายรับไม่ถูกต้อง")
+	assert(stage.DEFENDER_HP > 0 and stage.DEFENDER_DAMAGE > 0, "Config: HP/damage ของทหารฝ่ายรับต้องมากกว่า 0")
+	assert(stage.WALL_HP_RATIO > 0, "Config: WALL_HP_RATIO ต้องมากกว่า 0")
+	assert(
+		stage.DISPLAY_MODELS_MIN > 0 and stage.DISPLAY_MODELS_MIN <= stage.DISPLAY_MODELS_MAX,
+		"Config: ช่วงจำนวนโมเดลที่แสดงไม่ถูกต้อง"
+	)
+
+	assert(Config.Boss.RESPAWN_SECONDS > 0, "Config: เวลารีเกิดบอสต้องมากกว่า 0")
+	assert(Config.Boss.EGGS_PER_SPAWN > 0, "Config: จำนวนไข่ต่อรอบต้องมากกว่า 0")
+	assert(Config.Boss.EGG_GRAB_HOLD_SECONDS > 0, "Config: เวลากดค้างหยิบไข่ต้องมากกว่า 0")
+
+	-- สเกลที่ทำให้ "อาวุธขั้น N ตีบอสด่าน N ตายในจำนวนครั้งเท่ากันทุกด่าน"
+	-- ถ้าตัวคูณสองตัวนี้ไม่เท่ากัน ความรู้สึกตอนสู้บอสจะเพี้ยนไปเรื่อย ๆ ตามด่าน
+	assert(
+		Config.Weapon.DAMAGE_MULTIPLIER == Config.Boss.HP_MULTIPLIER,
+		"Config: ตัวคูณ damage อาวุธกับตัวคูณ HP บอสต้องเท่ากัน ไม่งั้นจำนวนครั้งที่ตีบอสจะเพี้ยนตามด่าน"
+	)
+	assert(Config.Weapon.MAX_LEVEL >= stage.COUNT, "Config: ขั้นอาวุธต้องมีอย่างน้อยเท่าจำนวนด่าน")
+
+	----------------------------------------------------------------------------
+	-- upgrade อัตราผลิต
+	----------------------------------------------------------------------------
+	assert(production.UPGRADE_MAX_LEVEL > 0, "Config: UPGRADE_MAX_LEVEL ของอัตราผลิตต้องมากกว่า 0")
+	assert(production.UPGRADE_RATE_MULTIPLIER > 1, "Config: UPGRADE_RATE_MULTIPLIER ต้องมากกว่า 1")
+	assert(
+		production.UPGRADE_RATE_MULTIPLIER <= production.UPGRADE_COST_MULTIPLIER,
+		"Config: ผลของ upgrade ต่อขั้นไม่ควรมากกว่าราคาที่จ่ายต่อขั้น ไม่งั้นกำแพงจะหมดความหมายช่วงท้ายเกม"
+	)
 	assert(Config.DataStore.AUTOSAVE_INTERVAL >= 10, "Config: AUTOSAVE_INTERVAL ถี่เกินไป เสี่ยงโดน throttle")
 	assert(Config.SCHEMA_VERSION >= 1 and Config.SCHEMA_VERSION % 1 == 0, "Config: SCHEMA_VERSION ต้องเป็นจำนวนเต็มตั้งแต่ 1")
 end

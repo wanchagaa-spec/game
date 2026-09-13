@@ -1,0 +1,21 @@
+--!strict
+-- egg-army-game :: Server entry point
+--
+-- Phase 0: โครงเปล่า ยังไม่มี game logic
+--
+-- ที่นี่คือจุดรวมของ logic ฝั่ง server ทั้งหมด (server-authoritative)
+-- ของที่จะมาอยู่ในโฟลเดอร์นี้ตามแผนเฟส:
+--
+--   Phase 1 — ระบบไข่ & ฟาร์ม
+--             data model ไข่, จุดวางไข่, ตัวจับเวลาฟัก, สุ่มผลทหาร
+--   Phase 2 — คลังทหาร & DataStore
+--             บันทึกทหาร/ไข่/currency, จัดทีม
+--   Phase 3 — สนามรบ auto-battle
+--             ระบบ HP/damage/target, PvE ฐานบอท
+--   Phase 4 — เศรษฐกิจ & progression
+--             รางวัลชนะ, shop ไข่, อัปเกรดทหาร
+--
+-- กฎสำคัญ: การฟักไข่ สุ่มผล คำนวณ combat และการให้ currency
+-- ต้องคำนวณที่ฝั่ง server เท่านั้น และ validate ทุก input ที่มาจาก client
+
+print("[egg-army-game] server booted")

@@ -281,8 +281,31 @@ Config.Weight = {
 -- เพื่อให้ผลลัพธ์เหมือนกันไม่ว่าเซิร์ฟเวอร์จะกระตุกหรือผู้เล่นจะออกไปนานแค่ไหน
 
 Config.Production = {
-	ONLINE_PER_MINUTE = 1, -- ตอนออนไลน์ แม่ 1 ตัวผลิตกี่ตัวต่อนาที
-	OFFLINE_PER_MINUTE = 0.1, -- ตอนออฟไลน์ ช้ากว่า 10 เท่า
+	-- อัตราผลิต = ONLINE_PER_MINUTE × (น้ำหนักแม่ ÷ WEIGHT_REFERENCE)^WEIGHT_EXPONENT
+	--
+	-- ⚠️ ทำไม exponent = 0.25 ไม่ใช่ 0.5
+	-- น้ำหนักมีผลอยู่แล้ว 2 ทาง: เงิน (√) และ damage ต่อตัว (√)
+	-- ถ้าอัตราผลิตใช้ √ ด้วย damage รวมต่อวันจะแปรผัน "ตรง" กับน้ำหนัก
+	-- → ช่องว่างระหว่างแม่ 100 kg กับ 100M kg จะกลายเป็น 1,000,000 เท่า
+	-- ใช้ 0.25 ได้ราว 31,623 เท่า — กว้างพอให้ตัวหนักคุ้มค่า แต่ไม่ถึงกับขาดกัน
+	--
+	--   100 kg → 1.0/นาที · 10,000 kg → 3.2 · 1M kg → 10 · 100M kg → 31.6
+	ONLINE_PER_MINUTE = 1, -- อัตราฐานที่น้ำหนัก = WEIGHT_REFERENCE
+	WEIGHT_REFERENCE = 100,
+	WEIGHT_EXPONENT = 0.25,
+
+	-- ตอนออฟไลน์ผลิตช้ากว่า 10 เท่า (เป็นสัดส่วนของอัตราออนไลน์ ไม่ใช่ค่าคงที่
+	-- เพราะอัตราออนไลน์แปรตามน้ำหนักแล้ว)
+	OFFLINE_RATE_RATIO = 0.1,
+
+	-- ⚠️ ความจุคลังต่อ 1 กอง
+	-- แม่ 1 ตัวที่น้ำหนักฐานผลิต ~1 ตัว/นาที → 500 ตัว ≈ 8 ชั่วโมง
+	-- ตรงกับ cap ออฟไลน์ 8 ชั่วโมงพอดี ระบบจึงสม่ำเสมอกันทั้งเกม
+	-- 500 ตัวปล่อยที่ 1 ตัว/วินาที = ระบายหมดใน ~8 นาที (นั่งดูได้จริง)
+	-- คลังเต็ม → แม่ตัวนั้น **หยุดผลิต** + แจ้งเตือนผู้เล่น
+	STACK_CAP = 500,
+	STACK_CAP_START = 200, -- เผื่ออัปเกรดทีหลัง: เริ่ม 200 อัปได้ถึง STACK_CAP
+
 	OFFLINE_CAP_SECONDS = 8 * 60 * 60, -- สะสมออฟไลน์ได้สูงสุด 8 ชั่วโมง (= 48 ตัวต่อแม่ 1 ตัว)
 
 	TICK_INTERVAL = 5, -- ตอนออนไลน์เช็คทุกกี่วินาที (ไม่กระทบผลลัพธ์ แค่ความถี่อัปเดต UI)
@@ -649,10 +672,26 @@ Config.Hatchery = {
 --
 -- turretDps = อาวุธป้องกันของกำแพง ยิงใส่กองทัพเราตลอดเวลาที่ตี
 -- ตั้งไว้ที่ 10% ของ damage รวมที่ทหารฝ่ายรับทำได้ (ทหาร N ตัว × 10 × 10%)
+--
+-- 🔴 ห้ามเอาค่าชุดนี้ไปใช้ตรง ๆ ตอนทำ Phase 3 — รอตัดสินก่อน
+--    ระบบรบใหม่ (ปล่อยต่อเนื่อง) ทำให้การรบมี "ระยะเวลา" จริงเป็นชั่วโมง
+--    ค่าพวกนี้ตั้งไว้ตอนที่การรบยังคำนวณครั้งเดียว จึงแรงเกินไปมาก
+--
+--        กำลังพลที่เสียให้ turret = turretDps ÷ (damage/วินาทีของเรา)
+--        (เวลาตัดกันทั้งสองฝั่ง เพราะ HP ของตัวเรา = damage ของตัวเรา)
+--
+--    ผลที่ได้: turret แรงกว่า damage/วิ ของผู้เล่นชั้นกลาง 17.6× (ด่าน 2)
+--    ถึง 237.7× (ด่าน 9) → ทหารตายก่อนถึงกำแพงทุกตัว ผ่านไม่ได้สักด่าน
+--    ค่าที่ควรเป็นถ้าอยากให้ turret กินกำลังพล 10%: ด่าน 2 = 0.57 · ด่าน 9 = 420,651
+--    รายละเอียดและทางเลือก: docs/data-schema.md §8.6.1 และ §13
+--
 -- ⚠️ ค่านี้ผมตั้งเอง รอยืนยัน
 local Stages: { StageDef } = {
 	-- id  ทหารฝ่ายรับ          turretDps
-	{ id = 1, defenders = 10, turretDps = 10 },
+	-- ⚠️ ด่าน 1 ไม่มีกำแพงและไม่มีทหารฝ่ายรับ
+	-- เป็นด่านเริ่มต้น ผู้เล่นเดินไปสู้บอสตัวเล็กเอาไข่ได้เลยตั้งแต่เข้าเกมครั้งแรก
+	-- แก้ปัญหาไก่กับไข่: ต้องมีแม่ถึงจะมีกองทัพ ต้องมีไข่ถึงจะมีแม่
+	{ id = 1, defenders = 0, turretDps = 0 },
 	{ id = 2, defenders = 100, turretDps = 100 },
 	{ id = 3, defenders = 1000, turretDps = 1000 },
 	{ id = 4, defenders = 10000, turretDps = 10000 },
@@ -716,24 +755,63 @@ Config.Boss = {
 -- ผลข้างเคียงที่ตั้งใจ: ลูกที่สะสมไว้ตั้งแต่ด่านต้นแรงขึ้นตามผู้เล่น ไม่มีกองที่ตกยุค
 --
 --------------------------------------------------------------------------------
--- ⚠️ ทำไม BASE = 1 ไม่ใช่ 8
+-- ⚠️ ทำไม BASE = 2 ไม่ใช่ 8
 --------------------------------------------------------------------------------
--- damage/วันของกองทัพโตอยู่แล้ว ×7.05 ต่อด่าน โดยไม่ต้องมีตัวคูณนี้เลย:
---     น้ำหนักแม่ที่หาได้โตขึ้น ×3.96/ด่าน → damage ×1.99 (sqrt บีบครึ่ง)
---     ขนาดคอกโตขึ้น                        → ×1.18/ด่าน
---     upgrade อัตราผลิต                    → ×3/ด่าน
--- ส่วน HP ของด่านโตแค่ ×10 ต่อด่าน
+-- ระบบรบใหม่ (ปล่อยต่อเนื่อง) เปลี่ยนสมการทั้งหมด
+-- เดิม: damage รวม = "จำนวนที่สะสมได้" × damage/ตัว → upgrade อัตราผลิตคูณ damage ตรง ๆ
+-- ใหม่: damage/วินาที = min(อัตราผลิต, อัตราปล่อย) × damage/ตัว × BASE^(N-1)
+--       พอชนเพดานปล่อยแล้ว upgrade อัตราผลิต "หลุดออกจากสมการ damage" ทันที
+--       (ยังมีประโยชน์เพราะเติมคลังเร็วขึ้น แต่ไม่ใช่ตัวคูณ damage อีกต่อไป)
 --
--- 7.05 < 10 → เกมยากขึ้นเรื่อย ๆ อยู่แล้ว (ด่าน 1 = 2.2 ชม. → ด่าน 9 = 17.8 ชม.)
--- ถ้าตั้ง BASE = 8 จะกลายเป็น 56 ต่อด่าน ซึ่งมากกว่า 10 → **เกมง่ายลงเรื่อย ๆ**
--- ด่าน 4 เป็นต้นไปจะจบทันที และด่าน 9 จะเร็วกว่าด่าน 1 ราวสองล้านเท่า
+-- เวลาต่อด่าน = HP ÷ (อัตราปล่อย × damage/ตัว × BASE^(N-1))
+--     HP ด่านโต ×10/ด่าน · damage/ตัวโต ×1.99/ด่าน (น้ำหนักแม่ ×3.96 ผ่าน sqrt)
+--     → ต้องการ 1.99 × R × BASE ≈ 10 ถึงจะยากเท่ากันทุกด่าน (R = อัตราโตของการปล่อย)
 --
--- assertProgressionIsSane() ข้างล่างจะไม่ยอมให้เซิร์ฟบูตถ้าตั้งค่าที่ทำให้เป็นแบบนั้น
+--     BASE = 8 → R = 0.63/ด่าน = อัตราปล่อยต้อง "ลดลง" ทุกด่าน ซึ่งเป็นไปไม่ได้
+--                และด่าน 4 ขึ้นไปจะจบทันที (~0 ชม.)
+--     BASE = 1 → ด่าน 9 ใช้เวลา 2,536 ชม. เกินเพดาน 72 ชม.
+--     BASE = 2 → R = 2.51/ด่าน เข้ากับตารางปล่อยข้างล่างพอดี
+--                ด่าน 2 = 0.73 ชม. → ด่าน 9 = 9.9 ชม. (ไต่ขึ้น 13.5 เท่า)
+--
+-- BASE = 2 เป็นค่าเดียวที่ผ่าน assertProgressionIsSane() ข้างล่าง
+-- (ตั้ง 8 แล้วยามจะไม่ยอมให้เซิร์ฟบูต — ทดสอบแล้ว)
 
 Config.Combat = {
-	-- ฐานของตัวคูณ damage ต่อ 1 กำแพงที่พังได้
-	-- 1 = ปิด (ให้ upgrade อัตราผลิตเป็นตัวขับอย่างเดียว)
-	STAGE_DAMAGE_BASE = 1,
+	-- ฐานของตัวคูณ damage ต่อ 1 กำแพงที่พังได้ (1 = ปิด)
+	-- ⚠️ ดูเหตุผลที่ไม่ใช้ 8 ในบล็อกด้านบน
+	STAGE_DAMAGE_BASE = 2,
+
+	-- อัตราปล่อยทหารออกจากจุดสปอน (ตัว/วินาที) ต่อด่าน
+	-- ⚠️ นี่คือ "เพดาน damage ต่อวินาที" ของผู้เล่น และเป็นคอขวดหลักตั้งแต่ด่าน 3 ขึ้นไป
+	-- ปล่อยเฉพาะตอนออนไลน์ · ออฟไลน์ไม่ปล่อย (แต่แม่ยังผลิตตามกติกาออฟไลน์เดิม)
+	--
+	-- ⚠️ ตัวเลขชุดนี้หามาจากการไล่คำนวณ ไม่ได้ตั้งลอย ๆ
+	-- ด่าน 1-2 คอขวดอยู่ที่ "การผลิต" (ผลิตได้ 0.12 และ 0.63 ตัว/วิ) เพดานปล่อยยังไม่มีผล
+	-- ตั้งแต่ด่าน 3 ขึ้นไปคอขวดพลิกเป็น "การปล่อย" ถาวร
+	-- ถ้าเร่งปล่อยเร็วเกินตรงรอยต่อนี้ เส้นเวลาจะแอ่นลง (ด่าน 3 ง่ายกว่าด่าน 2)
+	RELEASE_PER_SECOND = { 1, 1, 1, 2, 3, 4, 6, 8, 10 },
+
+	-- ปุ่มอัญเชิญ: ปิด = หยุดปล่อย สะสมไว้ในคลัง · เปิด = ปล่อยต่อเนื่องอัตโนมัติ
+	-- กลไกหลักของเกมคือสะสมกองใหญ่แล้วปล่อยรวดเดียวทะลุ
+	-- ดีกว่าปล่อยทีละตัวแล้วถูกกินทีละตัว
+	SUMMON_DEFAULT_ON = true,
+
+	-- auto-pause: ปล่อยไปครบเท่านี้ตัวแล้ว HP ฝ่ายตรงข้ามไม่ลดเลย → หยุดปล่อยเอง
+	-- กันไม่ให้ทหารถูกป้อนเข้าเครื่องบดหายถาวรโดยไม่ได้ damage
+	AUTO_PAUSE_AFTER_UNITS = 100,
+
+	-- cap โมเดลทหารฝ่ายเราที่แสดงพร้อมกัน ส่วนเกินรวมเป็นตัวเลข
+	-- แสดงเฉพาะทหารของผู้เล่นคนนั้นเอง ไม่แสดงของคนอื่น
+	-- ประมาณการ: 10 ตัว/วินาที × เดินถึงกำแพง ~30 วินาที = 300 ตัวมีชีวิตพร้อมกัน
+	MAX_VISIBLE_UNITS = 120,
+	WALK_SECONDS_TO_WALL = 30, -- เวลาเดินจากจุดสปอนถึงกำแพง ใช้ประมาณจำนวนบนจอ
+
+	-- ⚠️ ห้ามระบบ auto ปล่อย "ตัวแม่" เด็ดขาด — auto ปล่อยได้เฉพาะตัวลูก
+	-- ผู้เล่นต้องกดเลือกและส่งแม่เองทีละครั้ง + กล่องยืนยัน
+	-- และ **เลือกได้เฉพาะแม่ที่อยู่ในกระเป๋า** แม่ในคอกเลือกไม่ได้
+	-- (กันไม่ให้เผลอส่งเครื่องผลิตไปตาย)
+	ALLOW_AUTO_RELEASE_MOTHERS = false,
+	MOTHERS_SELECTABLE_FROM_PEN = false,
 }
 
 --------------------------------------------------------------------------------
@@ -1263,6 +1341,51 @@ function Config.getStageDamageMultiplier(wallProgress: number): number
 	return Config.Combat.STAGE_DAMAGE_BASE ^ (clamped - 1)
 end
 
+-- อัตราปล่อยทหารของด่านนั้น (ตัว/วินาที)
+function Config.getReleaseRate(stage: number): number
+	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
+	return Config.Combat.RELEASE_PER_SECOND[clamped]
+end
+
+-- อัตราผลิตลูกของแม่ 1 ตัว (ตัว/นาที)
+-- แปรตามน้ำหนักด้วยเลขชี้กำลัง WEIGHT_EXPONENT แล้วคูณด้วย upgrade และบัฟสถานะ
+-- online = false → คูณ OFFLINE_RATE_RATIO
+function Config.getProductionPerMinute(
+	motherWeight: number,
+	statuses: { string }?,
+	productionLevel: number,
+	online: boolean?
+): number
+	local production = Config.Production
+
+	local rate = production.ONLINE_PER_MINUTE
+		* (motherWeight / production.WEIGHT_REFERENCE) ^ production.WEIGHT_EXPONENT
+		* Config.getProductionMultiplier(productionLevel)
+
+	if statuses then
+		rate *= Config.getStatusEffects(statuses).productionMultiplier
+	end
+
+	if online == false then
+		rate *= production.OFFLINE_RATE_RATIO
+	end
+
+	return rate
+end
+
+-- ความจุคลังต่อกอง — แยกเป็นฟังก์ชันไว้เผื่อทำเป็น upgrade ทีหลัง
+function Config.getStackCap(): number
+	return Config.Production.STACK_CAP
+end
+
+-- ประมาณจำนวนโมเดลทหารฝ่ายเราที่มีชีวิตพร้อมกันบนจอ
+-- = อัตราปล่อย × เวลาเดินถึงกำแพง แล้วตัดที่ MAX_VISIBLE_UNITS
+-- ส่วนเกินไม่ spawn โมเดล ให้รวมเป็นตัวเลขแทน (วิธีเดียวกับทหารฝ่ายรับ)
+function Config.getVisibleUnitCount(stage: number): number
+	local alive = Config.getReleaseRate(stage) * Config.Combat.WALK_SECONDS_TO_WALL
+	return math.min(math.ceil(alive), Config.Combat.MAX_VISIBLE_UNITS)
+end
+
 -- damage/HP ของหน่วย 1 ตัวตอนเข้ารบ = พลังพื้นฐาน × ตัวคูณตามด่าน
 -- ใช้ได้ทั้งแม่และลูก ส่ง weight ของตัวนั้นเข้ามา
 function Config.computeBattlePower(
@@ -1443,12 +1566,15 @@ end
 local function assertProgressionIsSane()
 	local check = Config.BalanceCheck
 
-	for stage = 1, Config.Stage.COUNT do
+	-- damage/วินาทีที่ผู้เล่นทำได้จริงที่ด่านนั้น
+	-- ⚠️ ระบบใหม่เป็นการปล่อยต่อเนื่อง ไม่ใช่ส่งกองทัพทีเดียว
+	-- อัตราจริงจึงเป็น min(ผลิตได้, ปล่อยได้) ไม่ใช่ "จำนวนที่สะสมได้ทั้งหมด"
+	-- ผลสำคัญ: พอชนเพดานปล่อยแล้ว **upgrade อัตราผลิตหยุดเพิ่ม damage ทันที**
+	-- (ยังมีประโยชน์อยู่ เพราะเติมคลังเร็วขึ้น แต่ไม่ใช่ตัวคูณ damage อีกต่อไป)
+	local function damagePerSecondAt(stage: number): number
 		local weight = check.REFERENCE_WEIGHT[stage]
 		local class = check.REFERENCE_CLASS[stage]
-		assert(weight ~= nil and class ~= nil, `Config: BalanceCheck ขาดค่าอ้างอิงของด่าน {stage}`)
 
-		-- หาตัวละครสักตัวในคลาสอ้างอิง (คลาสเดียวกันพลังเท่ากันหมด)
 		local charId: string? = nil
 		for id, character in Characters do
 			if character.class == class then
@@ -1459,54 +1585,59 @@ local function assertProgressionIsSane()
 		assert(charId ~= nil, `Config: BalanceCheck อ้างคลาส "{class}" ที่ไม่มีตัวละครอยู่เลย`)
 
 		-- ผู้เล่นชั้นกลางที่ด่าน N: คอกเลเวล N · upgrade อัตราผลิตขั้น N-1
-		local penCapacity = Config.getPenCapacity(stage)
-		local productionRate = Config.getProductionMultiplier(stage - 1)
-		local childrenPerDay = penCapacity * 60 * 24 * Config.Production.ONLINE_PER_MINUTE * productionRate
+		local producedPerSecond = Config.getPenCapacity(stage)
+			* Config.getProductionPerMinute(weight, nil, stage - 1, true)
+			/ 60
+		local effectiveRate = math.min(producedPerSecond, Config.getReleaseRate(stage))
 
-		local perChild = Config.computeBattlePower(Config.getChildWeight(weight), charId, nil, stage)
-		local damagePerDay = childrenPerDay * perChild
-		assert(damagePerDay > 0, `Config: ด่าน {stage} คำนวณ damage/วัน ได้ 0`)
+		return effectiveRate * Config.computeBattlePower(Config.getChildWeight(weight), charId, nil, stage)
+	end
 
-		local hours = Config.getStageTotalHp(stage) / (damagePerDay / 24)
+	local function hoursAt(stage: number): number
+		local totalHp = Config.getStageTotalHp(stage)
+		if totalHp <= 0 then
+			return 0 -- ด่านที่ไม่มีกำแพง (ด่าน 1) ไม่ต้องตี
+		end
+		return totalHp / (damagePerSecondAt(stage) * 3600)
+	end
 
+	local firstGuarded: number? = nil
+	local lastGuarded: number? = nil
+
+	for stage = 1, Config.Stage.COUNT do
 		assert(
-			hours <= check.MAX_HOURS_PER_STAGE,
-			`Config: ด่าน {stage} ต้องสะสมกองทัพ {math.floor(hours)} ชั่วโมง (เพดาน {check.MAX_HOURS_PER_STAGE}) `
-				.. `— ยากเกินจนผู้เล่นเลิกเล่น ลอง HP ด่านลง หรือดัน damage ขึ้น`
+			check.REFERENCE_WEIGHT[stage] ~= nil and check.REFERENCE_CLASS[stage] ~= nil,
+			`Config: BalanceCheck ขาดค่าอ้างอิงของด่าน {stage}`
 		)
-		assert(
-			hours >= check.MIN_HOURS_PER_STAGE,
-			`Config: ด่าน {stage} ใช้เวลาแค่ {string.format("%.2f", hours)} ชั่วโมง (ขั้นต่ำ {check.MIN_HOURS_PER_STAGE}) `
-				.. `— เร็วเกินจนด่านไม่มีความหมาย มักเกิดจากตัวคูณฝั่ง damage โตเร็วกว่า HP ของด่าน`
-		)
+
+		if Config.getStageTotalHp(stage) > 0 then
+			local hours = hoursAt(stage)
+
+			assert(
+				hours <= check.MAX_HOURS_PER_STAGE,
+				`Config: ด่าน {stage} ต้องตีนาน {math.floor(hours)} ชั่วโมง (เพดาน {check.MAX_HOURS_PER_STAGE}) `
+					.. `— ยากเกินจนผู้เล่นเลิกเล่น ลอง HP ด่านลง หรือดันอัตราปล่อย/damage ขึ้น`
+			)
+			assert(
+				hours >= check.MIN_HOURS_PER_STAGE,
+				`Config: ด่าน {stage} ใช้เวลาแค่ {string.format("%.3f", hours)} ชั่วโมง (ขั้นต่ำ {check.MIN_HOURS_PER_STAGE}) `
+					.. `— เร็วเกินจนด่านไม่มีความหมาย มักเกิดจากตัวคูณฝั่ง damage โตเร็วกว่า HP ของด่าน`
+			)
+
+			if firstGuarded == nil then
+				firstGuarded = hours
+			end
+			lastGuarded = hours
+		end
 	end
 
 	-- เกมควร "ยากขึ้น" เรื่อย ๆ ไม่ใช่ง่ายลง
-	-- เทียบด่านสุดท้ายกับด่านแรก ถ้าด่านท้ายเร็วกว่าด่านแรก แปลว่าสเกลกลับทาง
-	local function hoursAt(stage: number): number
-		local weight = check.REFERENCE_WEIGHT[stage]
-		local class = check.REFERENCE_CLASS[stage]
-		local charId: string? = nil
-		for id, character in Characters do
-			if character.class == class then
-				charId = id
-				break
-			end
-		end
-		local childrenPerDay = Config.getPenCapacity(stage)
-			* 60
-			* 24
-			* Config.Production.ONLINE_PER_MINUTE
-			* Config.getProductionMultiplier(stage - 1)
-		local perChild = Config.computeBattlePower(Config.getChildWeight(weight), charId, nil, stage)
-		return Config.getStageTotalHp(stage) / (childrenPerDay * perChild / 24)
-	end
-
-	local first, last = hoursAt(1), hoursAt(Config.Stage.COUNT)
+	assert(firstGuarded ~= nil and lastGuarded ~= nil, "Config: ไม่มีด่านไหนที่มีกำแพงให้ตีเลย")
 	assert(
-		last >= first,
-		`Config: ด่านสุดท้ายใช้เวลา {string.format("%.2f", last)} ชม. น้อยกว่าด่านแรก {string.format("%.2f", first)} ชม. `
-			.. `— เกมง่ายลงเรื่อย ๆ แทนที่จะไต่ระดับ ตรวจ Config.Combat.STAGE_DAMAGE_BASE`
+		(lastGuarded :: number) >= (firstGuarded :: number),
+		`Config: ด่านที่มีกำแพงด่านสุดท้ายใช้เวลา {string.format("%.2f", lastGuarded :: number)} ชม. `
+			.. `น้อยกว่าด่านแรก {string.format("%.2f", firstGuarded :: number)} ชม. `
+			.. `— เกมง่ายลงเรื่อย ๆ แทนที่จะไต่ระดับ ตรวจ Config.Combat.STAGE_DAMAGE_BASE กับตารางอัตราปล่อย`
 	)
 end
 
@@ -1590,10 +1721,19 @@ function Config.validate()
 	----------------------------------------------------------------------------
 	local production = Config.Production
 	assert(production.ONLINE_PER_MINUTE > 0, "Config: ONLINE_PER_MINUTE ต้องมากกว่า 0")
-	assert(production.OFFLINE_PER_MINUTE > 0, "Config: OFFLINE_PER_MINUTE ต้องมากกว่า 0")
+	assert(production.WEIGHT_REFERENCE > 0, "Config: WEIGHT_REFERENCE ต้องมากกว่า 0")
 	assert(
-		production.OFFLINE_PER_MINUTE <= production.ONLINE_PER_MINUTE,
-		"Config: อัตราออฟไลน์ต้องไม่เร็วกว่าออนไลน์ ไม่งั้นผู้เล่นจะได้เปรียบตอนไม่เล่น"
+		production.WEIGHT_EXPONENT > 0 and production.WEIGHT_EXPONENT < 1,
+		"Config: WEIGHT_EXPONENT ของอัตราผลิตต้องอยู่ระหว่าง 0 กับ 1 (ต้องถดถอย)"
+	)
+	assert(
+		production.OFFLINE_RATE_RATIO > 0 and production.OFFLINE_RATE_RATIO <= 1,
+		"Config: OFFLINE_RATE_RATIO ต้องอยู่ระหว่าง 0 ถึง 1 — ออฟไลน์ห้ามเร็วกว่าออนไลน์"
+	)
+	assert(production.STACK_CAP > 0, "Config: STACK_CAP ต้องมากกว่า 0")
+	assert(
+		production.STACK_CAP_START > 0 and production.STACK_CAP_START <= production.STACK_CAP,
+		"Config: STACK_CAP_START ต้องมากกว่า 0 และไม่เกิน STACK_CAP"
 	)
 	assert(production.OFFLINE_CAP_SECONDS > 0, "Config: OFFLINE_CAP_SECONDS ต้องมากกว่า 0")
 	assert(production.TICK_INTERVAL > 0, "Config: TICK_INTERVAL ต้องมากกว่า 0")
@@ -1776,11 +1916,16 @@ function Config.validate()
 	assert(economy.EXPONENT > 0 and economy.EXPONENT < 1, "Config: EXPONENT ของเงินต้องอยู่ระหว่าง 0 กับ 1 (ต้องถดถอย)")
 	-- ตัวคูณเงินต่อด่านต้องไม่น้อยกว่าอัตราที่ด่านยากขึ้นจริง
 	-- ไม่งั้นรายได้จะโตช้ากว่าความยาก แล้วผู้เล่นจะซื้อของขั้นสูงไม่ได้เลย
+	-- ⚠️ ข้ามด่านที่ด่านก่อนหน้าไม่มีทหารเลย (ด่าน 1 ไม่มีกำแพง จึงเป็น 0)
+	-- ไม่งั้นจะหารด้วยศูนย์แล้วได้ inf
 	local steepestStageStep = 1
 	for index = 2, #Stages do
-		local step = Stages[index].defenders / Stages[index - 1].defenders
-		if step > steepestStageStep then
-			steepestStageStep = step
+		local previous = Stages[index - 1].defenders
+		if previous > 0 then
+			local step = Stages[index].defenders / previous
+			if step > steepestStageStep then
+				steepestStageStep = step
+			end
 		end
 	end
 	assert(
@@ -1808,10 +1953,15 @@ function Config.validate()
 
 	-- ตารางด่านต้องครบทุกด่าน เรียงตาม id และยากขึ้นเรื่อย ๆ
 	assert(#Stages == stage.COUNT, `Config: ตารางด่านมี {#Stages} แถว แต่ COUNT = {stage.COUNT}`)
-	local previousDefenders = 0
+	-- ด่าน 1 เป็นด่านเริ่มต้น ต้องไม่มีกำแพงและไม่มีทหารฝ่ายรับ
+	-- ไม่งั้นผู้เล่นใหม่จะติดกับดักไก่กับไข่: ต้องมีแม่ถึงจะมีกองทัพ ต้องมีไข่ถึงจะมีแม่
+	assert(Stages[1].defenders == 0, "Config: ด่าน 1 ต้องไม่มีทหารฝ่ายรับ (ผู้เล่นใหม่ต้องเดินไปหาบอสได้เลย)")
+	assert(Config.getStageTotalHp(1) == 0, "Config: ด่าน 1 ต้องไม่มีกำแพงให้ตี")
+
+	local previousDefenders = -1
 	for index, def in Stages do
 		assert(def.id == index, `Config: ตารางด่านแถวที่ {index} มี id = {def.id} (ต้องตรงกับลำดับ)`)
-		assert(def.defenders > 0, `Config: ด่าน {def.id} มีทหารฝ่ายรับ <= 0`)
+		assert(def.defenders >= 0, `Config: ด่าน {def.id} มีทหารฝ่ายรับติดลบ`)
 		assert(def.turretDps >= 0, `Config: ด่าน {def.id} มี turretDps ติดลบ`)
 		assert(
 			def.defenders > previousDefenders,
@@ -1915,6 +2065,31 @@ function Config.validate()
 	-- ตัวคูณ damage ตามด่าน
 	----------------------------------------------------------------------------
 	assert(Config.Combat.STAGE_DAMAGE_BASE > 0, "Config: STAGE_DAMAGE_BASE ต้องมากกว่า 0 (1 = ปิด)")
+
+	-- อัตราปล่อยทหาร
+	local combat = Config.Combat
+	assert(
+		#combat.RELEASE_PER_SECOND == Config.Stage.COUNT,
+		`Config: ตารางอัตราปล่อยมี {#combat.RELEASE_PER_SECOND} แถว แต่มี {Config.Stage.COUNT} ด่าน`
+	)
+	local previousRate = 0
+	for index, rate in combat.RELEASE_PER_SECOND do
+		assert(rate > 0, `Config: อัตราปล่อยของด่าน {index} ต้องมากกว่า 0`)
+		assert(rate >= previousRate, `Config: อัตราปล่อยของด่าน {index} น้อยกว่าด่านก่อนหน้า — ต้องเร่งขึ้นหรือเท่าเดิม`)
+		previousRate = rate
+	end
+	assert(combat.AUTO_PAUSE_AFTER_UNITS > 0, "Config: AUTO_PAUSE_AFTER_UNITS ต้องมากกว่า 0")
+	assert(combat.MAX_VISIBLE_UNITS > 0, "Config: MAX_VISIBLE_UNITS ต้องมากกว่า 0")
+	assert(combat.WALK_SECONDS_TO_WALL > 0, "Config: WALK_SECONDS_TO_WALL ต้องมากกว่า 0")
+	-- ⚠️ กติกาที่ห้ามพลิก: ระบบห้ามปล่อยตัวแม่เอง และห้ามเลือกแม่จากคอก
+	assert(
+		combat.ALLOW_AUTO_RELEASE_MOTHERS == false,
+		"Config: ห้ามเปิด auto ปล่อยตัวแม่ — แม่ตายถาวร ผู้เล่นต้องกดเองพร้อมกล่องยืนยันเท่านั้น"
+	)
+	assert(
+		combat.MOTHERS_SELECTABLE_FROM_PEN == false,
+		"Config: ห้ามให้เลือกแม่จากคอกลงสนาม — เลือกได้เฉพาะแม่ในกระเป๋า กันเผลอส่งเครื่องผลิตไปตาย"
+	)
 	-- ด่านแรกต้องไม่ได้ตัวคูณฟรี — ดักกรณีเผลอเขียน BASE^wallProgress แทน BASE^(wallProgress-1)
 	assert(
 		Config.getStageDamageMultiplier(1) == 1,

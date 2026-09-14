@@ -18,7 +18,15 @@ local MapBuilder = require(ServerScriptService.MapBuilder)
 local PenService = require(ServerScriptService.PenService)
 local EggService = require(ServerScriptService.EggService)
 
+-- ⚠️ กันตัวละครเกิดก่อนแมพสร้างเสร็จ
+-- แมพทั้งใบ generate ตอน server start ดังนั้น**ก่อนหน้านั้นโลกว่างเปล่า ไม่มีพื้นเลย**
+-- ถ้าปล่อยให้เกิดเอง ตัวละครจะโผล่มาแล้วร่วงลงเหวทันที (ไม่มี Baseplate ให้ตก)
+-- ปิดไว้ก่อน แล้วเปิดคืนหลังสร้างแมพเสร็จ
+Players.CharacterAutoLoads = false
+
 -- เช็คตาราง Config ก่อนอย่างอื่น พิมพ์ผิดตรงไหนจะได้รู้ตั้งแต่ตอนบูต
+-- ⚠️ ถ้าตรงนี้ล้ม สคริปต์จะหยุดโดยที่ CharacterAutoLoads ยังเป็น false = ไม่มีใครเกิด
+-- ซึ่งตั้งใจ — config พังแล้วไม่ควรให้ใครเข้าไปเล่น ดูข้อความ assert ใน Output ได้เลย
 Config.validate()
 
 -- ⚠️ MaxPlayers ต้องเท่ากับจำนวนคอก ไม่งั้นคนที่เกินมาจะเข้าเกมได้แบบไม่มีคอก
@@ -36,6 +44,9 @@ Remotes.setupServer()
 MapBuilder.build()
 PenService.buildWorld()
 EggService.start()
+
+-- แมพพร้อมแล้ว มีพื้นให้ยืนแล้ว ค่อยปล่อยให้ตัวละครเกิด
+Players.CharacterAutoLoads = true
 
 local function onPlayerAdded(player: Player)
 	local pen = PenService.assign(player)
@@ -59,8 +70,17 @@ Players.PlayerAdded:Connect(onPlayerAdded)
 Players.PlayerRemoving:Connect(onPlayerRemoving)
 
 -- เผื่อกรณีผู้เล่นเข้ามาก่อนสคริปต์นี้จะรันจบ (เกิดได้ตอนกด Play ใน Studio)
+-- ⚠️ ต้อง LoadCharacter เองด้วย เพราะตอนเขาเข้ามา CharacterAutoLoads ยังเป็น false
 for _, player in Players:GetPlayers() do
 	task.spawn(onPlayerAdded, player)
+	if not player.Character then
+		task.spawn(function()
+			player:LoadCharacter()
+		end)
+	end
 end
 
-print("[egg-army-game] server พร้อมแล้ว (Phase 1.5)")
+print(
+	`[egg-army-game] server พร้อมแล้ว · แมพ blockout · คอก {Config.World.MAX_PENS} แปลง · `
+		.. `เลนยาว {Config.getLaneLength()} studs`
+)

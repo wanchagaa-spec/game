@@ -441,7 +441,7 @@ stack key · uid · บัฟสถานะ · แหล่งที่มา�
 - ✅ `MaxPlayers = 6` ใน `default.project.json` + เช็คซ้ำตอนบูต (เว็บ Roblox ทับค่าได้)
 
 ค้างอยู่ตอนนี้:
-- **ยังไม่ได้ทดสอบใน Studio** → เช็คลิสต์ใน `docs/map-layout.md` §9 และ `docs/phase-1.5-rework.md` §8
+- **ยังไม่ได้ทดสอบใน Studio** → เช็คลิสต์ใน `docs/map-layout.md` §10 และ `docs/phase-1.5-rework.md` §8
 - **ขนาดแมพยังไม่ตัดสิน** — สุดแมพเดิน ~1.3 นาที · ดูตัวเลขด้วย `luau tools/dump-map.luau`
   รอลองเดินจริงใน Studio ก่อน · ตัวที่กระทบมากสุดคือ `Config.Map.LANE_LENGTH_PER_STAGE`
 - ⚠️ **เพดานไข่ในกระเป๋าจะขึ้นเป็น 10,000** แต่โครง `heldEggs` ปัจจุบันรับไม่ไหว

@@ -16,6 +16,13 @@
       }
     },
 
+    "Players": {
+      "$className": "Players",
+      "$properties": {
+        "MaxPlayers": 6
+      }
+    },
+
     "ReplicatedStorage": {
       "$className": "ReplicatedStorage",
       "Shared": {

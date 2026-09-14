@@ -21,6 +21,17 @@ local EggService = require(ServerScriptService.EggService)
 -- เช็คตาราง Config ก่อนอย่างอื่น พิมพ์ผิดตรงไหนจะได้รู้ตั้งแต่ตอนบูต
 Config.validate()
 
+-- ⚠️ MaxPlayers ต้องเท่ากับจำนวนคอก ไม่งั้นคนที่เกินมาจะเข้าเกมได้แบบไม่มีคอก
+-- ตั้งไว้ใน default.project.json แล้ว แต่ **เช็คซ้ำตอนบูตด้วย**
+-- เพราะ MaxPlayers แก้ได้จากหน้า Game Settings บนเว็บ Roblox ซึ่งทับค่าในไฟล์ได้
+-- และ repo มองไม่เห็นการแก้ตรงนั้นเลย
+if Players.MaxPlayers ~= Config.World.MAX_PENS then
+	warn(
+		`[Main] ⚠️ MaxPlayers = {Players.MaxPlayers} แต่มีคอก {Config.World.MAX_PENS} แปลง — `
+			.. `คนที่เกินมาจะเข้าเกมได้แบบไม่มีคอก · แก้ที่ default.project.json หรือ Game Settings บนเว็บ`
+	)
+end
+
 Remotes.setupServer()
 MapBuilder.build()
 PenService.buildWorld()

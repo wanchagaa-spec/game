@@ -1,389 +1,360 @@
 --!strict
--- egg-army-game :: ระบบคอก (จองพื้นที่ + แสดงแม่ + สวนฟัก)
+-- egg-army-game :: ระบบคอก (จองแปลง + แสดงแม่ที่เดินได้ + วางไข่)
 --
--- ⚠️ เปลี่ยนชื่อจาก PlotService ตอน Phase 1.5 — "plot" เป็นคำของกลไกเก่า
--- ดีไซน์ใหม่เรียกพื้นที่ของผู้เล่นว่า **คอก**
+-- หน้าที่: จองคอกให้ผู้เล่นคนละ 1 แปลง แล้ววาดแม่กับไข่ลงในแปลงนั้น
+-- ผู้เล่นออก → คืนแปลงให้คนถัดไปใช้ต่อ
 --
--- หน้าที่: สร้างพื้นที่ในโลก แล้วจองให้ผู้เล่นคนละ 1 คอก
--- ผู้เล่นออก → คืนคอกให้คนถัดไปใช้ต่อ
+-- ⚠️ **ตัวแปลงในโลกสร้างโดย MapBuilder ไม่ใช่ไฟล์นี้** ไฟล์นี้แค่จองกับวาดของลงไป
 --
--- คอก 1 ช่องประกอบด้วย:
---   - ที่วาง **แม่** ตาม Config.getPenCapacity(penLevel) — ความจุโตตามเลเวล
---   - **สวนฟัก** Config.Hatchery.MAX_SLOTS ช่อง (แยกจากที่วางแม่)
+-- ══ กติกาการวางของในคอก (เปลี่ยนจาก Phase 1.5) ══
+--   พื้นที่เปิดโล่ง **ไม่มีช่องตาราง** — แม่และไข่วางตรงไหนก็ได้ในขอบเขตแปลง
+--   แม่ **เดินไปมาได้** สุ่มจุดหมายในคอกแล้วเดินไปหา
 --
--- Phase 1.5: ยังเป็นแค่แผ่นพื้นกับแท่น ยังไม่มีของตกแต่ง (Phase 5 ค่อย polish)
--- ตัวโลกทั้งหมดสร้างด้วยโค้ด เพราะ place ที่ build จาก Rojo ไม่มี Baseplate มาให้
+-- ⚠️ **ห้ามใช้ Humanoid กับตัวแม่**
+-- แม่เต็มคอก × ผู้เล่นเต็มเซิร์ฟ = Humanoid หลักร้อยตัว ซึ่งหนักเกินไปมาก
+-- ใช้ CFrame lerp ธรรมดาแทน (ดู updateWander)
+--
+-- ⚠️ **ห้ามเซฟตำแหน่งแม่/ไข่ลง DataStore** — สุ่มใหม่ทุกครั้งที่เข้าเกม
+-- ตำแหน่งไม่มีความหมายเชิงเกม (แม่เดินไปมาอยู่แล้ว) และการเซฟตำแหน่งของแม่ทุกตัว
+-- บวกไข่อีกเป็นหมื่นฟอง จะกินโควต้า DataStore ฟรี ๆ โดยไม่ได้อะไรกลับมา
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local MapBuilder = require(ServerScriptService.MapBuilder)
 
 local PenService = {}
 
+local MAP = Config.Map
+
 export type Pen = {
-	index: number, -- เลขคอก 1..MAX_PENS
-	model: Model, -- Model ที่รวมทุกอย่างของคอกนี้
-	base: Part, -- แผ่นพื้น
-	motherStands: { Part }, -- ที่วางแม่ เรียงตามลำดับในคอก (สร้างไว้เท่าความจุสูงสุด)
-	hatchPads: { Part }, -- แท่นฟักไข่ เรียงตาม slotIndex 1..MAX_SLOTS
-	label: TextLabel, -- ป้ายบอกเจ้าของ (ไว้ดูตอนเทสต์)
+	index: number, -- เลขแปลง 1..MAX_PENS
+	plot: MapBuilder.PenPlot, -- แปลงในโลกที่ MapBuilder สร้างไว้
+	mothersFolder: Folder, -- แม่ที่กำลังแสดงอยู่
+	eggsFolder: Folder, -- ไข่ที่กำลังฟักอยู่
 	ownerUserId: number?, -- nil = ว่าง
 }
 
-local WORLD = Config.World
-local MAX_PEN_CAPACITY = Config.getPenCapacity(Config.Pen.MAX_LEVEL)
--- แท่นฟักเท่านั้น — กระเป๋าไข่ (BAG_CAPACITY) ไม่มีของให้วางในโลก
-local HATCHERY_SLOTS = Config.Hatchery.MAX_SLOTS
+-- แม่ 1 ตัวที่กำลังเดินอยู่ในคอก
+type Roamer = {
+	part: Part,
+	origin: Vector3, -- กึ่งกลางแปลงที่แม่ตัวนี้อยู่
+	from: Vector3,
+	to: Vector3,
+	startedAt: number, -- os.clock() ตอนเริ่มเดินรอบนี้
+	duration: number, -- ใช้เวลาเดินกี่วินาที
+	waitUntil: number, -- os.clock() ที่จะออกเดินรอบถัดไป
+}
 
 local pens: { Pen } = {}
 local penByUserId: { [number]: Pen } = {}
+local roamers: { Roamer } = {}
 local built = false
+local wanderConnection: RBXScriptConnection? = nil
+
+local rng = Random.new()
 
 local EMPTY_LABEL = "ว่าง"
-local STAND_SIZE = Vector3.new(4, 1, 4)
-local PAD_SIZE = Vector3.new(3, 0.6, 3)
-local HATCH_COLUMNS = 10
+
+--------------------------------------------------------------------------------
+-- ขอบเขตที่วางของได้ในแปลง
+--------------------------------------------------------------------------------
+
+-- ครึ่งความกว้าง/ลึกที่ของยังอยู่ในรั้ว (หักขอบกันชนแล้ว)
+-- validate() บังคับว่า PEN_EDGE_MARGIN เล็กกว่าครึ่งด้านสั้นสุดเสมอ ค่านี้จึงเป็นบวกแน่นอน
+local function innerHalfExtents(): (number, number)
+	local size = MAP.PEN_PLOT_SIZE
+	local margin = MAP.PEN_EDGE_MARGIN
+	return size.X / 2 - margin, size.Z / 2 - margin
+end
+
+-- สุ่มจุดบนพื้นภายในแปลง
+local function randomPointInPen(center: Vector3): Vector3
+	local halfX, halfZ = innerHalfExtents()
+	return Vector3.new(
+		center.X + rng:NextNumber(-halfX, halfX),
+		center.Y,
+		center.Z + rng:NextNumber(-halfZ, halfZ)
+	)
+end
+
+--------------------------------------------------------------------------------
+-- แม่เดินไปมา — CFrame lerp ไม่ใช่ Humanoid
+--------------------------------------------------------------------------------
+
+local function pickNextTrip(roamer: Roamer, now: number)
+	local target = randomPointInPen(roamer.origin)
+	local from = roamer.part.Position
+	local distance = (Vector3.new(target.X, from.Y, target.Z) - from).Magnitude
+
+	roamer.from = from
+	roamer.to = Vector3.new(target.X, from.Y, target.Z)
+	roamer.startedAt = now
+	-- ระยะ ÷ ความเร็ว = เวลาที่ใช้ · กันหาร 0 ตอนสุ่มได้จุดเดิมเป๊ะ
+	roamer.duration = math.max(distance / MAP.WANDER_SPEED, 0.05)
+end
+
+local function updateWander()
+	local now = os.clock()
+
+	for _, roamer in roamers do
+		local part = roamer.part
+		if part.Parent == nil then
+			continue -- ถูกเก็บไปแล้ว รอบถัดไปจะถูกกวาดออกจากตาราง
+		end
+
+		if now < roamer.waitUntil then
+			continue -- ยืนพักอยู่
+		end
+
+		local elapsed = now - roamer.startedAt
+		local alpha = math.clamp(elapsed / roamer.duration, 0, 1)
+		local position = roamer.from:Lerp(roamer.to, alpha)
+
+		-- หันหน้าไปทางที่เดิน ให้ดูมีชีวิตขึ้นโดยไม่ต้องมี Humanoid
+		local direction = roamer.to - roamer.from
+		if direction.Magnitude > 0.01 then
+			part.CFrame = CFrame.lookAt(position, position + direction.Unit)
+		else
+			part.Position = position
+		end
+
+		if alpha >= 1 then
+			-- ถึงแล้ว หยุดพักสักครู่ค่อยออกเดินใหม่
+			roamer.waitUntil = now + rng:NextNumber(MAP.WANDER_PAUSE_MIN, MAP.WANDER_PAUSE_MAX)
+			pickNextTrip(roamer, roamer.waitUntil)
+		end
+	end
+end
+
+-- ลูปเดียวคุมแม่ทุกตัวในเซิร์ฟเวอร์ ไม่ใช่ลูปต่อตัว
+local function startWanderLoop()
+	if wanderConnection then
+		return
+	end
+	local accumulated = 0
+	wanderConnection = RunService.Heartbeat:Connect(function(delta)
+		accumulated += delta
+		if accumulated < MAP.WANDER_TICK then
+			return
+		end
+		accumulated = 0
+		updateWander()
+	end)
+end
+
+local function dropRoamersUnder(folder: Folder)
+	for index = #roamers, 1, -1 do
+		if roamers[index].part:IsDescendantOf(folder) then
+			table.remove(roamers, index)
+		end
+	end
+end
 
 --------------------------------------------------------------------------------
 -- สร้างโลก
 --------------------------------------------------------------------------------
 
-local function createPen(index: number, parent: Folder): Pen
-	-- คอกเรียงกันเป็นแถวตามแกน X
-	local origin = WORLD.PEN_ORIGIN + Vector3.new((index - 1) * WORLD.PEN_SPACING, 0, 0)
-
-	local model = Instance.new("Model")
-	model.Name = `Pen{index}`
-
-	local base = Instance.new("Part")
-	base.Name = "Base"
-	base.Size = WORLD.PEN_SIZE
-	base.Position = origin
-	base.Anchored = true
-	base.Material = Enum.Material.Grass
-	base.Color = Color3.fromRGB(86, 130, 70)
-	base.TopSurface = Enum.SurfaceType.Smooth
-	base.BottomSurface = Enum.SurfaceType.Smooth
-	base.Parent = model
-
-	-- ป้ายลอยเหนือคอก บอกว่าใครเป็นเจ้าของ
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "OwnerTag"
-	billboard.Size = UDim2.fromScale(12, 2)
-	billboard.StudsOffsetWorldSpace = Vector3.new(0, 10, 0)
-	billboard.AlwaysOnTop = true
-	billboard.Parent = base
-
-	local label = Instance.new("TextLabel")
-	label.Name = "Label"
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.TextScaled = true
-	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.TextStrokeTransparency = 0.4
-	label.Text = `คอก {index} — {EMPTY_LABEL}`
-	label.Parent = billboard
-
-	----------------------------------------------------------------------------
-	-- ที่วางแม่ — ครึ่งหน้าของคอก
-	----------------------------------------------------------------------------
-	-- สร้างไว้เท่าความจุสูงสุด แล้วซ่อนตัวที่เกินเลเวลปัจจุบัน
-	-- (ถูกกว่าการสร้าง/ลบ Part ทุกครั้งที่อัปเกรด)
-	local standsFolder = Instance.new("Folder")
-	standsFolder.Name = "MotherStands"
-	standsFolder.Parent = model
-
-	local motherStands: { Part } = {}
-	local standColumns = 5
-	local standSpacingX = WORLD.PEN_SIZE.X / (standColumns + 1)
-
-	for slot = 1, MAX_PEN_CAPACITY do
-		local column = (slot - 1) % standColumns
-		local row = math.floor((slot - 1) / standColumns)
-
-		local stand = Instance.new("Part")
-		stand.Name = `Stand{slot}`
-		stand.Size = STAND_SIZE
-		stand.Position = origin
-			+ Vector3.new(
-				-WORLD.PEN_SIZE.X * 0.5 + standSpacingX * (column + 1),
-				WORLD.PEN_SIZE.Y * 0.5 + STAND_SIZE.Y * 0.5,
-				-WORLD.PEN_SIZE.Z * 0.5 + 6 + row * 6
-			)
-		stand.Anchored = true
-		stand.Material = Enum.Material.WoodPlanks
-		stand.Color = Color3.fromRGB(150, 120, 85)
-		stand.TopSurface = Enum.SurfaceType.Smooth
-		stand.Parent = standsFolder
-		motherStands[slot] = stand
-	end
-
-	----------------------------------------------------------------------------
-	-- สวนฟัก — ครึ่งหลังของคอก เรียงเป็นตาราง
-	----------------------------------------------------------------------------
-	local hatchFolder = Instance.new("Folder")
-	hatchFolder.Name = "Hatchery"
-	hatchFolder.Parent = model
-
-	local hatchPads: { Part } = {}
-	local rows = math.ceil(HATCHERY_SLOTS / HATCH_COLUMNS)
-	local padSpacingX = WORLD.PEN_SIZE.X / (HATCH_COLUMNS + 1)
-	local hatchStartZ = WORLD.PEN_SIZE.Z * 0.5 - 4 - (rows - 1) * 3.5
-
-	for slotIndex = 1, HATCHERY_SLOTS do
-		local column = (slotIndex - 1) % HATCH_COLUMNS
-		local row = math.floor((slotIndex - 1) / HATCH_COLUMNS)
-
-		local pad = Instance.new("Part")
-		pad.Name = `Slot{slotIndex}`
-		pad.Size = PAD_SIZE
-		pad.Position = origin
-			+ Vector3.new(
-				-WORLD.PEN_SIZE.X * 0.5 + padSpacingX * (column + 1),
-				WORLD.PEN_SIZE.Y * 0.5 + PAD_SIZE.Y * 0.5,
-				hatchStartZ + row * 3.5
-			)
-		pad.Anchored = true
-		pad.Material = Enum.Material.Slate
-		pad.Color = Color3.fromRGB(120, 110, 100)
-		pad.TopSurface = Enum.SurfaceType.Smooth
-		pad.Parent = hatchFolder
-		hatchPads[slotIndex] = pad
-	end
-
-	model.PrimaryPart = base
-	model.Parent = parent
-
-	local pen: Pen = {
-		index = index,
-		model = model,
-		base = base,
-		motherStands = motherStands,
-		hatchPads = hatchPads,
-		label = label,
-		ownerUserId = nil,
-	}
-
-	PenService.applyCapacity(pen, Config.getPenCapacity(1))
-	return pen
-end
-
--- สร้างคอกทั้งหมด + จุดเกิด เรียกครั้งเดียวตอน server บูต
 function PenService.buildWorld()
 	if built then
 		return
 	end
 	built = true
 
-	local folder = Instance.new("Folder")
-	folder.Name = "Pens"
-	folder.Parent = Workspace
+	MapBuilder.build()
 
-	for index = 1, WORLD.MAX_PENS do
-		pens[index] = createPen(index, folder)
+	for index = 1, Config.World.MAX_PENS do
+		local plot = MapBuilder.getPenPlot(index)
+		assert(plot, `PenService: MapBuilder ไม่ได้สร้างคอกแปลง {index}`)
+
+		local mothersFolder = Instance.new("Folder")
+		mothersFolder.Name = "Mothers"
+		mothersFolder.Parent = plot.model
+
+		local eggsFolder = Instance.new("Folder")
+		eggsFolder.Name = "Eggs"
+		eggsFolder.Parent = plot.model
+
+		pens[index] = {
+			index = index,
+			plot = plot,
+			mothersFolder = mothersFolder,
+			eggsFolder = eggsFolder,
+			ownerUserId = nil,
+		}
 	end
 
-	-- จุดเกิดผู้เล่น วางไว้หน้าแถวคอก
-	-- ถ้าไม่มีอันนี้ผู้เล่นจะเกิดกลางอากาศแล้วตกตลอด เพราะ place ที่ build มาไม่มีพื้น
-	local spawn = Instance.new("SpawnLocation")
-	spawn.Name = "PenSpawn"
-	spawn.Size = Vector3.new(16, 1, 16)
-	spawn.Position = WORLD.PEN_ORIGIN
-		+ Vector3.new((WORLD.MAX_PENS - 1) * WORLD.PEN_SPACING * 0.5, 3, WORLD.PEN_SIZE.Z * 0.5 + 20)
-	spawn.Anchored = true
-	spawn.Duration = 0
-	spawn.Material = Enum.Material.Neon
-	spawn.Color = Color3.fromRGB(230, 230, 230)
-	spawn.Parent = Workspace
+	startWanderLoop()
+	print(`[PenService] พร้อมใช้ {#pens} คอก`)
 end
 
 --------------------------------------------------------------------------------
--- ความจุคอกตามเลเวล
+-- ไข่ในคอก — วางตรงไหนก็ได้ ไม่มีแท่นเป็นช่อง ๆ
 --------------------------------------------------------------------------------
 
--- ซ่อนที่วางแม่ที่เกินความจุปัจจุบัน — เรียกตอนอัปเกรดคอก (Phase 2)
-function PenService.applyCapacity(pen: Pen, capacity: number)
-	for slot, stand in pen.motherStands do
-		local usable = slot <= capacity
-		stand.Transparency = if usable then 0 else 1
-		stand.CanCollide = usable
-	end
+local function findEgg(pen: Pen, slotIndex: number): Part?
+	return pen.eggsFolder:FindFirstChild(`Egg{slotIndex}`) :: Part?
 end
-
---------------------------------------------------------------------------------
--- แสดงไข่ในสวนฟัก
---------------------------------------------------------------------------------
 
 function PenService.showEgg(player: Player, slotIndex: number, egg: Config.EggType)
-	local pad = PenService.getHatchPad(player, slotIndex)
-	if not pad then
+	local pen = penByUserId[player.UserId]
+	if not pen then
 		return
 	end
 
-	local old = pad:FindFirstChild("Egg")
-	if old then
-		old:Destroy()
+	-- วางซ้ำช่องเดิม = เก็บอันเก่าทิ้งก่อน ไม่งั้นจะซ้อนกัน
+	local existing = findEgg(pen, slotIndex)
+	if existing then
+		existing:Destroy()
 	end
 
+	local spot = randomPointInPen(pen.plot.center)
+	local size = MAP.EGG_BLOCK_SIZE
+
 	local part = Instance.new("Part")
-	part.Name = "Egg"
+	part.Name = `Egg{slotIndex}`
 	part.Shape = Enum.PartType.Ball
-	part.Size = Vector3.new(2, 2, 2)
-	part.Position = pad.Position + Vector3.new(0, 1.6, 0)
+	part.Size = size
+	part.Position = Vector3.new(spot.X, spot.Y + MAP.PEN_PLOT_SIZE.Y / 2 + size.Y / 2, spot.Z)
 	part.Color = egg.color
-	part.Material = Enum.Material.SmoothPlastic
 	part.Anchored = true
 	part.CanCollide = false
-	part.Parent = pad
+	part.Material = Enum.Material.SmoothPlastic
+	part.Parent = pen.eggsFolder
 end
 
 function PenService.hideEgg(player: Player, slotIndex: number)
-	local pad = PenService.getHatchPad(player, slotIndex)
-	if not pad then
+	local pen = penByUserId[player.UserId]
+	if not pen then
 		return
 	end
-	local egg = pad:FindFirstChild("Egg")
-	if egg then
-		egg:Destroy()
+	local part = findEgg(pen, slotIndex)
+	if part then
+		part:Destroy()
 	end
 end
 
 --------------------------------------------------------------------------------
--- แสดงแม่ในคอก
+-- แม่ในคอก
 --------------------------------------------------------------------------------
 
 local CLASS_COLORS: { [string]: Color3 } = {
 	SS = Color3.fromRGB(240, 185, 60),
 	S = Color3.fromRGB(190, 110, 235),
-	A = Color3.fromRGB(90, 160, 235),
-	B = Color3.fromRGB(120, 200, 130),
-	C = Color3.fromRGB(200, 200, 195),
+	A = Color3.fromRGB(230, 110, 90),
+	B = Color3.fromRGB(120, 215, 180),
+	C = Color3.fromRGB(200, 200, 190),
 }
 
-local function clearStand(stand: Part)
-	local existing = stand:FindFirstChild("Mother")
-	if existing then
-		existing:Destroy()
-	end
-	local tag = stand:FindFirstChild("MotherTag")
-	if tag then
-		tag:Destroy()
-	end
-end
-
--- วาดแม่ทุกตัวในคอกใหม่ทั้งชุด
--- ⚠️ รับ list มาจาก EggService เพื่อไม่ให้ PenService ต้องรู้เรื่อง state ของผู้เล่น
+-- วาดแม่ในคอกใหม่ทั้งชุด (เรียกทุกครั้งที่รายชื่อแม่เปลี่ยน)
+-- ⚠️ ตำแหน่งสุ่มใหม่ทุกครั้ง ไม่ได้จำของเดิม ตามกฎ "ห้ามเซฟตำแหน่ง"
 function PenService.refreshMothers(player: Player, mothers: { any })
 	local pen = penByUserId[player.UserId]
 	if not pen then
 		return
 	end
 
-	for slot, stand in pen.motherStands do
-		clearStand(stand)
+	dropRoamersUnder(pen.mothersFolder)
+	pen.mothersFolder:ClearAllChildren()
 
-		local mother = mothers[slot]
-		if mother then
-			local character = Config.getCharacter(mother.charId)
-			local class = if character then character.class else "C"
+	local now = os.clock()
+	local size = MAP.MOTHER_BLOCK_SIZE
+	local floorTop = MAP.PEN_PLOT_SIZE.Y / 2
 
-			local body = Instance.new("Part")
-			body.Name = "Mother"
-			body.Size = Vector3.new(2.4, 2.4, 2.4)
-			body.Position = stand.Position + Vector3.new(0, 1.9, 0)
-			body.Color = CLASS_COLORS[class] or CLASS_COLORS.C
-			body.Material = Enum.Material.SmoothPlastic
-			body.Anchored = true
-			body.CanCollide = false
-			body.Parent = stand
+	for _, mother in mothers do
+		local character = Config.getCharacter(mother.charId)
+		local class = if character then character.class else "C"
 
-			local billboard = Instance.new("BillboardGui")
-			billboard.Name = "MotherTag"
-			billboard.Size = UDim2.fromScale(8, 2)
-			billboard.StudsOffsetWorldSpace = Vector3.new(0, 4, 0)
-			billboard.AlwaysOnTop = true
-			billboard.Parent = stand
+		local spot = randomPointInPen(pen.plot.center)
 
-			local text = Instance.new("TextLabel")
-			text.Size = UDim2.fromScale(1, 1)
-			text.BackgroundTransparency = 1
-			text.TextScaled = true
-			text.TextColor3 = Color3.fromRGB(255, 255, 255)
-			text.TextStrokeTransparency = 0.4
-			text.Text = `{if character then character.name else mother.charId} ({class})\n{Config.formatWeight(mother.weight)}`
-			text.Parent = billboard
-		end
+		local part = Instance.new("Part")
+		part.Name = mother.uid
+		part.Size = size
+		part.Position = Vector3.new(spot.X, spot.Y + floorTop + size.Y / 2, spot.Z)
+		part.Color = CLASS_COLORS[class] or CLASS_COLORS.C
+		part.Anchored = true
+		part.CanCollide = false
+		part.Material = Enum.Material.SmoothPlastic
+		part.TopSurface = Enum.SurfaceType.Smooth
+		part.BottomSurface = Enum.SurfaceType.Smooth
+		part.Parent = pen.mothersFolder
+
+		local gui = Instance.new("BillboardGui")
+		gui.Name = "Tag"
+		gui.Size = UDim2.fromOffset(170, 38)
+		gui.StudsOffsetWorldSpace = Vector3.new(0, size.Y / 2 + 1.6, 0)
+		gui.MaxDistance = 120
+		gui.Adornee = part
+		gui.Parent = part
+
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.fromScale(1, 1)
+		label.BackgroundTransparency = 1
+		label.TextColor3 = Color3.fromRGB(255, 255, 255)
+		label.TextStrokeTransparency = 0.4
+		label.TextScaled = true
+		label.Font = Enum.Font.SourceSansBold
+		label.Text = `{if character then character.name else mother.charId} ({class})\n{Config.formatWeight(mother.weight)}`
+		label.Parent = gui
+
+		local roamer: Roamer = {
+			part = part,
+			origin = pen.plot.center,
+			from = part.Position,
+			to = part.Position,
+			startedAt = now,
+			duration = 0.05,
+			-- กระจายเวลาออกเดินครั้งแรก ไม่งั้นแม่ทุกตัวจะขยับพร้อมกันเป๊ะ ดูเป็นหุ่นยนต์
+			waitUntil = now + rng:NextNumber(0, MAP.WANDER_PAUSE_MAX),
+		}
+		pickNextTrip(roamer, roamer.waitUntil)
+		table.insert(roamers, roamer)
 	end
+end
+
+function PenService.clearVisuals(pen: Pen)
+	dropRoamersUnder(pen.mothersFolder)
+	pen.mothersFolder:ClearAllChildren()
+	pen.eggsFolder:ClearAllChildren()
+	pen.plot.label.Text = `คอก {pen.index} · {EMPTY_LABEL}`
 end
 
 --------------------------------------------------------------------------------
 -- จอง / คืนคอก
 --------------------------------------------------------------------------------
 
-local function setOwnerLabel(pen: Pen, text: string)
-	pen.label.Text = `คอก {pen.index} — {text}`
-end
-
--- ลบของที่ค้างอยู่บนแท่นทุกช่อง (ใช้ตอนคืนคอก)
-function PenService.clearVisuals(pen: Pen)
-	for _, pad in pen.hatchPads do
-		local egg = pad:FindFirstChild("Egg")
-		if egg then
-			egg:Destroy()
-		end
-	end
-	for _, stand in pen.motherStands do
-		clearStand(stand)
-	end
-end
-
--- จองคอกว่างให้ผู้เล่น คืน nil ถ้าเต็ม
 function PenService.assign(player: Player): Pen?
-	local existing = penByUserId[player.UserId]
-	if existing then
-		return existing
+	if penByUserId[player.UserId] then
+		return penByUserId[player.UserId]
 	end
 
 	for _, pen in pens do
 		if pen.ownerUserId == nil then
 			pen.ownerUserId = player.UserId
 			penByUserId[player.UserId] = pen
-			pen.model:SetAttribute("OwnerUserId", player.UserId)
-			setOwnerLabel(pen, player.DisplayName)
+			pen.plot.label.Text = `คอก {pen.index} · {player.DisplayName}`
 			return pen
 		end
 	end
 
+	-- ไม่ควรเกิด เพราะ MAX_PENS = PLAYERS_PER_SERVER และ validate() บังคับไว้
 	return nil
 end
 
--- คืนคอกให้คนถัดไป พร้อมล้างของบนแท่น
 function PenService.release(player: Player)
 	local pen = penByUserId[player.UserId]
 	if not pen then
 		return
 	end
-
 	PenService.clearVisuals(pen)
-	PenService.applyCapacity(pen, Config.getPenCapacity(1))
 	pen.ownerUserId = nil
-	pen.model:SetAttribute("OwnerUserId", nil)
-	setOwnerLabel(pen, EMPTY_LABEL)
 	penByUserId[player.UserId] = nil
 end
 
 function PenService.getPen(player: Player): Pen?
 	return penByUserId[player.UserId]
-end
-
--- คืนแท่นฟักของช่องที่ระบุ คืน nil ถ้าผู้เล่นยังไม่มีคอก หรือ slotIndex เกินช่วง
-function PenService.getHatchPad(player: Player, slotIndex: number): Part?
-	local pen = penByUserId[player.UserId]
-	if not pen then
-		return nil
-	end
-	return pen.hatchPads[slotIndex]
 end
 
 function PenService.getFreeCount(): number
@@ -395,5 +366,13 @@ function PenService.getFreeCount(): number
 	end
 	return free
 end
+
+-- จำนวนแม่ที่กำลังเดินอยู่ทั้งเซิร์ฟ — ไว้ดูตอนเทสต์ว่าไม่มีตัวค้าง
+function PenService.getRoamerCount(): number
+	return #roamers
+end
+
+-- ⚠️ ไม่ต่อ Players.PlayerRemoving ที่นี่ — Main.server.lua เป็นคนต่อสายให้
+-- ต่อสองที่แล้วลำดับจะกลายเป็นเรื่องบังเอิญ (EggService ต้องเซฟก่อนคอกถูกคืน)
 
 return PenService

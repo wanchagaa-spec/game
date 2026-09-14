@@ -2,7 +2,8 @@
 -- egg-army-game :: Server entry point
 --
 -- หน้าที่ของไฟล์นี้คือ "ต่อสาย" อย่างเดียว logic จริงอยู่ในโมดูลแต่ละตัว
---   PenService — จองคอกให้ผู้เล่น + แสดงแม่และสวนฟักในโลก
+--   MapBuilder — สร้างแมพทั้งใบด้วยโค้ด (ลานคอก · เลนรบ · รังบอส · ร้านค้า)
+--   PenService — จองคอกให้ผู้เล่น + วาดแม่ที่เดินได้และไข่ลงในคอกนั้น
 --   EggService — สร้างไข่ (พร้อมน้ำหนัก) จับเวลา ฟักเป็นตัวแม่ เข้าคอก/กระเป๋า
 --
 -- Phase 1.5: ข้อมูลอยู่ใน memory ทั้งหมด ยังไม่มี DataStore (อยู่ Phase 2)
@@ -13,6 +14,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local MapBuilder = require(ServerScriptService.MapBuilder)
 local PenService = require(ServerScriptService.PenService)
 local EggService = require(ServerScriptService.EggService)
 
@@ -20,6 +22,7 @@ local EggService = require(ServerScriptService.EggService)
 Config.validate()
 
 Remotes.setupServer()
+MapBuilder.build()
 PenService.buildWorld()
 EggService.start()
 

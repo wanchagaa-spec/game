@@ -794,14 +794,14 @@ local Stages: { StageDef } = {
 	-- เป็นด่านเริ่มต้น ผู้เล่นเดินไปสู้บอสตัวเล็กเอาไข่ได้เลยตั้งแต่เข้าเกมครั้งแรก
 	-- แก้ปัญหาไก่กับไข่: ต้องมีแม่ถึงจะมีกองทัพ ต้องมีไข่ถึงจะมีแม่
 	{ id = 1, defenders = 0, turretDps = 0 },
-	{ id = 2, defenders = 100, turretDps = 0.25 }, -- 10% ของ damage/วิ
-	{ id = 3, defenders = 1000, turretDps = 1.6 }, -- 11%
-	{ id = 4, defenders = 10000, turretDps = 54 }, -- 13%
-	{ id = 5, defenders = 100000, turretDps = 220 }, -- 14%
+	{ id = 2, defenders = 100, turretDps = 0.46 }, -- 10% ของ damage/วิ
+	{ id = 3, defenders = 1000, turretDps = 2.5 }, -- 11%
+	{ id = 4, defenders = 10000, turretDps = 73 }, -- 13%
+	{ id = 5, defenders = 100000, turretDps = 260 }, -- 14%
 	{ id = 6, defenders = 1000000, turretDps = 820 }, -- 16%
-	{ id = 7, defenders = 10000000, turretDps = 20000 }, -- 17%
-	{ id = 8, defenders = 100000000, turretDps = 73000 }, -- 19%
-	{ id = 9, defenders = 1000000000, turretDps = 250000 }, -- 20%
+	{ id = 7, defenders = 10000000, turretDps = 17000 }, -- 17%
+	{ id = 8, defenders = 100000000, turretDps = 53000 }, -- 19%
+	{ id = 9, defenders = 1000000000, turretDps = 150000 }, -- 20%
 }
 
 Config.Stages = Stages
@@ -839,57 +839,92 @@ Config.Boss = {
 }
 
 --------------------------------------------------------------------------------
--- ตัวคูณ damage ตามความคืบหน้ากำแพง
+-- ตัวคูณ damage ของกองทัพ — "ซื้อด้วยเงิน" ไม่ใช่ได้ฟรีตามด่าน
 --------------------------------------------------------------------------------
--- ⚠️ เรื่อง off-by-one ที่พลาดง่ายที่สุดในไฟล์นี้
+-- ⚠️ ระบบเดิม (STAGE_DAMAGE_BASE ^ (wallProgress-1)) **ยกเลิกแล้วทั้งหมด**
 --
---   ตอนผู้เล่น "กำลังตีด่าน N" เขาพังกำแพงมาแล้ว N-1 ด่าน
---   ดังนั้น wallProgress = N และตัวคูณ = BASE ^ (wallProgress - 1)
+-- ทำไมถึงเปลี่ยน: ตัวคูณตามด่านเป็นของที่ได้ฟรีอัตโนมัติ ไม่มีการตัดสินใจของผู้เล่นเลย
+-- ขณะเดียวกันเงินในเกมล้นเกินที่ต้องใช้ 11 เท่า (ด่าน 2) ถึง 299 เท่า (ด่าน 9)
+-- เพราะคอขวดพลิกเป็น "การปล่อย" ตั้งแต่ด่าน 3 ทำให้ upgrade อัตราผลิตกับคอกหมดความหมาย
+-- → ยุบสองปัญหาเข้าหากัน: ตัวคูณ damage กลายเป็นของที่ต้องซื้อ เงินที่ล้นจึงมีที่ไป
 --
---   ด่าน 1 (ยังไม่เคยพังอะไร)  → wallProgress = 1 → ตัวคูณ = BASE^0 = 1
---   ด่าน 9 (พังมาแล้ว 8 ด่าน)  → wallProgress = 9 → ตัวคูณ = BASE^8
---
---   ถ้าเผลอใช้ BASE^wallProgress ด่านแรกจะได้ตัวคูณฟรีทันที
---   และช่องว่างจะเลื่อนไปทั้งเส้น ไม่ได้หายไป — มี unit test ยืนยันจุดนี้
---
--- ใช้กับ "ทั้งตัวแม่และตัวลูก" ที่ส่งไปรบ และ **คำนวณตอนเข้ารบ** จาก
--- wallProgress ปัจจุบันของผู้เล่น ไม่เก็บตัวคูณติดไปกับกองลูก
--- ผลข้างเคียงที่ตั้งใจ: ลูกที่สะสมไว้ตั้งแต่ด่านต้นแรงขึ้นตามผู้เล่น ไม่มีกองที่ตกยุค
+-- ⚠️ ผลข้างเคียงที่ **ตัดสินใจรับไว้แล้ว ไม่ใช่บั๊กที่ต้องแก้กลับ**
+--   เกมเอียงไปทาง idle มากขึ้น และน้ำหนัก/คลาสของแม่มีน้ำหนักน้อยลง
+--   เมื่อเทียบกับ "ฟาร์มเงินแล้วอัป" — ความคืบหน้าย้ายจากดวงมาอยู่ที่รายได้ที่คาดเดาได้
 --
 --------------------------------------------------------------------------------
--- ⚠️ ทำไม BASE = 2.5 ไม่ใช่ 5 (และไม่ใช่ 8 ตามที่เคยสั่งมาก่อนหน้า)
+-- ⚠️ ทำไม 8 ขั้น/ด่าน ไม่ใช่ 9
 --------------------------------------------------------------------------------
--- สมการของระบบรบแบบปล่อยต่อเนื่อง:
---     เวลาต่อด่าน = HP ÷ (อัตราปล่อย × damage/ตัว × BASE^(N-1))
+-- ค่าที่สั่งมาคือ "×1.1 ต่อขั้น · 9 ขั้นต่อด่าน · รวม 72 ขั้น" ซึ่งขัดกันเอง
+-- เพราะเพดาน = (กำแพงที่พังแล้ว + 1) × ขั้นต่อด่าน → 9 ขั้น/ด่าน = 81 ขั้น ไม่ใช่ 72
 --
--- HP ของด่านโต ×10 ต่อด่าน ส่วนฝั่งเราโตจาก 2 ทางเท่านั้น (น้ำหนักคงที่แล้ว):
---     คลาสไต่ C → A ตามด่าน   ≈ ×1.70/ด่าน
---     อัตราปล่อย 1 → 10       ≈ ×1.39/ด่าน
+-- และที่ 9 ขั้น/ด่าน ตัวคูณจะแรงเกินไปจนด่าน 4 จบใน 0.502 ชม.
+-- ซึ่งเฉียดพื้น 0.5 ชม. แบบไม่มีระยะเผื่อเลย (เพดานจริงคือ ×1.10014 ต่อขั้น)
+-- แก้อะไรอย่างอื่นอีกนิดเดียวก็หลุด
 --
--- ถ้าดูแค่ "อัตราการโต" จะได้ BASE ≈ 10 ÷ (1.70 × 1.39) ≈ 4.2 ซึ่งเป็นที่มาของ 5
--- แต่อัตราการโตไม่ใช่ข้อจำกัดเดียว — **ระดับสัมบูรณ์ก็ถูกบังคับด้วย**
--- BalanceCheck บอกว่าทุกด่านต้องใช้เวลา 0.5–72 ชั่วโมง และตัวคูณคลาสชุดใหม่
--- (S = ×216) ทำให้ damage ต่อตัวสูงมากอยู่แล้ว BASE ที่สูงไปจึงดันให้ด่านจบเร็วเกิน
+--     ขั้น/ด่าน | ขั้นรวม | ด่าน 4   | ด่าน 9  | ผ่านยาม
+--     ----------|---------|----------|---------|--------
+--      7        | 63      | 1.08 ชม. | 128 ชม. | ❌ เกินเพดาน 72 ชม.
+--      **8**    | **72**  | **0.74** | **54**  | ✅ มีระยะเผื่อทั้งสองด้าน
+--      9        | 81      | 0.502    | 23.0    | ⚠️ ผ่านแบบเฉียดพื้น 0.4%
 --
--- ตัวเลขจริงที่คำนวณได้ (แม่ 500 kg คงที่ · คลาส C,C,C,B,B,B,A,A,A):
+-- เลือก 8 ขั้น/ด่าน → ตรงกับ "รวม 72 ขั้น" ที่สั่งมาพอดี และ 1.1^8 = 2.14/ด่าน
+-- ซึ่งใกล้ตัวคูณ 2.5/ด่านของระบบเดิมพอ ๆ กับที่ 1.1^9 = 2.36 ใกล้
 --
---     BASE | ด่าน 2 | ด่าน 5 | ด่าน 9 | ผ่านยาม
---     -----|--------|--------|--------|---------
---      1   | 4.4 ชม | 216 ชม | 47 ปี  | ❌ เกินเพดาน 72 ชม.
---      2.5 | 1.7 ชม | 2.6 ชม | 34 ชม  | ✅
---      5   | 0.8 ชม | 0.1 ชม | 2 นาที | ❌ ต่ำกว่าพื้น 0.5 ชม. และเกมง่ายลงเรื่อย ๆ
---      8   | 0.5 ชม | 0.0 ชม | ~0     | ❌
+--------------------------------------------------------------------------------
+-- ⚠️ off-by-one ที่พลาดง่ายที่สุดในไฟล์นี้ (ย้ายมาจากระบบเดิม)
+--------------------------------------------------------------------------------
+--   ตอนผู้เล่น "อยู่ด่าน N" เขาพังกำแพงมาแล้ว N-1 ด่าน
+--   เพดานขั้นที่ซื้อได้ = (N-1 + 1) × STEPS_PER_STAGE = wallProgress × STEPS_PER_STAGE
 --
--- ช่วงที่ผ่านยามทั้งหมดคือ 2.28–3.07 → เลือก 2.5 เพราะอยู่กลางช่วงและเป็นเลขกลม
--- (ต่ำสุด 0.99 ชม. · สูงสุด 33.9 ชม. · เวลาฟาร์มไม่เกิน 2.4 เท่าของเวลาตี)
+--   ด่าน 1 (ยังไม่เคยพังอะไร) → ซื้อได้ถึงขั้น 8  ← **ต้องไม่ใช่ 0**
+--   ด่าน 9 (พังมาแล้ว 8 ด่าน) → ซื้อได้ถึงขั้น 72
 --
--- assertProgressionIsSane() ข้างล่างจะไม่ยอมให้เซิร์ฟบูตถ้าตั้งค่าที่หลุดช่วงนี้
+--   ถ้าเผลอเขียน (wallProgress - 1) × STEPS_PER_STAGE ผู้เล่นใหม่จะซื้ออะไรไม่ได้เลย
+--   และตันตั้งแต่ด่านแรก — validate() assert ตรง ๆ ว่าด่าน 1 ต้องได้ 8 ขั้น
+--
+-- ตัวคูณเป็นของ **บัญชีผู้เล่น** ไม่ใช่ของแม่รายตัว (ฟิลด์ damageLevel ใน PlayerData)
+-- ใช้กับทั้งตัวแม่และตัวลูกที่ส่งไปรบ · แม่ตายไปก็ไม่เสียการลงทุน
+-- และลูกที่สะสมไว้ตั้งแต่ด่านต้นแรงขึ้นตามผู้เล่น ไม่มีกองที่ตกยุค
+
+Config.DamageUpgrade = {
+	STEP_MULTIPLIER = 1.1, -- ตัวคูณ damage ต่อ 1 ขั้น
+	STEPS_PER_STAGE = 8, -- ปลดล็อกกี่ขั้นต่อ 1 กำแพงที่พังได้
+	MAX_LEVEL = 72, -- = STEPS_PER_STAGE × Stage.COUNT (validate() เช็คให้)
+
+	-- ราคาภายในด่านเดียวกันไล่ขึ้น ×นี้ ต่อขั้น
+	-- ขั้นแรกของด่านใหม่จึงถูก (รางวัลทันทีที่พังกำแพง) ขั้นท้าย ๆ ถึงจะแพง
+	COST_MULTIPLIER_IN_STAGE = 1.3,
+
+	-- ⚠️ ราคาขั้นแรกของแต่ละด่าน — **ไม่ได้ตั้งลอย ๆ แต่แก้สมการหามา**
+	--
+	-- เป้าหมาย: ซื้อครบเพดานของด่านนั้นแล้วรายได้ส่วนเกินเหลือ 2–3 เท่า
+	-- (ไม่ใช่ 0 เพราะยังต้องเหลือซื้ออาวุธและอัปคอก)
+	--
+	--   ราคารวมของด่าน N  = B_N × (w^8 - 1) ÷ (w - 1)   โดย w = 1.3 → ตัวคูณ 23.86
+	--   ต้องการ ราคารวม   = 0.40 × รายได้ทั้งด่าน N
+	--   →  B_N = 0.40 × รายได้ด่าน N ÷ 23.86
+	--
+	-- "รายได้ทั้งด่าน" = (เงินจากคอก + เงินจากบอส) × เวลาตีด่านนั้น + เงินจากกวาดทหารทั้งด่าน
+	-- ของผู้เล่นอ้างอิงที่ซื้อครบเพดาน (ดู Config.getReferenceStageIncome)
+	--
+	-- ด่าน 1 ไม่มีกำแพง จึงไม่มี "เวลาตี" ใช้รายได้ 1 ชั่วโมงแรกเป็นฐานแทน
+	-- ด่าน 4 ดันขึ้นจาก 360,000 เป็น 420,000 เพื่อให้ราคาไล่ขึ้นตลอด 72 ขั้นไม่มีสะดุด
+	-- (รายได้ด่าน 4 โตแค่ 5.6 เท่าเพราะเป็นด่านที่เพิ่งได้คลาสใหม่ เวลาตีจึงสั้น)
+	STAGE_COST_BASE = {
+		300, -- ด่าน 1  ผู้เล่นใหม่มี 500 coins ซื้อขั้นแรกได้ทันที
+		3100, -- ด่าน 2
+		64000, -- ด่าน 3
+		420000, -- ด่าน 4
+		9700000, -- ด่าน 5
+		300000000, -- ด่าน 6
+		2400000000, -- ด่าน 7
+		67000000000, -- ด่าน 8
+		2100000000000, -- ด่าน 9
+	},
+}
 
 Config.Combat = {
-	-- ฐานของตัวคูณ damage ต่อ 1 กำแพงที่พังได้ (1 = ปิด)
-	-- ⚠️ ดูเหตุผลที่ไม่ใช้ 5 ในบล็อกด้านบน — ช่วงที่ใช้ได้คือ 2.28–3.07 เท่านั้น
-	STAGE_DAMAGE_BASE = 2.5,
-
 	-- อัตราปล่อยทหารออกจากจุดสปอน (ตัว/วินาที) ต่อด่าน
 	-- ⚠️ นี่คือ "เพดาน damage ต่อวินาที" ของผู้เล่น และเป็นคอขวดหลักตั้งแต่ด่าน 3 ขึ้นไป
 	-- ปล่อยเฉพาะตอนออนไลน์ · ออฟไลน์ไม่ปล่อย (แต่แม่ยังผลิตตามกติกาออฟไลน์เดิม)
@@ -960,6 +995,12 @@ Config.BalanceCheck = {
 
 	-- เพดานอัตราส่วนตัวคูณคลาส SS ÷ S — กัน pay-to-win
 	MAX_SS_OVER_S_RATIO = 2.5,
+
+	-- ราคา upgrade ตัวคูณ damage ของด่านหนึ่ง ต้องกินรายได้ของด่านนั้นในสัดส่วนนี้
+	-- ต่ำกว่านี้ = เงินยังล้น upgrade ไม่ได้ทำหน้าที่เป็นบ่อเงิน
+	-- สูงกว่านี้ = ผู้เล่นซื้อไม่ไหว แล้วตันเพราะ damage ไม่พอ
+	MIN_UPGRADE_SHARE = 0.30,
+	MAX_UPGRADE_SHARE = 0.70,
 
 	-- ⚠️ เพดานสัดส่วนกำลังพลที่ turret กินได้ของผู้เล่นชั้นกลาง
 	-- turretDps ที่ตั้งไว้ตอนนี้ไล่ 10% → 20% เผื่อไว้ถึง 35% กันตั้งพลาด
@@ -1623,11 +1664,41 @@ end
 -- ตัวคูณ damage ตามด่าน
 --------------------------------------------------------------------------------
 
--- wallProgress = ด่านที่ผู้เล่นกำลังตีอยู่ (= จำนวนกำแพงที่พังแล้ว + 1)
--- คืนตัวคูณ = BASE ^ (wallProgress - 1) — ดูคำอธิบาย off-by-one ข้างบน
-function Config.getStageDamageMultiplier(wallProgress: number): number
+-- ตัวคูณ damage ของกองทัพจากขั้น upgrade ที่ซื้อไว้ (ขั้น 0 = ยังไม่ซื้อ = ×1)
+function Config.getArmyDamageMultiplier(damageLevel: number): number
+	local clamped = math.clamp(math.floor(damageLevel or 0), 0, Config.DamageUpgrade.MAX_LEVEL)
+	return Config.DamageUpgrade.STEP_MULTIPLIER ^ clamped
+end
+
+-- เพดานขั้นที่ซื้อได้ตอนนี้ — ⚠️ off-by-one อยู่ตรงนี้ ดูคำอธิบายข้างบน
+-- wallProgress = ด่านที่ผู้เล่นอยู่ (= กำแพงที่พังแล้ว + 1) → ด่าน 1 ได้ 8 ขั้น ไม่ใช่ 0
+function Config.getMaxDamageLevel(wallProgress: number): number
 	local clamped = math.clamp(math.floor(wallProgress), 1, Config.Stage.COUNT)
-	return Config.Combat.STAGE_DAMAGE_BASE ^ (clamped - 1)
+	return clamped * Config.DamageUpgrade.STEPS_PER_STAGE
+end
+
+-- ราคาของขั้นที่ `level` (1 = ขั้นแรกของเกม) · คืน nil ถ้าเกิน MAX_LEVEL
+function Config.getDamageUpgradeCost(level: number): number?
+	local upgrade = Config.DamageUpgrade
+	local target = math.floor(level)
+	if target < 1 or target > upgrade.MAX_LEVEL then
+		return nil
+	end
+
+	local stage = math.floor((target - 1) / upgrade.STEPS_PER_STAGE) + 1
+	local indexInStage = (target - 1) % upgrade.STEPS_PER_STAGE
+	return upgrade.STAGE_COST_BASE[stage] * upgrade.COST_MULTIPLIER_IN_STAGE ^ indexInStage
+end
+
+-- ราคารวมของทุกขั้นที่ปลดล็อกในด่านนั้น (8 ขั้น)
+function Config.getStageDamageUpgradeTotal(stage: number): number
+	local upgrade = Config.DamageUpgrade
+	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
+	local total = 0
+	for index = 1, upgrade.STEPS_PER_STAGE do
+		total += Config.getDamageUpgradeCost((clamped - 1) * upgrade.STEPS_PER_STAGE + index) or 0
+	end
+	return total
 end
 
 -- อัตราปล่อยทหารของด่านนั้น (ตัว/วินาที)
@@ -1677,13 +1748,16 @@ end
 
 -- damage/HP ของหน่วย 1 ตัวตอนเข้ารบ = พลังพื้นฐาน × ตัวคูณตามด่าน
 -- ใช้ได้ทั้งแม่และลูก ส่ง weight ของตัวนั้นเข้ามา
+-- พลังจริงตอนเข้ารบ = พลังพื้นฐาน × ตัวคูณที่ซื้อไว้
+-- ⚠️ damageLevel เป็นของบัญชีผู้เล่น ไม่ใช่ของแม่รายตัว และคำนวณตอนเข้ารบทุกครั้ง
+-- ไม่เก็บตัวคูณติดไปกับกองลูก → ลูกที่สะสมไว้แต่ด่านต้นแรงขึ้นตามผู้เล่น ไม่มีกองตกยุค
 function Config.computeBattlePower(
 	weight: number,
 	charId: string?,
 	statuses: { string }?,
-	wallProgress: number
+	damageLevel: number
 ): number
-	return Config.computePower(weight, charId, statuses) * Config.getStageDamageMultiplier(wallProgress)
+	return Config.computePower(weight, charId, statuses) * Config.getArmyDamageMultiplier(damageLevel)
 end
 
 --------------------------------------------------------------------------------
@@ -1894,7 +1968,32 @@ function Config.getReferenceDps(stage: number): number
 		/ 60
 	local effectiveRate = math.min(producedPerSecond, Config.getReleaseRate(stage))
 
-	return effectiveRate * Config.computeBattlePower(Config.getChildWeight(weight), charId, nil, stage)
+	-- ⚠️ สมมติว่าผู้เล่นซื้อ upgrade ครบเพดานของด่านนั้นแล้ว
+	-- สมมติแบบนี้ได้อย่างซื่อสัตย์ เพราะเงินเป็น "รายได้ที่คาดเดาได้" ต่างจากคลาสที่เป็นการสุ่ม
+	-- และยามราคาข้างล่างบังคับอยู่แล้วว่าราคาต้องอยู่ในวิสัยที่จ่ายไหว
+	local damageLevel = Config.getMaxDamageLevel(stage)
+
+	return effectiveRate * Config.computeBattlePower(Config.getChildWeight(weight), charId, nil, damageLevel)
+end
+
+-- รายได้รวมที่ผู้เล่นอ้างอิงได้ "ตลอดการตีด่านนั้น"
+-- = (เงินจากคอก + เงินจากบอส) × เวลาตี + เงินจากการกวาดทหารทั้งด่าน
+-- ด่านที่ไม่มีกำแพง (ด่าน 1) ใช้รายได้ 1 ชั่วโมงแรกเป็นฐานแทน เพราะไม่มี "เวลาตี"
+function Config.getReferenceStageIncome(stage: number): number
+	local check = Config.BalanceCheck
+	local weight = check.REFERENCE_WEIGHT[stage]
+
+	local hours = Config.getReferenceClearHours(stage)
+	if hours <= 0 then
+		hours = 1
+	end
+
+	local penPerHour = Config.getPenCapacity(stage) * Config.getCoinsPerMinute(weight, stage) * 60
+	local bossPerHour = (3600 / Config.Boss.RESPAWN_SECONDS)
+		* Config.getBossKillReward(stage)
+		/ check.PLAYERS_PER_SERVER
+
+	return (penPerHour + bossPerHour) * hours + Config.getStageDefenderRewardTotal(stage)
 end
 
 -- ชั่วโมงที่ใช้ตีกำแพงด่านนั้นจนพัง (0 = ด่านที่ไม่มีกำแพง)
@@ -1991,7 +2090,7 @@ local function assertProgressionIsSane()
 		(lastGuarded :: number) >= (firstGuarded :: number),
 		`Config: ด่านที่มีกำแพงด่านสุดท้ายใช้เวลา {string.format("%.2f", lastGuarded :: number)} ชม. `
 			.. `น้อยกว่าด่านแรก {string.format("%.2f", firstGuarded :: number)} ชม. `
-			.. `— เกมง่ายลงเรื่อย ๆ แทนที่จะไต่ระดับ ตรวจ Config.Combat.STAGE_DAMAGE_BASE กับตารางอัตราปล่อย`
+			.. `— เกมง่ายลงเรื่อย ๆ แทนที่จะไต่ระดับ ตรวจ Config.DamageUpgrade กับตารางอัตราปล่อย`
 	)
 end
 
@@ -2493,7 +2592,6 @@ function Config.validate()
 	----------------------------------------------------------------------------
 	-- ตัวคูณ damage ตามด่าน
 	----------------------------------------------------------------------------
-	assert(Config.Combat.STAGE_DAMAGE_BASE > 0, "Config: STAGE_DAMAGE_BASE ต้องมากกว่า 0 (1 = ปิด)")
 
 	-- อัตราปล่อยทหาร
 	local combat = Config.Combat
@@ -2519,11 +2617,72 @@ function Config.validate()
 		combat.MOTHERS_SELECTABLE_FROM_PEN == false,
 		"Config: ห้ามให้เลือกแม่จากคอกลงสนาม — เลือกได้เฉพาะแม่ในกระเป๋า กันเผลอส่งเครื่องผลิตไปตาย"
 	)
-	-- ด่านแรกต้องไม่ได้ตัวคูณฟรี — ดักกรณีเผลอเขียน BASE^wallProgress แทน BASE^(wallProgress-1)
+	----------------------------------------------------------------------------
+	-- ตัวคูณ damage ที่ซื้อด้วยเงิน
+	----------------------------------------------------------------------------
+	local check = Config.BalanceCheck
+	local upgrade = Config.DamageUpgrade
+	assert(upgrade.STEP_MULTIPLIER > 1, "Config: STEP_MULTIPLIER ของ upgrade damage ต้องมากกว่า 1")
 	assert(
-		Config.getStageDamageMultiplier(1) == 1,
-		"Config: ตัวคูณ damage ของด่าน 1 ต้องเป็น 1 พอดี — น่าจะพลาด off-by-one ในสูตรยกกำลัง"
+		upgrade.STEPS_PER_STAGE >= 1 and upgrade.STEPS_PER_STAGE % 1 == 0,
+		"Config: STEPS_PER_STAGE ต้องเป็นจำนวนเต็มบวก"
 	)
+	assert(
+		upgrade.MAX_LEVEL == upgrade.STEPS_PER_STAGE * Config.Stage.COUNT,
+		`Config: MAX_LEVEL ({upgrade.MAX_LEVEL}) ต้องเท่ากับ STEPS_PER_STAGE × จำนวนด่าน `
+			.. `({upgrade.STEPS_PER_STAGE} × {Config.Stage.COUNT} = {upgrade.STEPS_PER_STAGE * Config.Stage.COUNT})`
+	)
+	assert(upgrade.COST_MULTIPLIER_IN_STAGE >= 1, "Config: COST_MULTIPLIER_IN_STAGE ต้องไม่น้อยกว่า 1")
+	assert(
+		#upgrade.STAGE_COST_BASE == Config.Stage.COUNT,
+		`Config: STAGE_COST_BASE มี {#upgrade.STAGE_COST_BASE} ด่าน แต่เกมมี {Config.Stage.COUNT} ด่าน`
+	)
+
+	-- ⚠️ off-by-one: ผู้เล่นใหม่ที่ด่าน 1 ต้องซื้อได้ทันที ไม่ใช่ตันตั้งแต่ต้นเกม
+	assert(
+		Config.getMaxDamageLevel(1) == upgrade.STEPS_PER_STAGE,
+		`Config: เพดาน upgrade ที่ด่าน 1 ต้องเป็น {upgrade.STEPS_PER_STAGE} ขั้น แต่ได้ {Config.getMaxDamageLevel(1)} `
+			.. `— น่าจะพลาด off-by-one (ใช้ wallProgress - 1 แทน wallProgress) ผู้เล่นใหม่จะซื้ออะไรไม่ได้เลย`
+	)
+	assert(
+		Config.getMaxDamageLevel(Config.Stage.COUNT) == upgrade.MAX_LEVEL,
+		"Config: เพดานที่ด่านสุดท้ายต้องพอดีกับ MAX_LEVEL"
+	)
+	assert(Config.getArmyDamageMultiplier(0) == 1, "Config: ยังไม่ซื้อ upgrade ต้องได้ตัวคูณ 1 พอดี")
+	assert(Config.getDamageUpgradeCost(0) == nil, "Config: ขั้น 0 ต้องไม่มีราคา")
+	assert(
+		Config.getDamageUpgradeCost(upgrade.MAX_LEVEL + 1) == nil,
+		"Config: ขั้นที่เกินเพดานต้องคืน nil ไม่ใช่ราคา"
+	)
+
+	-- ราคาต้องไล่ขึ้นตลอดทั้ง 72 ขั้น ไม่มีช่วงที่ถูกลง
+	local previousCost = 0
+	for level = 1, upgrade.MAX_LEVEL do
+		local cost = Config.getDamageUpgradeCost(level)
+		assert(cost ~= nil and (cost :: number) > 0, `Config: ขั้น {level} ไม่มีราคา`)
+		assert(
+			(cost :: number) >= previousCost,
+			`Config: ราคาขั้น {level} ({cost}) ถูกกว่าขั้นก่อนหน้า ({previousCost}) — ราคาต้องไล่ขึ้นตลอด`
+		)
+		previousCost = cost :: number
+	end
+
+	-- ⚠️ ยามที่เป็นหัวใจของรอบนี้: ราคาต้องดูดเงินส่วนเกินให้หมดจริง
+	-- ถูกเกินไป = เงินยังล้นเหมือนเดิม upgrade ไม่ได้เป็นบ่อเงินจริง
+	-- แพงเกินไป = ผู้เล่นซื้อไม่ไหว แล้วตันเพราะ damage ไม่พอ
+	for upgradeStage = 1, Config.Stage.COUNT do
+		local stageTotal = Config.getStageDamageUpgradeTotal(upgradeStage)
+		local stageIncome = Config.getReferenceStageIncome(upgradeStage)
+		assert(stageIncome > 0, `Config: คำนวณรายได้ของด่าน {upgradeStage} ได้ 0`)
+
+		local share = stageTotal / stageIncome
+		assert(
+			share >= check.MIN_UPGRADE_SHARE and share <= check.MAX_UPGRADE_SHARE,
+			`Config: ราคา upgrade damage ของด่าน {upgradeStage} คิดเป็น {string.format("%.0f", share * 100)}% ของรายได้ด่านนั้น `
+				.. `(ต้องอยู่ {check.MIN_UPGRADE_SHARE * 100}–{check.MAX_UPGRADE_SHARE * 100}%) `
+				.. `— ถูกไปเงินจะล้นเหมือนเดิม แพงไปผู้เล่นจะตัน ปรับ DamageUpgrade.STAGE_COST_BASE[{upgradeStage}]`
+		)
+	end
 
 	assert(
 		#Config.BalanceCheck.REFERENCE_WEIGHT == Config.Stage.COUNT

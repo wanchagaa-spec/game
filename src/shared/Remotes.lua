@@ -17,7 +17,8 @@ local NAMES = Config.RemoteNames
 
 -- รายชื่อ RemoteEvent ทั้งหมดที่ server ต้องสร้างตอนบูต
 local EVENT_NAMES: { string } = {
-	NAMES.PLACE_EGG_REQUEST,
+	NAMES.PLACE_EGG_IN_HATCHERY_REQUEST,
+	NAMES.MOVE_MOTHER_REQUEST,
 	NAMES.EGG_HATCHED,
 	NAMES.FARM_STATE_SYNC,
 }

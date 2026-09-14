@@ -32,13 +32,6 @@ export type UnitType = {
 	enabled: boolean, -- false = เลิกใช้แล้ว แต่ยัง lookup ได้ (ห้ามลบทิ้ง ดู docs/data-schema.md)
 }
 
--- หนึ่งแถวในตารางสุ่มของไข่: ทหารตัวไหน น้ำหนักเท่าไหร่
--- โอกาสออก = weight ของตัวนั้น ÷ ผลรวม weight ทั้งตาราง
-export type HatchEntry = {
-	unitId: string,
-	weight: number,
-}
-
 export type EggType = {
 	id: string, -- คีย์อ้างอิง (ห้ามเปลี่ยนพร่ำเพรื่อ)
 	name: string, -- ชื่อไทยสำหรับโชว์ใน UI
@@ -58,7 +51,6 @@ export type EggType = {
 	guaranteedTier: number?,
 	-- ⚠️ Color3 เซฟลง DataStore ไม่ได้ ห้ามให้ค่านี้หลุดเข้าไปใน PlayerData
 	color: Color3, -- สีของก้อนไข่ตอนวางในฟาร์ม (ชั่วคราว ไว้ดูด้วยตาตอนเทสต์)
-	hatchTable: { HatchEntry }, -- ตารางน้ำหนักการสุ่มว่าฟักแล้วออกทหารตัวไหน
 	enabled: boolean, -- false = ไม่ให้สุ่ม/ซื้อได้อีก แต่ของเก่าที่ผู้เล่นถืออยู่ยังอ่านได้
 }
 
@@ -150,24 +142,25 @@ export type DamageFormula = {
 -- ค่าตั้งของฟาร์ม
 --------------------------------------------------------------------------------
 
-Config.Farm = {
-	-- จำนวน plot สูงสุดในเซิร์ฟเวอร์ = จำนวนผู้เล่นสูงสุดที่มีฟาร์มได้พร้อมกัน
-	MAX_PLOTS = 6,
+-- ⚠️ เปลี่ยนชื่อจาก Config.Farm ตอน Phase 1.5 — ดีไซน์ใหม่เรียกพื้นที่ของผู้เล่นว่า "คอก"
+-- ตรงนี้เก็บเฉพาะ "รูปทรงของโลก" ส่วนความจุคอกอยู่ที่ Config.Pen (ตามเลเวล)
+Config.World = {
+	-- จำนวนคอกสูงสุดในเซิร์ฟเวอร์ = จำนวนผู้เล่นสูงสุดที่มีคอกได้พร้อมกัน
+	-- ⚠️ ต้องเท่ากับ BalanceCheck.PLAYERS_PER_SERVER เสมอ (validate() บังคับ)
+	-- เคยตั้งไม่ตรงกัน (6 กับ 7) ซึ่งทำให้โมเดลสมดุลกับโลกจริงไม่ตรงกัน
+	MAX_PENS = 7,
 
-	-- จำนวนช่องวางไข่ต่อผู้เล่น 1 คน
-	EGG_SLOTS_PER_PLAYER = 4,
-
-	-- ขนาดพื้น plot และระยะห่างระหว่าง plot (studs)
-	PLOT_SIZE = Vector3.new(32, 1, 32),
-	PLOT_SPACING = 40,
-	PLOT_ORIGIN = Vector3.new(0, 0, 0),
+	-- ขนาดพื้นคอกและระยะห่างระหว่างคอก (studs)
+	PEN_SIZE = Vector3.new(48, 1, 40),
+	PEN_SPACING = 56,
+	PEN_ORIGIN = Vector3.new(0, 0, 0),
 
 	-- ทุกกี่วินาที server จะเช็คไข่ที่ครบเวลา แล้ว sync สถานะกลับไปหา client
 	-- ค่านี้เป็นความละเอียดของตัวจับเวลาด้วย (1 = คลาดเคลื่อนได้ไม่เกิน 1 วินาที)
 	SYNC_INTERVAL = 1,
 
-	-- กันผู้เล่นสแปมกดวางไข่ (วินาที) — ด่านแรกของการกัน exploit
-	PLACE_EGG_COOLDOWN = 0.25,
+	-- กันผู้เล่นสแปมคำขอ (วินาที) — ด่านแรกของการกัน exploit
+	REQUEST_COOLDOWN = 0.25,
 }
 
 --------------------------------------------------------------------------------
@@ -195,10 +188,23 @@ Config.Farm = {
 --     }
 --     ส่งทุก SYNC_INTERVAL วินาที และส่งทันทีเมื่อสถานะเปลี่ยน
 
+-- ⚠️ โครงหลัก: ชื่อและ signature ที่ client-server ตกลงกัน
+-- เปลี่ยนแล้วต้องแก้ทั้งสองฝั่งพร้อมกันเสมอ
 Config.RemoteNames = {
 	FOLDER = "Remotes", -- Folder ใน ReplicatedStorage ที่เก็บ RemoteEvent ทั้งหมด
-	PLACE_EGG_REQUEST = "PlaceEggRequest",
+
+	-- client → server : FireServer(heldIndex, slotIndex?)
+	-- ⚠️ ส่ง "ตำแหน่งไข่ใน heldEggs" ไม่ใช่ชนิดไข่
+	-- เพราะไข่ชนิดเดียวกันน้ำหนักต่างกันได้ ระบุด้วยชนิดไม่ได้อีกแล้ว
+	PLACE_EGG_IN_HATCHERY_REQUEST = "PlaceEggInHatcheryRequest",
+
+	-- client → server : FireServer(uid, "pen" | "bag")
+	MOVE_MOTHER_REQUEST = "MoveMotherRequest",
+
+	-- server → client : { slotIndex, eggId, charId, charName, class, weight, placedIn }
 	EGG_HATCHED = "EggHatched",
+
+	-- server → client : { heldEggs, hatching, mothersInPen, mothersInBag, penCapacity, ... }
 	FARM_STATE_SYNC = "FarmStateSync",
 }
 
@@ -524,8 +530,8 @@ Config.NewPlayer = {
 --------------------------------------------------------------------------------
 -- ลำดับความหายาก
 --------------------------------------------------------------------------------
--- type Rarity เป็น union ซึ่ง iterate ไม่ได้ ตัวนี้คือ list เรียงจากธรรมดา → หายากสุด
--- ใช้ตอนเรียง UI คลัง และตอนทำสถิติแยกตามความหายาก
+-- ⚠️ เลิกใช้แล้วตอน Phase 1.5 — ระบบจริงใช้คลาส SS/S/A/B/C (Config.CharacterClasses)
+-- เก็บไว้เพราะ UnitTypes ที่ปิดไปยังอ้างถึงอยู่ ห้ามลบตามกฎ id
 
 local Rarities: { Rarity } = { "Common", "Rare", "Epic", "Legendary" }
 
@@ -1095,10 +1101,13 @@ Config.Weapon = {
 --------------------------------------------------------------------------------
 -- ตัวเลข hp/damage/speed ยังไม่ได้ balance จริง ใช้เป็นตุ๊กตาไปก่อนจนถึง Phase 3
 
+-- ⚠️ ตกค้างจากกลไกเก่า "ฟักไข่ → ได้ทหาร" ซึ่งถูกแทนที่ด้วย Config.Characters แล้ว
+-- **ปิดทั้งหมดตอน Phase 1.5 แต่ห้ามลบ** — unitId เคยอยู่ในข้อมูลที่เซฟไปแล้ว
+-- (กฎ id ใน CLAUDE.md: เลิกใช้ให้ตั้ง enabled = false แทนการลบ)
 local UnitTypes: { [string]: UnitType } = {
 	recruit = {
 		id = "recruit",
-		enabled = true,
+		enabled = false,
 		name = "พลทหารฝึกหัด",
 		rarity = "Common",
 		hp = 100,
@@ -1107,7 +1116,7 @@ local UnitTypes: { [string]: UnitType } = {
 	},
 	spearman = {
 		id = "spearman",
-		enabled = true,
+		enabled = false,
 		name = "พลหอก",
 		rarity = "Common",
 		hp = 140,
@@ -1116,7 +1125,7 @@ local UnitTypes: { [string]: UnitType } = {
 	},
 	archer = {
 		id = "archer",
-		enabled = true,
+		enabled = false,
 		name = "พลธนู",
 		rarity = "Rare",
 		hp = 110,
@@ -1125,7 +1134,7 @@ local UnitTypes: { [string]: UnitType } = {
 	},
 	knight = {
 		id = "knight",
-		enabled = true,
+		enabled = false,
 		name = "อัศวิน",
 		rarity = "Rare",
 		hp = 260,
@@ -1134,7 +1143,7 @@ local UnitTypes: { [string]: UnitType } = {
 	},
 	mage = {
 		id = "mage",
-		enabled = true,
+		enabled = false,
 		name = "จอมเวท",
 		rarity = "Epic",
 		hp = 180,
@@ -1143,7 +1152,7 @@ local UnitTypes: { [string]: UnitType } = {
 	},
 	dragon_rider = {
 		id = "dragon_rider",
-		enabled = true,
+		enabled = false,
 		name = "ผู้ขี่มังกร",
 		rarity = "Legendary",
 		hp = 420,
@@ -1171,12 +1180,6 @@ local EggTypes: { [string]: EggType } = {
 		source = "boss",
 		hatchTime = 30,
 		color = Color3.fromRGB(235, 235, 225),
-		hatchTable = {
-			{ unitId = "recruit", weight = 55 }, -- 55%
-			{ unitId = "spearman", weight = 30 }, -- 30%
-			{ unitId = "archer", weight = 12 }, -- 12%
-			{ unitId = "knight", weight = 3 }, -- 3%
-		},
 	},
 	egg_rare = {
 		id = "egg_rare",
@@ -1186,13 +1189,6 @@ local EggTypes: { [string]: EggType } = {
 		source = "boss",
 		hatchTime = 120,
 		color = Color3.fromRGB(90, 160, 235),
-		hatchTable = {
-			{ unitId = "spearman", weight = 30 },
-			{ unitId = "archer", weight = 35 },
-			{ unitId = "knight", weight = 25 },
-			{ unitId = "mage", weight = 9 },
-			{ unitId = "dragon_rider", weight = 1 },
-		},
 	},
 	egg_stage1 = {
 		id = "egg_stage1",
@@ -1203,11 +1199,6 @@ local EggTypes: { [string]: EggType } = {
 		stage = 1,
 		hatchTime = 30,
 		color = Color3.fromRGB(235, 235, 225),
-		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
-		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
-		hatchTable = {
-			{ unitId = "recruit", weight = 100 },
-		},
 	},
 	egg_stage2 = {
 		id = "egg_stage2",
@@ -1218,11 +1209,6 @@ local EggTypes: { [string]: EggType } = {
 		stage = 2,
 		hatchTime = 60,
 		color = Color3.fromRGB(200, 225, 235),
-		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
-		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
-		hatchTable = {
-			{ unitId = "recruit", weight = 100 },
-		},
 	},
 	egg_stage3 = {
 		id = "egg_stage3",
@@ -1233,11 +1219,6 @@ local EggTypes: { [string]: EggType } = {
 		stage = 3,
 		hatchTime = 90,
 		color = Color3.fromRGB(150, 200, 235),
-		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
-		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
-		hatchTable = {
-			{ unitId = "spearman", weight = 100 },
-		},
 	},
 	egg_stage4 = {
 		id = "egg_stage4",
@@ -1248,11 +1229,6 @@ local EggTypes: { [string]: EggType } = {
 		stage = 4,
 		hatchTime = 120,
 		color = Color3.fromRGB(120, 215, 180),
-		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
-		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
-		hatchTable = {
-			{ unitId = "spearman", weight = 100 },
-		},
 	},
 	egg_stage5 = {
 		id = "egg_stage5",
@@ -1263,11 +1239,6 @@ local EggTypes: { [string]: EggType } = {
 		stage = 5,
 		hatchTime = 150,
 		color = Color3.fromRGB(150, 220, 120),
-		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
-		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
-		hatchTable = {
-			{ unitId = "archer", weight = 100 },
-		},
 	},
 	egg_stage6 = {
 		id = "egg_stage6",
@@ -1278,11 +1249,6 @@ local EggTypes: { [string]: EggType } = {
 		stage = 6,
 		hatchTime = 180,
 		color = Color3.fromRGB(235, 215, 110),
-		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
-		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
-		hatchTable = {
-			{ unitId = "archer", weight = 100 },
-		},
 	},
 	egg_stage7 = {
 		id = "egg_stage7",
@@ -1293,11 +1259,6 @@ local EggTypes: { [string]: EggType } = {
 		stage = 7,
 		hatchTime = 210,
 		color = Color3.fromRGB(240, 170, 80),
-		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
-		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
-		hatchTable = {
-			{ unitId = "knight", weight = 100 },
-		},
 	},
 	egg_stage8 = {
 		id = "egg_stage8",
@@ -1308,11 +1269,6 @@ local EggTypes: { [string]: EggType } = {
 		stage = 8,
 		hatchTime = 240,
 		color = Color3.fromRGB(230, 110, 90),
-		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
-		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
-		hatchTable = {
-			{ unitId = "mage", weight = 100 },
-		},
 	},
 	egg_stage9 = {
 		id = "egg_stage9",
@@ -1323,11 +1279,6 @@ local EggTypes: { [string]: EggType } = {
 		stage = 9,
 		hatchTime = 270,
 		color = Color3.fromRGB(190, 110, 235),
-		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
-		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
-		hatchTable = {
-			{ unitId = "dragon_rider", weight = 100 },
-		},
 	},
 	egg_legendary = {
 		id = "egg_legendary",
@@ -1338,11 +1289,6 @@ local EggTypes: { [string]: EggType } = {
 		stage = nil, -- ไม่ผูกด่าน — ใช้ด่านที่ผู้ซื้ออยู่ตอนกด
 		hatchTime = 300,
 		color = Color3.fromRGB(240, 185, 60),
-		hatchTable = {
-			{ unitId = "knight", weight = 30 },
-			{ unitId = "mage", weight = 45 },
-			{ unitId = "dragon_rider", weight = 25 },
-		},
 	},
 }
 
@@ -2200,18 +2146,6 @@ function Config.validate()
 	for eggId, egg in EggTypes do
 		assert(egg.id == eggId, `Config: EggTypes["{eggId}"].id ไม่ตรงกับคีย์ ({egg.id})`)
 		assert(egg.hatchTime > 0, `Config: ไข่ "{eggId}" มี hatchTime <= 0`)
-		assert(#egg.hatchTable > 0, `Config: ไข่ "{eggId}" ไม่มีตารางสุ่ม`)
-
-		local total = 0
-		for _, entry in egg.hatchTable do
-			assert(
-				UnitTypes[entry.unitId] ~= nil,
-				`Config: ไข่ "{eggId}" อ้างถึงทหาร "{entry.unitId}" ที่ไม่มีใน UnitTypes`
-			)
-			assert(entry.weight > 0, `Config: ไข่ "{eggId}" → "{entry.unitId}" มี weight <= 0`)
-			total += entry.weight
-		end
-		assert(total > 0, `Config: ไข่ "{eggId}" มีผลรวม weight เป็น 0`)
 	end
 
 	for unitId, unit in UnitTypes do
@@ -2220,8 +2154,16 @@ function Config.validate()
 	end
 
 	assert(EggTypes[Config.DEFAULT_EGG_ID] ~= nil, "Config: DEFAULT_EGG_ID ชี้ไปที่ไข่ที่ไม่มีอยู่")
-	assert(Config.Farm.MAX_PLOTS > 0, "Config: MAX_PLOTS ต้องมากกว่า 0")
-	assert(Config.Farm.EGG_SLOTS_PER_PLAYER > 0, "Config: EGG_SLOTS_PER_PLAYER ต้องมากกว่า 0")
+	assert(Config.World.MAX_PENS > 0, "Config: MAX_PENS ต้องมากกว่า 0")
+	-- ⚠️ เคยตั้งไม่ตรงกัน (คอก 6 ช่อง แต่โมเดลสมดุลคิดที่ 7 คน)
+	-- ทำให้อัตราได้ไข่ที่ยามใช้คำนวณไม่ตรงกับเกมจริง
+	assert(
+		Config.World.MAX_PENS == Config.BalanceCheck.PLAYERS_PER_SERVER,
+		`Config: จำนวนคอก ({Config.World.MAX_PENS}) ไม่ตรงกับ PLAYERS_PER_SERVER `
+			.. `({Config.BalanceCheck.PLAYERS_PER_SERVER}) — อัตราได้ไข่ที่ยามคำนวณจะเพี้ยน`
+	)
+	assert(Config.World.SYNC_INTERVAL > 0, "Config: SYNC_INTERVAL ต้องมากกว่า 0")
+	assert(Config.World.REQUEST_COOLDOWN >= 0, "Config: REQUEST_COOLDOWN ติดลบไม่ได้")
 
 	----------------------------------------------------------------------------
 	-- ตาราง tier น้ำหนัก

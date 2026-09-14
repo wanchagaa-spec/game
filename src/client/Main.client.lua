@@ -16,6 +16,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local WallRenderer = require(script.Parent.WallRenderer)
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -230,4 +231,9 @@ eggHatched.OnClientEvent:Connect(function(payload)
 	print(`[Client] ฟักได้ {payload.charName} คลาส {payload.class} น้ำหนัก {payload.weightText}`)
 end)
 
-print("[egg-army-game] client พร้อมแล้ว (Phase 1.5)")
+-- ⚠️ กำแพงวาดฝั่งนี้เท่านั้น — แต่ละคนพังคนละด่านแต่ยืนบนเลนเดียวกัน
+-- (เหตุผลเต็มอยู่ใน src/client/WallRenderer.lua และ docs/map-layout.md)
+WallRenderer.start()
+
+print(`[egg-army-game] client พร้อมแล้ว · wallProgress ทดสอบ = {WallRenderer.getWallProgress()}`)
+print("   เปลี่ยนด่านที่พังแล้วเพื่อทดสอบ: WallRenderer.setWallProgress(n)")

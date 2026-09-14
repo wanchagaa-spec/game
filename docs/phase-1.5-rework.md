@@ -142,7 +142,7 @@ UI จริง (สองแถบแม่/ลูก + กล่องยื�
 | `EggType.hatchTable` | **ตกยุค** — แทนที่ด้วย `Config.EggCharacterPools` | ✅ ถอดฟิลด์ `hatchTable` และ type `HatchEntry` ออกจาก Config หมดแล้ว (ไม่มีใครอ่านแล้ว) |
 | `Config.Rarities` (Common/Rare/Epic/Legendary) | **ตกยุค** — คลาสใหม่คือ SS/S/A/B/C | ✅ ทำเครื่องหมาย deprecated ไว้ในไฟล์แล้ว ไม่มีโค้ดไหนอ่าน |
 | `Config.Farm.EGG_SLOTS_PER_PLAYER` = 4 | **ตกยุค** — สวนฟักคือ `Config.Hatchery.MAX_SLOTS` = 50 | ✅ ลบทิ้งแล้ว · ภายหลังแยกเป็น `MAX_SLOTS` (ช่องฟัก) กับ `BAG_CAPACITY` (กระเป๋าไข่) |
-| `Config.Farm.MAX_PLOTS` = **6** | ⚠️ **ไม่ตรงกับดีไซน์** — ดีไซน์บอก 7 คนต่อเซิร์ฟเวอร์ (`BalanceCheck.PLAYERS_PER_SERVER` = 7) | ✅ กลายเป็น `Config.World.MAX_PENS` = 7 และ `validate()` บังคับให้เท่ากับ `PLAYERS_PER_SERVER` ตลอดไป |
+| `Config.Farm.MAX_PLOTS` = **6** | ⚠️ **ไม่ตรงกับดีไซน์ตอนนั้น** — ดีไซน์บอก 7 คนต่อเซิร์ฟเวอร์ | ✅ กลายเป็น `Config.World.MAX_PENS` และ `validate()` บังคับให้เท่ากับ `PLAYERS_PER_SERVER` ตลอดไป · **ภายหลังตกลงกลับมาที่ 6 ทั้งคู่** ตอนวางผังแมพ (คอก 6 แปลง) |
 | `Config.Farm.PLOT_SIZE` / `PLOT_SPACING` / `PLOT_ORIGIN` | **ยังใช้ได้** แต่ควรเปลี่ยนชื่อเป็น Pen | ✅ `Config.Farm` → `Config.World` · `PEN_SIZE` / `PEN_SPACING` / `PEN_ORIGIN` |
 | `Config.DEFAULT_EGG_ID` | **ยังใช้ได้** ความหมายเปลี่ยน — เดิมคือ "ไข่ที่ปุ่มทดสอบใช้" | ✅ ชี้ที่ `egg_stage1` ใช้เป็นไข่เริ่มต้นของผู้เล่นใหม่ |
 | `Config.NewPlayer.startingEggs` | **ยังใช้ได้** แต่เป็นแค่ "คำสั่งแจก" | ✅ `onPlayerAdded` วนเรียก `grantEgg()` ทีละฟอง แต่ละฟองจึงสุ่มน้ำหนักของตัวเอง |

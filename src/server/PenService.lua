@@ -9,7 +9,7 @@
 --
 -- คอก 1 ช่องประกอบด้วย:
 --   - ที่วาง **แม่** ตาม Config.getPenCapacity(penLevel) — ความจุโตตามเลเวล
---   - **สวนฟัก** Config.Hatchery.MAX_EGGS ช่อง (แยกจากที่วางแม่)
+--   - **สวนฟัก** Config.Hatchery.MAX_SLOTS ช่อง (แยกจากที่วางแม่)
 --
 -- Phase 1.5: ยังเป็นแค่แผ่นพื้นกับแท่น ยังไม่มีของตกแต่ง (Phase 5 ค่อย polish)
 -- ตัวโลกทั้งหมดสร้างด้วยโค้ด เพราะ place ที่ build จาก Rojo ไม่มี Baseplate มาให้
@@ -26,14 +26,15 @@ export type Pen = {
 	model: Model, -- Model ที่รวมทุกอย่างของคอกนี้
 	base: Part, -- แผ่นพื้น
 	motherStands: { Part }, -- ที่วางแม่ เรียงตามลำดับในคอก (สร้างไว้เท่าความจุสูงสุด)
-	hatchPads: { Part }, -- แท่นฟักไข่ เรียงตาม slotIndex 1..MAX_EGGS
+	hatchPads: { Part }, -- แท่นฟักไข่ เรียงตาม slotIndex 1..MAX_SLOTS
 	label: TextLabel, -- ป้ายบอกเจ้าของ (ไว้ดูตอนเทสต์)
 	ownerUserId: number?, -- nil = ว่าง
 }
 
 local WORLD = Config.World
 local MAX_PEN_CAPACITY = Config.getPenCapacity(Config.Pen.MAX_LEVEL)
-local HATCHERY_SLOTS = Config.Hatchery.MAX_EGGS
+-- แท่นฟักเท่านั้น — กระเป๋าไข่ (BAG_CAPACITY) ไม่มีของให้วางในโลก
+local HATCHERY_SLOTS = Config.Hatchery.MAX_SLOTS
 
 local pens: { Pen } = {}
 local penByUserId: { [number]: Pen } = {}

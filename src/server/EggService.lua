@@ -32,7 +32,12 @@ local PenService = require(ServerScriptService.PenService)
 local EggService = {}
 
 local WORLD = Config.World
-local HATCHERY_SLOTS = Config.Hatchery.MAX_EGGS
+-- ⚠️ สองค่านี้แยกกันแล้ว (บังเอิญเท่ากันที่ 50 ไม่ใช่เพราะต้องเท่า)
+-- BAG_SLOTS   = ความยาวของ state.heldEggs — ไข่ที่ถือไว้ ยังไม่เข้าสวน
+-- HATCH_SLOTS = ความยาวของ state.hatching — ไข่ที่กำลังฟัก
+-- ใช้สลับกันเมื่อไหร่ = index หลุดขอบอาเรย์ทันทีที่ปรับค่าใดค่าหนึ่ง
+local BAG_SLOTS = Config.Hatchery.BAG_CAPACITY
+local HATCH_SLOTS = Config.Hatchery.MAX_SLOTS
 
 -- ไข่ 1 ฟองที่ถืออยู่ (ยังไม่เข้าสวนฟัก)
 -- ⚠️ มีน้ำหนักของตัวเองตั้งแต่วินาทีที่เกิด
@@ -153,7 +158,7 @@ function EggService.grantEgg(player: Player, eggId: string): (boolean, string?)
 		return false, `สร้างไข่ "{eggId}" ไม่ได้ (ไม่มีอยู่ หรือถูกปิดไปแล้ว)`
 	end
 
-	local slot = findFreeSlot(state.heldEggs, HATCHERY_SLOTS)
+	local slot = findFreeSlot(state.heldEggs, BAG_SLOTS)
 	if not slot then
 		return false, "ถือไข่เต็มแล้ว"
 	end
@@ -185,8 +190,8 @@ end
 local function buildSyncPayload(state: PlayerState)
 	local now = os.time()
 
-	local held: { EggView } = table.create(HATCHERY_SLOTS)
-	for index = 1, HATCHERY_SLOTS do
+	local held: { EggView } = table.create(BAG_SLOTS)
+	for index = 1, BAG_SLOTS do
 		local egg = state.heldEggs[index]
 		-- ⚠️ ใช้ type() ไม่ใช่ `~= false` — Luau ขยาย `X | false` เป็น `X | boolean`
 		-- ทำให้เทียบกับ false แล้วไม่แคบลง แต่ type() แคบลงได้เสมอ
@@ -204,8 +209,8 @@ local function buildSyncPayload(state: PlayerState)
 		end
 	end
 
-	local hatching: { EggView } = table.create(HATCHERY_SLOTS)
-	for index = 1, HATCHERY_SLOTS do
+	local hatching: { EggView } = table.create(HATCH_SLOTS)
+	for index = 1, HATCH_SLOTS do
 		local slot = state.hatching[index]
 		if type(slot) == "table" then
 			local eggType = Config.getEgg(slot.eggId)
@@ -235,10 +240,11 @@ local function buildSyncPayload(state: PlayerState)
 
 	return {
 		heldEggs = held,
-		heldCount = countFilled(state.heldEggs, HATCHERY_SLOTS),
+		heldCount = countFilled(state.heldEggs, BAG_SLOTS),
+		bagSize = BAG_SLOTS,
 		hatching = hatching,
-		hatchingCount = countFilled(state.hatching, HATCHERY_SLOTS),
-		hatcherySize = HATCHERY_SLOTS,
+		hatchingCount = countFilled(state.hatching, HATCH_SLOTS),
+		hatcherySize = HATCH_SLOTS,
 		mothersInPen = pen,
 		mothersInBag = bag,
 		penCapacity = Config.getPenCapacity(state.penLevel),
@@ -348,7 +354,7 @@ function EggService.placeEgg(player: Player, rawHeldIndex: unknown, rawSlotIndex
 	if type(rawHeldIndex) ~= "number" then
 		return false, "heldIndex ไม่ใช่ number"
 	end
-	if rawHeldIndex % 1 ~= 0 or rawHeldIndex < 1 or rawHeldIndex > HATCHERY_SLOTS then
+	if rawHeldIndex % 1 ~= 0 or rawHeldIndex < 1 or rawHeldIndex > BAG_SLOTS then
 		return false, "heldIndex อยู่นอกช่วงที่อนุญาต"
 	end
 	local heldEgg = state.heldEggs[rawHeldIndex]
@@ -369,7 +375,7 @@ function EggService.placeEgg(player: Player, rawHeldIndex: unknown, rawSlotIndex
 	-- 4) slotIndex ส่งมาหรือไม่ส่งก็ได้ ถ้าไม่ส่ง server เลือกช่องว่างช่องแรกให้
 	local slotIndex: number
 	if rawSlotIndex == nil then
-		local free = findFreeSlot(state.hatching, HATCHERY_SLOTS)
+		local free = findFreeSlot(state.hatching, HATCH_SLOTS)
 		if not free then
 			return false, "สวนฟักเต็มแล้ว"
 		end
@@ -378,7 +384,7 @@ function EggService.placeEgg(player: Player, rawHeldIndex: unknown, rawSlotIndex
 		if type(rawSlotIndex) ~= "number" then
 			return false, "slotIndex ไม่ใช่ number"
 		end
-		if rawSlotIndex % 1 ~= 0 or rawSlotIndex < 1 or rawSlotIndex > HATCHERY_SLOTS then
+		if rawSlotIndex % 1 ~= 0 or rawSlotIndex < 1 or rawSlotIndex > HATCH_SLOTS then
 			return false, "slotIndex อยู่นอกช่วงที่อนุญาต"
 		end
 		if state.hatching[rawSlotIndex] ~= false then
@@ -464,10 +470,14 @@ end
 function EggService.onPlayerAdded(player: Player)
 	-- ⚠️ อาเรย์ยาวคงที่ ช่องว่างใช้ false ห้ามใช้ nil
 	-- (Phase 2 จะเซฟลง DataStore ซึ่งอ่านอาเรย์ที่มีรูกลับมาไม่ได้ — data-schema §9.3)
+	-- ⚠️ สองอาเรย์นี้ยาวไม่เท่ากันก็ได้ จึงวนแยกกัน ห้ามยุบเป็นลูปเดียว
 	local heldEggs: { HeldEgg | false } = {}
-	local hatching: { HatchSlot | false } = {}
-	for index = 1, HATCHERY_SLOTS do
+	for index = 1, BAG_SLOTS do
 		heldEggs[index] = false
+	end
+
+	local hatching: { HatchSlot | false } = {}
+	for index = 1, HATCH_SLOTS do
 		hatching[index] = false
 	end
 
@@ -541,7 +551,7 @@ function EggService.start()
 			for _, player in Players:GetPlayers() do
 				local state = states[player.UserId]
 				if state then
-					for slotIndex = 1, HATCHERY_SLOTS do
+					for slotIndex = 1, HATCH_SLOTS do
 						local slot = state.hatching[slotIndex]
 						if type(slot) == "table" and now >= slot.hatchAt then
 							hatch(player, slotIndex, slot)

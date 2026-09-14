@@ -158,7 +158,8 @@ farmStateSync.OnClientEvent:Connect(function(payload)
 	-- ⚠️ จุดที่ดูออกว่ากฎ "น้ำหนักมาก่อน" ทำงานถูก: ไข่โชว์น้ำหนักตั้งแต่ยังไม่ฟัก
 	firstHeldIndex = nil
 	local heldLines = {}
-	for index = 1, payload.hatcherySize do
+	-- ⚠️ กระเป๋าไข่กับสวนฟักยาวไม่เท่ากันได้แล้ว ใช้ขนาดของใครของมัน
+	for index = 1, payload.bagSize do
 		local egg = payload.heldEggs[index]
 		if egg and egg.occupied then
 			if not firstHeldIndex then
@@ -170,10 +171,10 @@ farmStateSync.OnClientEvent:Connect(function(payload)
 		end
 	end
 	if #heldLines == 0 then
-		heldLabel.Text = `ไข่ในกระเป๋า: ไม่มี\n  (แจกด้วยคำสั่ง server: EggService.grantEgg)`
+		heldLabel.Text = `ไข่ในกระเป๋า: ไม่มี (0/{payload.bagSize})\n  (แจกด้วยคำสั่ง server: EggService.grantEgg)`
 	else
 		local more = payload.heldCount - #heldLines
-		heldLabel.Text = `ไข่ในกระเป๋า: {payload.heldCount} ฟอง\n`
+		heldLabel.Text = `ไข่ในกระเป๋า: {payload.heldCount}/{payload.bagSize} ฟอง\n`
 			.. table.concat(heldLines, "\n")
 			.. (if more > 0 then `\n  ...อีก {more} ฟอง` else "")
 	end

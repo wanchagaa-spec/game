@@ -56,7 +56,7 @@ Phase 1 เขียนตามกลไกเก่า ซึ่งต่า�
 | `state.units` เป็น array เดียว | `state.mothersInPen` + `state.mothersInBag` แยกสองอาเรย์ | โค้ด settle การผลิตต้องวนเฉพาะแม่ในคอก แยกโครงไว้ทำให้ลืมกรองไม่ได้ |
 | `state.nextUid` เริ่มที่ 1 ต่อผู้เล่น | ยังเป็นตัวนับต่อผู้เล่น แต่ uid เต็ม = `Config.makeUid(player.UserId, nextUid)` | รองรับการเทรดแม่ |
 | **`os.clock()`** (บรรทัด 124, 219, 330 และใน `EggSlot.hatchAt`) | **`os.time()`** | `os.clock()` รีเซ็ตทุกครั้งที่เซิร์ฟเวอร์ใหม่ เซฟลง DataStore ไม่ได้ |
-| `EggSlot` 4 ช่องตาม `Config.Farm.EGG_SLOTS_PER_PLAYER` | สวนฟัก `Config.Hatchery.MAX_EGGS` = 50 ช่อง | ดีไซน์ใหม่ |
+| `EggSlot` 4 ช่องตาม `Config.Farm.EGG_SLOTS_PER_PLAYER` | สวนฟัก `Config.Hatchery.MAX_SLOTS` = 50 ช่อง | ดีไซน์ใหม่ |
 | `placeEgg(player, eggId, slotIndex)` — client ส่ง **ชนิดไข่** มา | `placeEgg(player, heldIndex, slotIndex?)` — client ส่ง **ตำแหน่งไข่ใน `heldEggs`** | ไข่ชนิดเดียวกันน้ำหนักต่างกัน ระบุด้วยชนิดไม่ได้ · และของเดิมขอไข่ชนิดไหนก็ได้ฟรี = ช่องโหว่ |
 | `getUnits()` | `getMothersInPen()` / `getMothersInBag()` | ชื่อเดิมสื่อผิดแล้ว |
 | `hatch()` ยิง `EggHatched` ด้วย `{ unitId, unitName, rarity }` | `{ charId, charName, class, weight, placedIn }` | payload เปลี่ยน — ดู §4 |
@@ -141,7 +141,7 @@ UI จริง (สองแถบแม่/ลูก + กล่องยื�
 | `Config.UnitTypes` (recruit/spearman/archer/knight/mage/dragon_rider) | **ตกยุค** — แทนที่ด้วย `Config.Characters` | ✅ ตั้ง `enabled = false` ครบทุกตัวแล้ว **ไม่ได้ลบ** (กฎ CLAUDE.md: id ที่เคยเซฟไปแล้วห้ามลบ) |
 | `EggType.hatchTable` | **ตกยุค** — แทนที่ด้วย `Config.EggCharacterPools` | ✅ ถอดฟิลด์ `hatchTable` และ type `HatchEntry` ออกจาก Config หมดแล้ว (ไม่มีใครอ่านแล้ว) |
 | `Config.Rarities` (Common/Rare/Epic/Legendary) | **ตกยุค** — คลาสใหม่คือ SS/S/A/B/C | ✅ ทำเครื่องหมาย deprecated ไว้ในไฟล์แล้ว ไม่มีโค้ดไหนอ่าน |
-| `Config.Farm.EGG_SLOTS_PER_PLAYER` = 4 | **ตกยุค** — สวนฟักคือ `Config.Hatchery.MAX_EGGS` = 50 | ✅ ลบทิ้งแล้ว EggService ใช้ `Config.Hatchery.MAX_EGGS` |
+| `Config.Farm.EGG_SLOTS_PER_PLAYER` = 4 | **ตกยุค** — สวนฟักคือ `Config.Hatchery.MAX_SLOTS` = 50 | ✅ ลบทิ้งแล้ว · ภายหลังแยกเป็น `MAX_SLOTS` (ช่องฟัก) กับ `BAG_CAPACITY` (กระเป๋าไข่) |
 | `Config.Farm.MAX_PLOTS` = **6** | ⚠️ **ไม่ตรงกับดีไซน์** — ดีไซน์บอก 7 คนต่อเซิร์ฟเวอร์ (`BalanceCheck.PLAYERS_PER_SERVER` = 7) | ✅ กลายเป็น `Config.World.MAX_PENS` = 7 และ `validate()` บังคับให้เท่ากับ `PLAYERS_PER_SERVER` ตลอดไป |
 | `Config.Farm.PLOT_SIZE` / `PLOT_SPACING` / `PLOT_ORIGIN` | **ยังใช้ได้** แต่ควรเปลี่ยนชื่อเป็น Pen | ✅ `Config.Farm` → `Config.World` · `PEN_SIZE` / `PEN_SPACING` / `PEN_ORIGIN` |
 | `Config.DEFAULT_EGG_ID` | **ยังใช้ได้** ความหมายเปลี่ยน — เดิมคือ "ไข่ที่ปุ่มทดสอบใช้" | ✅ ชี้ที่ `egg_stage1` ใช้เป็นไข่เริ่มต้นของผู้เล่นใหม่ |

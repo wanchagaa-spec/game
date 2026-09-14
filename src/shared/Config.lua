@@ -16,6 +16,34 @@ local Config = {}
 Config.SCHEMA_VERSION = 1
 
 --------------------------------------------------------------------------------
+-- ทำให้ไฟล์นี้โหลดได้นอก Roblox ด้วย (สำหรับชุดเทสต์ใน tests/)
+--------------------------------------------------------------------------------
+-- ⚠️ Config ต้องโหลดได้สองที่:
+--   1. ใน Roblox — มี Color3 / Vector3 ครบ ใช้ของจริง
+--   2. ใน luau CLI ตอนรันเทสต์ — ไม่มีทั้งคู่ เพราะเป็น API ของ Roblox
+-- การอ่าน global ที่ไม่มีอยู่ใน luau ได้ nil เฉย ๆ ไม่ error จึงเช็คแล้ว fallback ได้
+--
+-- ค่าที่ fallback คืนเป็น table หน้าตาเหมือนของจริงแต่ไม่มีเมธอด
+-- ใช้ได้เพราะ **ไม่มีตรรกะไหนในเกมอ่านค่าสีหรือขนาดกลับมาคำนวณ** มีแต่ส่งต่อให้ Roblox วาด
+-- (ถ้าวันไหนมีคนเอา .Magnitude หรือ :Lerp() ไปใช้ ต้องกลับมาเติมที่นี่)
+local HAS_COLOR3 = (Color3 :: any) ~= nil
+local HAS_VECTOR3 = (Vector3 :: any) ~= nil
+
+local function rgb(r: number, g: number, b: number): Color3
+	if HAS_COLOR3 then
+		return Color3.fromRGB(r, g, b)
+	end
+	return ({ R = r / 255, G = g / 255, B = b / 255 } :: any) :: Color3
+end
+
+local function vec3(x: number, y: number, z: number): Vector3
+	if HAS_VECTOR3 then
+		return Vector3.new(x, y, z)
+	end
+	return ({ X = x, Y = y, Z = z } :: any) :: Vector3
+end
+
+--------------------------------------------------------------------------------
 -- Types
 --------------------------------------------------------------------------------
 
@@ -151,9 +179,9 @@ Config.World = {
 	MAX_PENS = 7,
 
 	-- ขนาดพื้นคอกและระยะห่างระหว่างคอก (studs)
-	PEN_SIZE = Vector3.new(48, 1, 40),
+	PEN_SIZE = vec3(48, 1, 40),
 	PEN_SPACING = 56,
-	PEN_ORIGIN = Vector3.new(0, 0, 0),
+	PEN_ORIGIN = vec3(0, 0, 0),
 
 	-- ทุกกี่วินาที server จะเช็คไข่ที่ครบเวลา แล้ว sync สถานะกลับไปหา client
 	-- ค่านี้เป็นความละเอียดของตัวจับเวลาด้วย (1 = คลาดเคลื่อนได้ไม่เกิน 1 วินาที)
@@ -776,13 +804,28 @@ Config.Bag = {
 }
 
 --------------------------------------------------------------------------------
--- สวนฟักไข่ (Hatchery)
+-- ไข่: กระเป๋าไข่ และ สวนฟัก (Hatchery)
 --------------------------------------------------------------------------------
--- ไข่ที่แย่งมาจากรังบอสเอามาฟักที่นี่ ฟักพร้อมกันได้สูงสุด MAX_EGGS ฟอง
--- เต็มแล้วหยิบไข่เพิ่มไม่ได้ ต้องแจ้งเตือนผู้เล่น
+-- ไข่ที่แย่งมาจากรังบอสเดินทางผ่านสองที่ ตามลำดับนี้
+--
+--   แย่งไข่จากรัง → กระเป๋าไข่ (heldEggs) → สวนฟัก (hatching) → ฟักได้ตัวแม่
+--                     BAG_CAPACITY ฟอง      MAX_SLOTS ฟอง
+--
+-- ⚠️ **เป็นเพดานคนละตัว ห้ามเอากลับมารวมกัน**
+-- เคยใช้ค่าเดียวกันทั้งสองที่ ซึ่งบังเอิญเท่ากันเฉย ๆ ไม่ใช่เพราะต้องเท่า
+-- ผูกไว้แบบนั้นแล้วปรับแยกไม่ได้เลย ทั้งที่สองอย่างนี้คุมคนละเรื่อง:
+--   BAG_CAPACITY — คุมว่า "แย่งไข่ตุนไว้ได้แค่ไหน" (เกี่ยวกับรอบรีเกิดบอส 5 นาที)
+--   MAX_SLOTS    — คุมว่า "ฟักพร้อมกันได้กี่ฟอง" (เกี่ยวกับเวลาฟัก 30 วิ × เลขด่าน)
+-- ตอนนี้ตั้งเท่ากันไว้ก่อนที่ 50 เพื่อไม่ให้พฤติกรรมเปลี่ยน แต่ขยับแยกกันได้แล้ว
+--
+-- ทั้งสองเต็มแล้วหยิบไข่เพิ่มไม่ได้ ต้องแจ้งเตือนผู้เล่น
 
 Config.Hatchery = {
-	MAX_EGGS = 50,
+	-- จำนวนไข่ที่ถือติดตัวได้ ยังไม่เข้าสวนฟัก (PlayerData.heldEggs)
+	BAG_CAPACITY = 50,
+
+	-- จำนวนไข่ที่ฟักพร้อมกันได้ = จำนวนแท่นในสวนฟัก (PlayerData.hatching)
+	MAX_SLOTS = 50,
 }
 
 --------------------------------------------------------------------------------
@@ -1179,7 +1222,7 @@ local EggTypes: { [string]: EggType } = {
 		name = "ไข่ธรรมดา",
 		source = "boss",
 		hatchTime = 30,
-		color = Color3.fromRGB(235, 235, 225),
+		color = rgb(235, 235, 225),
 	},
 	egg_rare = {
 		id = "egg_rare",
@@ -1188,7 +1231,7 @@ local EggTypes: { [string]: EggType } = {
 		name = "ไข่หายาก",
 		source = "boss",
 		hatchTime = 120,
-		color = Color3.fromRGB(90, 160, 235),
+		color = rgb(90, 160, 235),
 	},
 	egg_stage1 = {
 		id = "egg_stage1",
@@ -1198,7 +1241,7 @@ local EggTypes: { [string]: EggType } = {
 		source = "boss",
 		stage = 1,
 		hatchTime = 30,
-		color = Color3.fromRGB(235, 235, 225),
+		color = rgb(235, 235, 225),
 	},
 	egg_stage2 = {
 		id = "egg_stage2",
@@ -1208,7 +1251,7 @@ local EggTypes: { [string]: EggType } = {
 		source = "boss",
 		stage = 2,
 		hatchTime = 60,
-		color = Color3.fromRGB(200, 225, 235),
+		color = rgb(200, 225, 235),
 	},
 	egg_stage3 = {
 		id = "egg_stage3",
@@ -1218,7 +1261,7 @@ local EggTypes: { [string]: EggType } = {
 		source = "boss",
 		stage = 3,
 		hatchTime = 90,
-		color = Color3.fromRGB(150, 200, 235),
+		color = rgb(150, 200, 235),
 	},
 	egg_stage4 = {
 		id = "egg_stage4",
@@ -1228,7 +1271,7 @@ local EggTypes: { [string]: EggType } = {
 		source = "boss",
 		stage = 4,
 		hatchTime = 120,
-		color = Color3.fromRGB(120, 215, 180),
+		color = rgb(120, 215, 180),
 	},
 	egg_stage5 = {
 		id = "egg_stage5",
@@ -1238,7 +1281,7 @@ local EggTypes: { [string]: EggType } = {
 		source = "boss",
 		stage = 5,
 		hatchTime = 150,
-		color = Color3.fromRGB(150, 220, 120),
+		color = rgb(150, 220, 120),
 	},
 	egg_stage6 = {
 		id = "egg_stage6",
@@ -1248,7 +1291,7 @@ local EggTypes: { [string]: EggType } = {
 		source = "boss",
 		stage = 6,
 		hatchTime = 180,
-		color = Color3.fromRGB(235, 215, 110),
+		color = rgb(235, 215, 110),
 	},
 	egg_stage7 = {
 		id = "egg_stage7",
@@ -1258,7 +1301,7 @@ local EggTypes: { [string]: EggType } = {
 		source = "boss",
 		stage = 7,
 		hatchTime = 210,
-		color = Color3.fromRGB(240, 170, 80),
+		color = rgb(240, 170, 80),
 	},
 	egg_stage8 = {
 		id = "egg_stage8",
@@ -1268,7 +1311,7 @@ local EggTypes: { [string]: EggType } = {
 		source = "boss",
 		stage = 8,
 		hatchTime = 240,
-		color = Color3.fromRGB(230, 110, 90),
+		color = rgb(230, 110, 90),
 	},
 	egg_stage9 = {
 		id = "egg_stage9",
@@ -1278,7 +1321,7 @@ local EggTypes: { [string]: EggType } = {
 		source = "boss",
 		stage = 9,
 		hatchTime = 270,
-		color = Color3.fromRGB(190, 110, 235),
+		color = rgb(190, 110, 235),
 	},
 	egg_legendary = {
 		id = "egg_legendary",
@@ -1288,7 +1331,7 @@ local EggTypes: { [string]: EggType } = {
 		source = "robux",
 		stage = nil, -- ไม่ผูกด่าน — ใช้ด่านที่ผู้ซื้ออยู่ตอนกด
 		hatchTime = 300,
-		color = Color3.fromRGB(240, 185, 60),
+		color = rgb(240, 185, 60),
 	},
 }
 
@@ -2479,7 +2522,16 @@ function Config.validate()
 	assert(Config.Pen.MAX_LEVEL >= 1, "Config: MAX_LEVEL ของคอกต้องอย่างน้อย 1")
 	assert(Config.Pen.UPGRADE_COST_MULTIPLIER > 1, "Config: ตัวคูณราคาคอกต้องมากกว่า 1")
 	assert(Config.Bag.CAPACITY > 0, "Config: ความจุกระเป๋าต้องมากกว่า 0")
-	assert(Config.Hatchery.MAX_EGGS > 0, "Config: MAX_EGGS ของสวนฟักต้องมากกว่า 0")
+	-- ⚠️ สองค่านี้แยกกันโดยตั้งใจ ไม่ต้องเท่ากัน แต่ต้องมีจริงทั้งคู่
+	-- ค่าใดค่าหนึ่งเป็น 0 = ไข่เดินทางต่อไม่ได้ ผู้เล่นตันถาวรตั้งแต่ฟองแรก
+	assert(
+		Config.Hatchery.BAG_CAPACITY > 0 and Config.Hatchery.BAG_CAPACITY % 1 == 0,
+		"Config: Hatchery.BAG_CAPACITY (กระเป๋าไข่) ต้องเป็นจำนวนเต็มบวก"
+	)
+	assert(
+		Config.Hatchery.MAX_SLOTS > 0 and Config.Hatchery.MAX_SLOTS % 1 == 0,
+		"Config: Hatchery.MAX_SLOTS (ช่องฟัก) ต้องเป็นจำนวนเต็มบวก"
+	)
 	assert(
 		Config.Inventory.MAX_MOTHERS >= Config.Bag.CAPACITY + Config.getPenCapacity(Config.Pen.MAX_LEVEL),
 		"Config: MAX_MOTHERS น้อยกว่ากระเป๋า + คอกเต็มเลเวล ผู้เล่นจะเก็บของที่ควรเก็บได้ไม่ครบ"

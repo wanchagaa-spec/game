@@ -34,7 +34,7 @@ local function onPlayerAdded(player: Player)
 		warn(`[Main] คอกเต็ม ให้คอกกับ {player.Name} ไม่ได้ — Config.World.MAX_PENS ต้องเท่ากับจำนวนผู้เล่นสูงสุด`)
 	end
 
-	-- ต้องเรียกหลังจองคอกแล้ว เพราะการวางไข่ต้องมีแท่นฟักอยู่ก่อน
+	-- ต้องเรียกหลังจองคอกแล้ว เพราะไข่กับแม่ต้องมีคอกให้วางก่อน
 	EggService.onPlayerAdded(player)
 end
 

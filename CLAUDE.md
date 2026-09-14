@@ -322,7 +322,7 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 - **Phase 5** — บอส + รีเกิด 5 นาที + ไข่ 5 ฟอง + กติกาแย่งไข่ (กดค้าง 3 วิ) + ร้านอาวุธ
 - **Phase 6** — Robux / Developer Product + ไข่ตำนาน (ProcessReceipt ที่ปลอดภัย)
 - **Phase 7** — สมดุลตัวเลข + ระบบติดสถานะให้แม่ (gold/silver) + polish
-- **Phase 8** — ทดสอบ 7 ผู้เล่นพร้อมกัน + publish
+- **Phase 8** — ทดสอบ 6 ผู้เล่นพร้อมกัน + publish
 
 ## กฎการทำงาน
 

@@ -5,21 +5,23 @@
 -- Rojo sync ได้แค่ไฟล์สคริปต์ ของที่ปั้นมือจะไปอยู่ในไฟล์ .rbxl ซึ่งแก้ผ่าน repo ไม่ได้
 -- และปรับตัวเลขทีต้องปั้นใหม่ทุกครั้ง — ตรงนี้แก้ Config แล้ว generate ใหม่ได้ทันที
 --
--- ⚠️ **ทุกพิกัดมาจาก Config.Map / Config.get*() ห้าม hardcode ตัวเลขในไฟล์นี้**
--- ยกเว้นค่าที่เป็น "หน้าตา" ล้วน ๆ (สี · ความหนาเส้น) ซึ่งไม่กระทบกติกาเกม
+-- ⚠️ **ทุกพิกัดมาจาก Config.MapDimensions ผ่าน Config.get*() ห้าม hardcode ตัวเลขในไฟล์นี้**
+-- ยกเว้นค่าที่เป็น "หน้าตา" ล้วน ๆ (สี · วัสดุ) ซึ่งไม่กระทบกติกาเกมหรือการชน
+--
+-- ══ รูปทรง ══
+--   ลานหญ้าเปิดโล่งบนแท่นลอย **ไม่มีกำแพงล้อมรอบแมพ**
+--   มีกำแพงสองข้างทางเฉพาะใน **เลนรบ** ที่เดียว
+--   ขอบแมพกันตกด้วย **กำแพงใส** (Transparency = 1, CanCollide = true)
+--
+--   ร้านค้า (แผงเล็ก 2 จุด) → ลานคอก 6 แปลง 2×3 → เลนรบ 9 ด่าน
 --
 -- ══ สิ่งที่ไฟล์นี้สร้าง (server · ทุกคนเห็นเหมือนกัน) ══
---   ลานคอก   — 6 แปลง 2 แถว หันหน้าเข้าหากัน + ทางเดินกลาง
---   เลนรบ    — เลนเดียวใช้ร่วมกัน ทอดยาวผ่าน 9 ด่าน + แท่นปล่อยทหารที่ต้นเลน
---   รังบอส   — 1 รังต่อด่าน อยู่หลังกำแพงของด่านนั้น พร้อมจุดวางไข่ 5 จุด
---   ร้านค้า  — อาคารฉาก + แท่นวาป (ของจริงคือ UI)
+--   ลานหญ้า + คอก 6 แปลงพร้อมรั้วไม้เตี้ย · แผงร้านค้า · เลนรบพร้อมกำแพงสองข้าง
+--   ห้องบอส 1 ห้องต่อด่าน พร้อมจุดวางไข่ · กำแพงใสกันตกขอบแมพ
 --
 -- ══ สิ่งที่ไฟล์นี้ **ไม่** สร้าง ══
---   กำแพง · ทหารฝ่ายรับ · กองทัพของผู้เล่น → **วาดฝั่ง client** (src/client/WallRenderer.lua)
---   เพราะแต่ละคนพังกำแพงคนละด่านแต่ยืนบนเลนเดียวกัน ถ้าสร้างบน server จะแยกกันไม่ได้
---   บอสกับไข่ในรัง → เป็นของจริงบน server แต่เป็นงาน Phase 5 (ตรงนี้ทำแค่ที่วาง)
---
--- Phase blockout: หน้าตากล่อง ๆ ขอแค่รูปร่างพื้นที่ชัดและปรับตัวเลขแล้วขยับตามได้
+--   กำแพงกั้นด่าน · ทหารฝ่ายรับ · กองทัพผู้เล่น → **วาดฝั่ง client**
+--   บอกับไข่ในรัง → ของจริงบน server แต่เป็นงาน Phase 5 (ตรงนี้ทำแค่ที่วาง)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -29,37 +31,40 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local MapBuilder = {}
 
 local MAP = Config.Map
+local DIM = Config.MapDimensions
 
 --------------------------------------------------------------------------------
--- สี (หน้าตาล้วน ๆ ไม่กระทบกติกา)
+-- หน้าตา (ไม่กระทบกติกา)
 --------------------------------------------------------------------------------
 
 local COLORS = {
-	penFloor = Color3.fromRGB(118, 154, 92),
-	penFloorAlt = Color3.fromRGB(104, 140, 82),
-	fence = Color3.fromRGB(142, 106, 68),
-	walkway = Color3.fromRGB(196, 184, 158),
-	lane = Color3.fromRGB(168, 150, 120),
-	laneEdge = Color3.fromRGB(120, 104, 80),
-	releasePad = Color3.fromRGB(92, 150, 214),
-	nest = Color3.fromRGB(150, 124, 96),
-	nestEgg = Color3.fromRGB(226, 214, 186),
-	shopFloor = Color3.fromRGB(180, 168, 150),
-	shopWall = Color3.fromRGB(148, 116, 86),
-	teleport = Color3.fromRGB(206, 148, 72),
-	marker = Color3.fromRGB(90, 78, 62),
+	grass = Color3.fromRGB(116, 158, 88),
+	grassAlt = Color3.fromRGB(104, 146, 78),
+	walkway = Color3.fromRGB(198, 186, 158),
+	fence = Color3.fromRGB(146, 104, 62),
+	lane = Color3.fromRGB(176, 158, 126),
+	laneWall = Color3.fromRGB(122, 116, 106),
+	releasePad = Color3.fromRGB(88, 148, 214),
+	bossFloor = Color3.fromRGB(150, 122, 94),
+	bossEgg = Color3.fromRGB(230, 218, 190),
+	stall = Color3.fromRGB(158, 112, 76),
+	stallRoof = Color3.fromRGB(190, 92, 78),
+	teleport = Color3.fromRGB(212, 154, 74),
+	marker = Color3.fromRGB(86, 74, 58),
+	spawn = Color3.fromRGB(230, 200, 120),
 }
+
+local FLOOR_THICKNESS = 2
 
 --------------------------------------------------------------------------------
 -- ตัวช่วยสร้าง Part
 --------------------------------------------------------------------------------
 
--- Part แบบ anchored ทุกตัวในแมพนี้ ไม่มีอะไรตกได้
+-- position = "จุดบนพื้น" ฟังก์ชันยกขึ้นครึ่งความสูงให้เอง · anchored ทุกตัว
 local function makePart(name: string, size: Vector3, position: Vector3, color: Color3, parent: Instance): Part
 	local part = Instance.new("Part")
 	part.Name = name
 	part.Size = size
-	-- position ที่รับเข้ามาคือ "จุดบนพื้น" จึงยกขึ้นครึ่งความสูงเอง
 	part.Position = Vector3.new(position.X, position.Y + size.Y / 2, position.Z)
 	part.Color = color
 	part.Anchored = true
@@ -70,13 +75,27 @@ local function makePart(name: string, size: Vector3, position: Vector3, color: C
 	return part
 end
 
-local function makeLabel(text: string, size: Vector2, adornee: BasePart, heightOffset: number)
+-- แผ่นพื้น: ห้อยลงใต้ Y=0 เพื่อให้ผิวบนอยู่ที่ 0 พอดี ของที่วางบนพื้นจะได้ไม่ลอย
+local function makeFloor(name: string, sizeX: number, sizeZ: number, centerX: number, centerZ: number, color: Color3, parent: Instance): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Size = Vector3.new(sizeX, FLOOR_THICKNESS, sizeZ)
+	part.Position = Vector3.new(centerX, -FLOOR_THICKNESS / 2, centerZ)
+	part.Color = color
+	part.Anchored = true
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Material = Enum.Material.Grass
+	part.Parent = parent
+	return part
+end
+
+local function makeLabel(text: string, width: number, adornee: BasePart, heightOffset: number): TextLabel
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "Label"
-	gui.Size = UDim2.fromOffset(size.X, size.Y)
+	gui.Size = UDim2.fromOffset(width, 44)
 	gui.StudsOffsetWorldSpace = Vector3.new(0, heightOffset, 0)
-	gui.AlwaysOnTop = false
-	gui.MaxDistance = 400
+	gui.MaxDistance = 500
 	gui.Adornee = adornee
 	gui.Parent = adornee
 
@@ -100,136 +119,258 @@ end
 export type PenPlot = {
 	index: number,
 	model: Model,
-	base: Part, -- แผ่นพื้น ใช้หาขอบเขตที่แม่เดินได้
-	center: Vector3, -- จุดบนพื้น กึ่งกลางแปลง
-	label: TextLabel, -- ป้ายบอกเจ้าของ
+	base: Part,
+	center: Vector3,
+	label: TextLabel,
 }
 
-export type BossNest = {
+export type BossRoom = {
 	stage: number,
 	model: Model,
 	center: Vector3,
-	eggSpots: { Part }, -- จุดวางไข่ เรียง 1..Boss.EGGS_PER_SPAWN
+	eggSpots: { Part },
 }
 
 local root: Folder? = nil
 local penPlots: { PenPlot } = {}
-local bossNests: { BossNest } = {}
+local bossRooms: { BossRoom } = {}
 local releasePad: Part? = nil
+local spawnPads: { SpawnLocation } = {}
 local built = false
 
 --------------------------------------------------------------------------------
--- โซน 1 — ลานคอก
+-- โซน 1 — ลานหญ้า + คอก
 --------------------------------------------------------------------------------
 
--- รั้วรอบแปลง 4 ด้าน ทำให้เห็นชัดว่าคอกใครถึงไหน
-local function buildFence(plot: Model, center: Vector3, size: Vector3)
-	local map = MAP
-	local h = map.FENCE_HEIGHT
-	local t = map.FENCE_THICKNESS
+-- รั้วไม้เตี้ยรอบแปลง — **แค่บอกขอบเขต ไม่ใช่กำแพงกันทาง**
+local function buildFence(plot: Model, center: Vector3, sizeX: number, sizeZ: number)
+	local h = MAP.FENCE_HEIGHT
+	local t = MAP.FENCE_THICKNESS
 
 	local sides = {
-		{ name = "FenceNorth", size = Vector3.new(size.X, h, t), offset = Vector3.new(0, 0, size.Z / 2) },
-		{ name = "FenceSouth", size = Vector3.new(size.X, h, t), offset = Vector3.new(0, 0, -size.Z / 2) },
-		{ name = "FenceEast", size = Vector3.new(t, h, size.Z), offset = Vector3.new(size.X / 2, 0, 0) },
-		{ name = "FenceWest", size = Vector3.new(t, h, size.Z), offset = Vector3.new(-size.X / 2, 0, 0) },
+		{ name = "FenceNorth", size = Vector3.new(sizeX, h, t), offset = Vector3.new(0, 0, sizeZ / 2) },
+		{ name = "FenceSouth", size = Vector3.new(sizeX, h, t), offset = Vector3.new(0, 0, -sizeZ / 2) },
+		{ name = "FenceEast", size = Vector3.new(t, h, sizeZ), offset = Vector3.new(sizeX / 2, 0, 0) },
+		{ name = "FenceWest", size = Vector3.new(t, h, sizeZ), offset = Vector3.new(-sizeX / 2, 0, 0) },
 	}
 	for _, side in sides do
 		local part = makePart(side.name, side.size, center + side.offset, COLORS.fence, plot)
+		part.Material = Enum.Material.WoodPlanks
 		part.CanCollide = true
 	end
 end
 
-function MapBuilder.buildPenYard(parent: Folder)
-	local map = MAP
-	local yard = Instance.new("Folder")
-	yard.Name = "PenYard"
-	yard.Parent = parent
+function MapBuilder.buildPlaza(parent: Folder)
+	local plaza = Instance.new("Folder")
+	plaza.Name = "Plaza"
+	plaza.Parent = parent
+
+	-- พื้นหญ้าผืนเดียวคลุมทั้งลาน (รวมแถบแผงร้านทางซ้าย)
+	local minX = Config.getPlazaMinX()
+	local maxX = Config.getPlazaMaxX()
+	local halfDepth = Config.getPlazaHalfDepth()
+	makeFloor("GrassFloor", maxX - minX, halfDepth * 2, (minX + maxX) / 2, 0, COLORS.grass, plaza)
+
+	-- ทางเดินกลาง — แค่แถบสีบนหญ้า บอกทางจากร้านไปต้นเลน
+	local walk = makePart(
+		"Walkway",
+		Vector3.new(maxX - minX, 0.2, MAP.WALKWAY_WIDTH),
+		Vector3.new((minX + maxX) / 2, 0, 0),
+		COLORS.walkway,
+		plaza
+	)
+	walk.CanCollide = false
+
+	-- ══ คอก 6 แปลง ══ พื้นในคอกเป็นหญ้าทั้งหมด **ไม่มีแปลงหรือช่องตาราง**
+	local pens = Instance.new("Folder")
+	pens.Name = "Pens"
+	pens.Parent = plaza
+
+	local sizeX = MAP.PEN_PLOT_SIZE.X
+	local sizeZ = MAP.PEN_PLOT_SIZE.Z
 
 	for index = 1, Config.World.MAX_PENS do
 		local center = Config.getPenPlotCenter(index)
-		local size = map.PEN_PLOT_SIZE
 
 		local model = Instance.new("Model")
 		model.Name = `Plot{index}`
-		model.Parent = yard
+		model.Parent = pens
 
-		-- ⚠️ พื้นเปิดโล่ง **ไม่แบ่งเป็นช่องตาราง** แม่เดินอิสระ ไข่วางตรงไหนก็ได้
-		local shade = if index % 2 == 0 then COLORS.penFloorAlt else COLORS.penFloor
-		local base = makePart("Base", size, center, shade, model)
+		-- แผ่นบาง ๆ ทับบนหญ้า ไว้แยกสีให้เห็นว่าคอกไหนเป็นของใคร
+		local shade = if index % 2 == 0 then COLORS.grassAlt else COLORS.grass
+		local base = makePart("Base", Vector3.new(sizeX, 0.3, sizeZ), center, shade, model)
+		base.Material = Enum.Material.Grass
+		base.CanCollide = false
 		model.PrimaryPart = base
 
-		buildFence(model, center, size)
+		buildFence(model, center, sizeX, sizeZ)
 
-		local label = makeLabel(`คอก {index}`, Vector2.new(180, 44), base, size.Y / 2 + 6)
+		local label = makeLabel(`คอก {index}`, 200, base, MAP.FENCE_HEIGHT + 5)
 
-		penPlots[index] = {
-			index = index,
-			model = model,
-			base = base,
-			center = center,
-			label = label,
-		}
+		penPlots[index] = { index = index, model = model, base = base, center = center, label = label }
 	end
-
-	-- ทางเดินกลาง เชื่อมร้านค้า (ซ้าย) กับต้นเลนรบ (ขวา)
-	local walkLength = Config.getPenYardWidth() + map.SHOP_GAP * 2 + map.LANE_START_GAP * 2
-	makePart(
-		"Walkway",
-		Vector3.new(walkLength, 1, map.WALKWAY_WIDTH),
-		Vector3.new(0, 0, 0),
-		COLORS.walkway,
-		yard
-	)
 end
 
 --------------------------------------------------------------------------------
--- โซน 2 — เลนรบ
+-- โซน 2 — ร้านค้า (แผงเล็ก ๆ ที่ขอบลาน ไม่ใช่อาคารใหญ่)
 --------------------------------------------------------------------------------
 
+function MapBuilder.buildShop(parent: Folder)
+	local shop = Instance.new("Folder")
+	shop.Name = "Shop"
+	shop.Parent = parent
+
+	local sizeX = MAP.SHOP_STALL_SIZE.X
+	local sizeZ = MAP.SHOP_STALL_SIZE.Z
+	local h = MAP.SHOP_STALL_HEIGHT
+
+	for index = 1, MAP.SHOP_STALL_COUNT do
+		local center = Config.getShopStallCenter(index)
+
+		local model = Instance.new("Model")
+		model.Name = `Stall{index}`
+		model.Parent = shop
+
+		-- เคาน์เตอร์เตี้ย + หลังคา — เป็นแค่ฉาก ของจริงคือ UI
+		local counter = makePart("Counter", Vector3.new(sizeX, h * 0.4, sizeZ), center, COLORS.stall, model)
+		counter.Material = Enum.Material.WoodPlanks
+		model.PrimaryPart = counter
+
+		local roof = makePart(
+			"Roof",
+			Vector3.new(sizeX + 2, 0.6, sizeZ + 2),
+			Vector3.new(center.X, h, center.Z),
+			COLORS.stallRoof,
+			model
+		)
+		roof.CanCollide = false
+
+		makeLabel(if index == 1 then "ขายของ · ซื้อไข่" else "ซื้ออาวุธ", 220, counter, h * 0.4 + 3)
+	end
+
+	-- ⚠️ แท่นวาปไปร้านค้า · **อัปเกรดไม่ต้องเดินมา** มีปุ่มติดตัวเปิดได้ทุกที่
+	-- (ตัวคูณ damage มี 72 ขั้น ถ้าต้องเดินทุกครั้งจะน่ารำคาญมาก)
+	local padCenter = Config.getShopCenter()
+	local pad = makePart(
+		"TeleportPad",
+		MAP.TELEPORT_PAD_SIZE,
+		Vector3.new(padCenter.X, 0, 0),
+		COLORS.teleport,
+		shop
+	)
+	pad.CanCollide = false
+	makeLabel("วาปไปร้านค้า", 200, pad, 4)
+end
+
+--------------------------------------------------------------------------------
+-- โซน 3 — เลนรบ (ที่เดียวในแมพที่มีกำแพงสองข้างทาง)
+--------------------------------------------------------------------------------
+
+-- กำแพงข้างเลนหนึ่งชิ้น ยาวตามแกน X ที่ระยะ Z ที่กำหนด
+local function laneWallPiece(parent: Folder, name: string, fromX: number, toX: number, z: number)
+	local length = toX - fromX
+	if length <= 0 then
+		return
+	end
+	local part = makePart(
+		name,
+		Vector3.new(length, MAP.LANE_WALL_HEIGHT, MAP.FENCE_THICKNESS * 4),
+		Vector3.new((fromX + toX) / 2, 0, z),
+		COLORS.laneWall,
+		parent
+	)
+	part.Material = Enum.Material.Slate
+	part.CanCollide = true
+end
+
+-- ชิ้นเชื่อมตอนกำแพงเดินเป็นขั้น (ขวางตามแกน Z)
+local function laneWallJog(parent: Folder, name: string, x: number, fromZ: number, toZ: number)
+	local width = math.abs(toZ - fromZ)
+	if width <= 0 then
+		return
+	end
+	local part = makePart(
+		name,
+		Vector3.new(MAP.FENCE_THICKNESS * 4, MAP.LANE_WALL_HEIGHT, width),
+		Vector3.new(x, 0, (fromZ + toZ) / 2),
+		COLORS.laneWall,
+		parent
+	)
+	part.Material = Enum.Material.Slate
+	part.CanCollide = true
+end
+
 function MapBuilder.buildBattleLane(parent: Folder)
-	local map = MAP
 	local lane = Instance.new("Folder")
 	lane.Name = "BattleLane"
 	lane.Parent = parent
 
 	local startX = Config.getLaneStartX()
-	local length = Config.getLaneLength()
+	local endX = Config.getLaneEndX()
 
-	-- ⚠️ เลนเดียว ทุกคนใช้ร่วมกัน — กำแพงของแต่ละคนอยู่คนละด่านแต่ยืนบนเลนนี้เหมือนกัน
-	makePart(
-		"LaneFloor",
-		Vector3.new(length, 1, map.LANE_WIDTH),
-		Vector3.new(startX + length / 2, 0, 0),
-		COLORS.lane,
+	-- พื้นเลน (ช่วงปกติ กว้าง LANE_WIDTH) — ส่วนที่ผายออกอยู่กับห้องบอส
+	makeFloor("LaneFloor", endX - startX, MAP.LANE_WIDTH, (startX + endX) / 2, 0, COLORS.lane, lane)
+
+	-- ══ กำแพงสองข้างทาง ══ เดินเป็นขั้นตรงห้องบอสที่กว้างกว่าเลน
+	local walls = Instance.new("Folder")
+	walls.Name = "SideWalls"
+	walls.Parent = lane
+
+	local laneHalf = MAP.LANE_WIDTH / 2
+	local roomHalfZ = MAP.NEST_SIZE.Z / 2
+	local roomHalfX = MAP.NEST_SIZE.X / 2
+
+	for _, sign in { 1, -1 } do
+		local side = if sign == 1 then "North" else "South"
+		local cursor = startX
+
+		for stage = 1, Config.Stage.COUNT do
+			local room = Config.getBossNestCenter(stage)
+			local roomStart = room.X - roomHalfX
+			local roomEnd = room.X + roomHalfX
+
+			-- ช่วงปกติก่อนถึงห้อง
+			laneWallPiece(walls, `Wall{side}_S{stage}_A`, cursor, roomStart, sign * laneHalf)
+
+			if roomHalfZ > laneHalf then
+				-- ผายออก: ขั้นเข้า → ยาวตามห้อง → ขั้นกลับ
+				laneWallJog(walls, `Jog{side}_S{stage}_In`, roomStart, sign * laneHalf, sign * roomHalfZ)
+				laneWallPiece(walls, `Wall{side}_S{stage}_Room`, roomStart, roomEnd, sign * roomHalfZ)
+				laneWallJog(walls, `Jog{side}_S{stage}_Out`, roomEnd, sign * roomHalfZ, sign * laneHalf)
+			else
+				laneWallPiece(walls, `Wall{side}_S{stage}_Room`, roomStart, roomEnd, sign * laneHalf)
+			end
+
+			cursor = roomEnd
+		end
+
+		-- หางเลนหลังห้องสุดท้าย
+		laneWallPiece(walls, `Wall{side}_Tail`, cursor, endX, sign * laneHalf)
+	end
+
+	-- ปิดปลายเลน กันเดินตกท้ายแมพ
+	local cap = makePart(
+		"LaneEndCap",
+		Vector3.new(MAP.FENCE_THICKNESS * 4, MAP.LANE_WALL_HEIGHT, MAP.LANE_WIDTH),
+		Vector3.new(endX, 0, 0),
+		COLORS.laneWall,
 		lane
 	)
-
-	-- ขอบเลนสองข้าง กันเดินหลุดออกนอกเลน
-	for _, sign in { 1, -1 } do
-		local edge = makePart(
-			if sign == 1 then "LaneEdgeNorth" else "LaneEdgeSouth",
-			Vector3.new(length, map.FENCE_HEIGHT, map.FENCE_THICKNESS),
-			Vector3.new(startX + length / 2, 0, sign * map.LANE_WIDTH / 2),
-			COLORS.laneEdge,
-			lane
-		)
-		edge.CanCollide = true
-	end
+	cap.Material = Enum.Material.Slate
 
 	-- ⚠️ แท่นปล่อยทหารอยู่ที่ต้นเลน — ทหารโผล่ที่นี่เลย ไม่ต้องเดินมาจากคอก
 	local pad = makePart(
 		"ReleasePad",
-		map.RELEASE_PAD_SIZE,
-		Vector3.new(startX + map.RELEASE_PAD_SIZE.X / 2, 1, 0),
+		MAP.RELEASE_PAD_SIZE,
+		Vector3.new(startX + MAP.RELEASE_PAD_SIZE.X / 2, 0, 0),
 		COLORS.releasePad,
 		lane
 	)
-	makeLabel("จุดปล่อยทหาร", Vector2.new(200, 44), pad, map.RELEASE_PAD_SIZE.Y / 2 + 5)
+	pad.CanCollide = false
+	makeLabel("จุดปล่อยทหาร", 240, pad, 5)
 	releasePad = pad
 
-	-- เส้นบอกรอยต่อของด่าน วางบนพื้นเพื่อให้เห็นว่าด่านไหนถึงไหน
-	-- ⚠️ เป็น**เครื่องหมายเฉย ๆ ไม่ใช่กำแพง** กำแพงจริงวาดฝั่ง client
+	-- เส้นบอกรอยต่อด่าน — ⚠️ **เครื่องหมายเฉย ๆ ไม่ใช่กำแพง** กำแพงจริงวาดฝั่ง client
 	local markers = Instance.new("Folder")
 	markers.Name = "StageMarkers"
 	markers.Parent = lane
@@ -237,114 +378,153 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	for stage = 1, Config.Stage.COUNT do
 		local marker = makePart(
 			`StageMarker{stage}`,
-			Vector3.new(1, 0.2, map.LANE_WIDTH),
-			Vector3.new(Config.getStageStartX(stage), 1, 0),
+			Vector3.new(1.5, 0.3, MAP.LANE_WIDTH),
+			Vector3.new(Config.getStageStartX(stage), 0, 0),
 			COLORS.marker,
 			markers
 		)
 		marker.CanCollide = false
-		makeLabel(`ด่าน {stage}`, Vector2.new(140, 36), marker, 4)
+		makeLabel(`ด่าน {stage}`, 160, marker, 6)
 	end
 end
 
 --------------------------------------------------------------------------------
--- โซน 3 — รังบอส
+-- โซน 4 — ห้องบอส (หลังกำแพงของแต่ละด่าน)
 --------------------------------------------------------------------------------
 
-function MapBuilder.buildBossNests(parent: Folder)
-	local map = MAP
-	local nests = Instance.new("Folder")
-	nests.Name = "BossNests"
-	nests.Parent = parent
+function MapBuilder.buildBossRooms(parent: Folder)
+	local rooms = Instance.new("Folder")
+	rooms.Name = "BossRooms"
+	rooms.Parent = parent
 
 	for stage = 1, Config.Stage.COUNT do
 		local center = Config.getBossNestCenter(stage)
 
 		local model = Instance.new("Model")
-		model.Name = `Nest{stage}`
-		model.Parent = nests
+		model.Name = `Room{stage}`
+		model.Parent = rooms
 
-		local base = makePart("Base", map.NEST_SIZE, center, COLORS.nest, model)
+		local base = makeFloor(
+			"Floor",
+			MAP.NEST_SIZE.X,
+			MAP.NEST_SIZE.Z,
+			center.X,
+			center.Z,
+			COLORS.bossFloor,
+			model
+		)
+		base.Material = Enum.Material.Ground
 		model.PrimaryPart = base
 
-		-- ด่าน 1 ไม่มีกำแพง → เข้าได้ตั้งแต่เข้าเกมครั้งแรก บอกไว้บนป้ายเลย
+		-- ด่าน 1 ไม่มีกำแพงกั้น → เดินเข้าได้ตั้งแต่เข้าเกมครั้งแรก
 		local gated = if Config.getWallX(stage) then "หลังกำแพง" else "เข้าได้เลย"
-		makeLabel(`รังบอสด่าน {stage} · {gated}`, Vector2.new(230, 44), base, map.NEST_SIZE.Y / 2 + 7)
+		makeLabel(`รังบอสด่าน {stage} · {gated}`, 280, base, 10)
 
 		local spots: { Part } = {}
 		for i = 1, Config.Boss.EGGS_PER_SPAWN do
 			local spot = makePart(
 				`EggSpot{i}`,
-				map.NEST_EGG_PAD_SIZE,
+				MAP.NEST_EGG_PAD_SIZE,
 				Config.getBossEggSpot(stage, i),
-				COLORS.nestEgg,
+				COLORS.bossEgg,
 				model
 			)
 			spot.CanCollide = false
 			spots[i] = spot
 		end
 
-		bossNests[stage] = { stage = stage, model = model, center = center, eggSpots = spots }
+		bossRooms[stage] = { stage = stage, model = model, center = center, eggSpots = spots }
 	end
 end
 
 --------------------------------------------------------------------------------
--- โซน 4 — ร้านค้า
+-- โซน 5 — กำแพงใสกันตกขอบแมพ
 --------------------------------------------------------------------------------
 
-function MapBuilder.buildShop(parent: Folder)
-	local map = MAP
-	local shop = Instance.new("Folder")
-	shop.Name = "Shop"
-	shop.Parent = parent
+-- ⚠️ แมพเป็นแท่นลอย ผู้เล่นตกขอบได้ ยิ่งวิ่งเร็วยิ่งตกง่าย
+-- **ไม่ใช้วิธี "ตกแล้วเกิดใหม่"** เพราะน่ารำคาญตอนกำลังฟาร์ม → กั้นไว้ตั้งแต่แรก
+-- ⚠️ กั้นเฉพาะรอบ **ลานคอก** เพราะเลนรบมีกำแพงทึบสองข้างอยู่แล้ว
+-- และต้องเว้นช่องฝั่งที่ต่อกับเลน ไม่งั้นเดินออกไปรบไม่ได้
+function MapBuilder.buildBoundary(parent: Folder)
+	local folder = Instance.new("Folder")
+	folder.Name = "Boundary"
+	folder.Parent = parent
 
-	local center = Config.getShopCenter()
-	local size = map.SHOP_SIZE
+	local h = MAP.BOUNDARY_HEIGHT
+	local t = MAP.BOUNDARY_THICKNESS
+	local margin = MAP.BOUNDARY_MARGIN
 
-	local floor = makePart("Floor", size, center, COLORS.shopFloor, shop)
+	local minX = Config.getPlazaMinX() + margin
+	local maxX = Config.getPlazaMaxX()
+	local halfZ = Config.getPlazaHalfDepth() - margin
+	local laneHalf = MAP.LANE_WIDTH / 2
 
-	-- ผนังสามด้าน เปิดด้านที่หันเข้าลานคอก (+X) ให้เดินเข้าได้
-	local h = map.SHOP_WALL_HEIGHT
-	local t = map.FENCE_THICKNESS * 4
-	local walls = {
-		{ name = "WallWest", size = Vector3.new(t, h, size.Z), offset = Vector3.new(-size.X / 2, 0, 0) },
-		{ name = "WallNorth", size = Vector3.new(size.X, h, t), offset = Vector3.new(0, 0, size.Z / 2) },
-		{ name = "WallSouth", size = Vector3.new(size.X, h, t), offset = Vector3.new(0, 0, -size.Z / 2) },
-	}
-	for _, wall in walls do
-		local part = makePart(wall.name, wall.size, center + wall.offset, COLORS.shopWall, shop)
+	local function invisible(name: string, size: Vector3, position: Vector3)
+		local part = makePart(name, size, position, Color3.fromRGB(255, 255, 255), folder)
+		part.Transparency = 1
 		part.CanCollide = true
+		part.CastShadow = false
 	end
 
-	makeLabel("ร้านค้า · ขายของ / ซื้อไข่ / ซื้ออาวุธ", Vector2.new(280, 44), floor, h + 2)
+	-- ซ้าย · หน้า · หลัง
+	invisible("West", Vector3.new(t, h, halfZ * 2), Vector3.new(minX, 0, 0))
+	invisible("North", Vector3.new(maxX - minX, h, t), Vector3.new((minX + maxX) / 2, 0, halfZ))
+	invisible("South", Vector3.new(maxX - minX, h, t), Vector3.new((minX + maxX) / 2, 0, -halfZ))
 
-	-- ⚠️ แท่นวาปสองอัน: อันหนึ่งที่ร้าน อีกอันกลางทางเดิน
-	-- **อัปเกรดไม่ต้องเดินมาที่นี่** — มีปุ่มติดตัวเปิดได้ทุกที่
-	-- (ตัวคูณ damage มี 72 ขั้น ถ้าต้องเดินทุกครั้งจะน่ารำคาญมาก)
-	local shopPad = makePart(
-		"TeleportPadShop",
-		map.TELEPORT_PAD_SIZE,
-		Vector3.new(center.X + size.X / 2 - map.TELEPORT_PAD_SIZE.X, 1, 0),
-		COLORS.teleport,
-		shop
+	-- ฝั่งขวาแบ่งเป็นสองชิ้น เว้นช่องกลางไว้ให้เดินเข้าเลนรบ
+	local gapHalf = laneHalf
+	invisible(
+		"EastUpper",
+		Vector3.new(t, h, halfZ - gapHalf),
+		Vector3.new(maxX, 0, (halfZ + gapHalf) / 2)
 	)
-	shopPad.CanCollide = false
-	makeLabel("วาปกลับลานคอก", Vector2.new(190, 36), shopPad, 4)
-
-	local yardPad = makePart(
-		"TeleportPadYard",
-		map.TELEPORT_PAD_SIZE,
-		Vector3.new(-Config.getPenYardRightX() - map.TELEPORT_PAD_SIZE.X, 1, 0),
-		COLORS.teleport,
-		parent
+	invisible(
+		"EastLower",
+		Vector3.new(t, h, halfZ - gapHalf),
+		Vector3.new(maxX, 0, -(halfZ + gapHalf) / 2)
 	)
-	yardPad.CanCollide = false
-	makeLabel("วาปไปร้านค้า", Vector2.new(190, 36), yardPad, 4)
 end
 
 --------------------------------------------------------------------------------
 -- ประกอบทั้งแมพ
 --------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+-- จุดเกิดผู้เล่น — หนึ่งจุดต่อคอก
+--------------------------------------------------------------------------------
+-- ⚠️ ผู้เล่นต้องเกิด**ใกล้คอกตัวเอง** ไม่ใช่กลางลานแล้ววิ่งข้ามไปหา
+-- ลานกว้างขึ้นมากหลังขยายแมพ เกิดผิดมุมแล้วต้องวิ่งหลายวินาทีทุกครั้งที่ตาย
+--
+-- ทำเป็น SpawnLocation จริง (ไม่ใช่ย้ายตัวละครเองตอน CharacterAdded) เพราะ
+--   · Roblox วางตัวละครให้ตั้งแต่เฟรมแรก ไม่มีอาการ "โผล่กลางลานแล้ววาร์ป"
+--   · ใช้ได้กับการเกิดใหม่หลังตายด้วย โดยไม่ต้องต่อ event เพิ่ม
+-- Main ผูกผู้เล่นกับจุดของตัวเองด้วย `player.RespawnLocation` หลังจองคอกเสร็จ
+--
+-- Neutral = true เพราะเกมนี้ไม่มีทีม · ใครยังไม่ได้คอก (ระหว่างจอง) จะได้จุดใดจุดหนึ่ง
+-- ในลาน ซึ่งยังอยู่บนพื้นเสมอ ไม่ตกเหว
+function MapBuilder.buildSpawns(parent: Folder)
+	local folder = Instance.new("Folder")
+	folder.Name = "Spawns"
+	folder.Parent = parent
+
+	for index = 1, Config.World.MAX_PENS do
+		local point = Config.getSpawnPointForPen(index)
+		local pad = Instance.new("SpawnLocation")
+		pad.Name = `Spawn{index}`
+		pad.Size = MAP.SPAWN_PAD_SIZE
+		pad.Position = Vector3.new(point.X, point.Y + MAP.SPAWN_PAD_SIZE.Y / 2, point.Z)
+		pad.Anchored = true
+		pad.CanCollide = false -- ไม่ให้สะดุดตอนเดินผ่าน
+		pad.Neutral = true
+		pad.Duration = 0 -- ไม่ต้องมี ForceField ตอนเกิด
+		pad.Color = COLORS.spawn
+		pad.Material = Enum.Material.SmoothPlastic
+		pad.TopSurface = Enum.SurfaceType.Smooth
+		pad.Parent = folder
+
+		spawnPads[index] = pad
+	end
+end
 
 function MapBuilder.build()
 	if built then
@@ -357,26 +537,18 @@ function MapBuilder.build()
 	folder.Parent = Workspace
 	root = folder
 
+	MapBuilder.buildPlaza(folder)
 	MapBuilder.buildShop(folder)
-	MapBuilder.buildPenYard(folder)
 	MapBuilder.buildBattleLane(folder)
-	MapBuilder.buildBossNests(folder)
+	MapBuilder.buildBossRooms(folder)
+	MapBuilder.buildBoundary(folder)
 
-	-- จุดเกิด กลางทางเดิน ให้เห็นทั้งร้าน (ซ้าย) และเลนรบ (ขวา) ตั้งแต่วินาทีแรก
-	local spawnPoint = Config.getSpawnPoint()
-	local spawn = Instance.new("SpawnLocation")
-	spawn.Name = "Spawn"
-	spawn.Size = Vector3.new(10, 1, 10)
-	spawn.Position = Vector3.new(spawnPoint.X, spawnPoint.Y + 1.5, spawnPoint.Z)
-	spawn.Anchored = true
-	spawn.CanCollide = true
-	spawn.Color = Color3.fromRGB(230, 200, 120)
-	spawn.TopSurface = Enum.SurfaceType.Smooth
-	spawn.Parent = folder
+	MapBuilder.buildSpawns(folder)
 
 	print(
-		`[MapBuilder] สร้างแมพแล้ว — คอก {Config.World.MAX_PENS} แปลง · `
-			.. `เลนยาว {Config.getLaneLength()} studs · รังบอส {Config.Stage.COUNT} รัง`
+		`[MapBuilder] สร้างแมพแล้ว — คอก {Config.World.MAX_PENS} แปลง ({MAP.PEN_PLOT_SIZE.X}x{MAP.PEN_PLOT_SIZE.Z}) · `
+			.. `เลนยาว {Config.getLaneLength()} studs · ห้องบอส {Config.Stage.COUNT} ห้อง · `
+			.. `วิ่ง {DIM.Player.WalkSpeed} studs/วิ`
 	)
 end
 
@@ -388,12 +560,17 @@ function MapBuilder.getPenPlot(index: number): PenPlot?
 	return penPlots[index]
 end
 
-function MapBuilder.getBossNest(stage: number): BossNest?
-	return bossNests[stage]
+function MapBuilder.getBossRoom(stage: number): BossRoom?
+	return bossRooms[stage]
 end
 
 function MapBuilder.getReleasePad(): Part?
 	return releasePad
+end
+
+-- จุดเกิดของคอกหมายเลข index — Main เอาไปตั้ง player.RespawnLocation
+function MapBuilder.getSpawnLocation(index: number): SpawnLocation?
+	return spawnPads[index]
 end
 
 function MapBuilder.getRoot(): Folder?

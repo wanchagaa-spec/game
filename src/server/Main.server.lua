@@ -11,6 +11,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local StarterPlayer = game:GetService("StarterPlayer")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
@@ -40,6 +41,22 @@ if Players.MaxPlayers ~= Config.World.MAX_PENS then
 	)
 end
 
+-- ⚠️ ความเร็ววิ่งของผู้เล่นต้องตรงกับ Config.MapDimensions.Player.WalkSpeed
+-- ตั้งไว้ที่ StarterPlayer.CharacterWalkSpeed ใน default.project.json (ไม่ได้ตั้งตอน CharacterAdded)
+-- เพราะ:
+--   · Roblox ใส่ค่าให้ตั้งแต่ตอนสร้าง Humanoid = ไม่มีจังหวะที่ผู้เล่นวิ่งช้าแล้วค่อยเร็วขึ้น
+--   · ไม่ต้องต่อ event และไม่ต้องจำว่าต้องตั้งซ้ำทุกครั้งที่ตาย
+--   · แก้ได้จาก Studio โดยไม่ต้องรันเกม = ลองค่าใหม่ง่าย
+-- แต่ **เช็คซ้ำตอนบูต** ด้วยเหตุผลเดียวกับ MaxPlayers: ค่านี้แก้จาก Studio ทับไฟล์ได้
+-- และถ้ามันไม่ตรง ตัวเลขเวลาเดินทุกตัวที่ประเมินขนาดแมพไว้จะผิดหมดโดยไม่มีใครรู้
+if StarterPlayer.CharacterWalkSpeed ~= Config.MapDimensions.Player.WalkSpeed then
+	warn(
+		`[Main] ⚠️ CharacterWalkSpeed = {StarterPlayer.CharacterWalkSpeed} แต่ Config ตั้งไว้ `
+			.. `{Config.MapDimensions.Player.WalkSpeed} — เวลาเดินข้ามแมพจะไม่ตรงกับที่ออกแบบไว้ · `
+			.. `แก้ที่ default.project.json`
+	)
+end
+
 Remotes.setupServer()
 MapBuilder.build()
 PenService.buildWorld()
@@ -51,6 +68,17 @@ Players.CharacterAutoLoads = true
 local function onPlayerAdded(player: Player)
 	local pen = PenService.assign(player)
 	if pen then
+		-- ⚠️ ให้เกิดใกล้คอกตัวเอง ไม่ใช่กลางลานแล้ววิ่งข้ามไปหา
+		-- ตั้งก่อน LoadCharacter เสมอ · ใช้กับการเกิดใหม่หลังตายด้วยโดยไม่ต้องต่อ event เพิ่ม
+		local spawnPad = MapBuilder.getSpawnLocation(pen.index)
+		if spawnPad then
+			player.RespawnLocation = spawnPad
+			-- เผื่อกรณีตัวละครเกิดไปแล้วก่อนจองคอกเสร็จ (เข้ามาตอน server กำลังบูต)
+			local character = player.Character
+			if character then
+				character:PivotTo(spawnPad.CFrame + Vector3.new(0, Config.MapDimensions.Player.Height, 0))
+			end
+		end
 		print(`[Main] {player.Name} ได้คอก {pen.index} (เหลือว่าง {PenService.getFreeCount()})`)
 	else
 		warn(`[Main] คอกเต็ม ให้คอกกับ {player.Name} ไม่ได้ — Config.World.MAX_PENS ต้องเท่ากับจำนวนผู้เล่นสูงสุด`)

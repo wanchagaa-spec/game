@@ -99,7 +99,6 @@ export type WeightTier = {
 export type StageDef = {
 	id: number,
 	defenders: number, -- จำนวนทหารฝ่ายรับ
-	turretDps: number, -- damage/วินาที ที่อาวุธป้องกันของกำแพงยิงใส่กองทัพเรา
 }
 
 -- ของที่ซื้อด้วย Robux ผ่าน MarketplaceService
@@ -797,37 +796,20 @@ Config.Hatchery = {
 -- จำนวนทหารมาจากกติกา ×10 ต่อด่าน แต่เก็บเป็นตารางไม่ใช่สูตร
 -- เพื่อให้ปรับด่านใดด่านหนึ่งตอน balance ได้โดยไม่ต้องรื้อทั้งแถว
 --
--- turretDps = อาวุธป้องกันของกำแพง ยิงใส่กองทัพเราตลอดเวลาที่ตี
---
--- ⚠️ ตัวเลขชุดนี้ไม่ได้มาจากสูตร "10% ของ damage ทหารฝ่ายรับ" อีกแล้ว
--- ในระบบรบแบบปล่อยต่อเนื่อง สิ่งที่กำหนดว่า turret แรงแค่ไหนคือสูตรนี้:
---
---        กำลังพลที่เสียให้ turret = turretDps ÷ (damage/วินาทีของเรา)
---        (ระยะเวลารบตัดกันทั้งสองฝั่ง เพราะ HP ของตัวเรา = damage ของตัวเรา)
---
--- จึงตั้ง turretDps = TURRET_TOLL ของด่านนั้น × damage/วินาทีของผู้เล่นชั้นกลาง
--- ไล่จาก 10% ที่ด่าน 2 ถึง 20% ที่ด่าน 9 (ด่านสูงกำแพงเขี้ยวขึ้น)
---
--- ผลข้างเคียงที่ตั้งใจ: แม่หนักกว่า = damage ต่อตัวสูงกว่า = เสียสัดส่วนน้อยกว่า
--- ผู้เล่นที่ลงทุนกับแม่ได้รางวัลตรงนี้ฟรีโดยไม่ต้องเขียนกฎเพิ่ม
---
--- ⚠️ ห้ามตั้งค่านี้ด้วยมือโดยไม่คิดเป็นสัดส่วน — assertTurretIsSurvivable() ข้างล่าง
--- จะไม่ยอมให้เซิร์ฟบูตถ้า turret กินกำลังพลเกิน TURRET_TOLL_CEILING
--- (ชุดเดิมที่ตั้งเป็น 10% ของ damage ทหารรวม แรงกว่าที่ควรเป็น 17–238 เท่า)
+-- ⚠️ ตารางนี้ **ไม่มี turretDps แล้ว** — ดูเหตุผลที่ Config.Combat.TURRET_TOLL
 local Stages: { StageDef } = {
-	-- id  ทหารฝ่ายรับ          turretDps
 	-- ⚠️ ด่าน 1 ไม่มีกำแพงและไม่มีทหารฝ่ายรับ
 	-- เป็นด่านเริ่มต้น ผู้เล่นเดินไปสู้บอสตัวเล็กเอาไข่ได้เลยตั้งแต่เข้าเกมครั้งแรก
 	-- แก้ปัญหาไก่กับไข่: ต้องมีแม่ถึงจะมีกองทัพ ต้องมีไข่ถึงจะมีแม่
-	{ id = 1, defenders = 0, turretDps = 0 },
-	{ id = 2, defenders = 100, turretDps = 0.46 }, -- 10% ของ damage/วิ
-	{ id = 3, defenders = 1000, turretDps = 2.5 }, -- 11%
-	{ id = 4, defenders = 10000, turretDps = 73 }, -- 13%
-	{ id = 5, defenders = 100000, turretDps = 260 }, -- 14%
-	{ id = 6, defenders = 1000000, turretDps = 820 }, -- 16%
-	{ id = 7, defenders = 10000000, turretDps = 17000 }, -- 17%
-	{ id = 8, defenders = 100000000, turretDps = 53000 }, -- 19%
-	{ id = 9, defenders = 1000000000, turretDps = 150000 }, -- 20%
+	{ id = 1, defenders = 0 },
+	{ id = 2, defenders = 100 },
+	{ id = 3, defenders = 1000 },
+	{ id = 4, defenders = 10000 },
+	{ id = 5, defenders = 100000 },
+	{ id = 6, defenders = 1000000 },
+	{ id = 7, defenders = 10000000 },
+	{ id = 8, defenders = 100000000 },
+	{ id = 9, defenders = 1000000000 },
 }
 
 Config.Stages = Stages
@@ -951,6 +933,31 @@ Config.DamageUpgrade = {
 }
 
 Config.Combat = {
+	--------------------------------------------------------------------------
+	-- อาวุธป้องกันของกำแพง — เก็บเป็น "สัดส่วน" ไม่ใช่ตัวเลข damage
+	--------------------------------------------------------------------------
+	-- ⚠️ เดิมเก็บเป็นตาราง turretDps ดิบ 9 ค่า ซึ่ง **เปราะมาก**
+	-- เพราะค่าที่ถูกต้องคือ TOLL × damage/วินาทีของผู้เล่นอ้างอิงเสมอ
+	-- และ damage/วินาที แปรตามของอย่างน้อย 5 อย่าง:
+	--     ตัวคูณคลาส · ตัวคูณ damage ที่ซื้อได้ · อัตราปล่อย · อัตราผลิต · ความจุคอก
+	-- แตะอย่างใดอย่างหนึ่ง = ต้องนั่งคำนวณ 9 ค่าใหม่ด้วยมือ ซึ่งทำมาแล้ว 5 รอบ
+	-- และยามจับได้แค่ตอน "เกินเพดาน" ถ้าค่าเพี้ยนไปอยู่ที่ 2% ก็ปล่อยผ่านเงียบ ๆ
+	--
+	-- ตอนนี้จึงเก็บแค่ "สัดส่วนกำลังพลที่ยอมให้ turret กิน" แล้วให้
+	-- Config.getStageTurretDps() คำนวณ damage จริงจากสูตร:
+	--
+	--     turretDps(N) = TURRET_TOLL[N] × Config.getReferenceDps(N)
+	--
+	-- ปรับตัวคูณคลาส/upgrade/อัตราปล่อยอะไรก็ตาม turret ขยับตามเองทันที
+	-- อยากให้ด่านไหนโหดขึ้นเป็นพิเศษ ก็ดัน TOLL ของด่านนั้นตัวเดียว
+	--
+	-- ⚠️ ผลข้างเคียงที่ **ตั้งใจ**: ค่านี้อิงผู้เล่นอ้างอิงที่ "ซื้อ upgrade ครบเพดาน"
+	-- ผู้เล่นที่ยังไม่ซื้อจะเจอ turret ที่กินกำลังพลมากกว่าสัดส่วนนี้ตามที่เขาขาด
+	-- ซึ่งถูกต้องแล้ว — ไม่ซื้อของก็ควรเจอกำแพงที่เขี้ยวกว่า
+	--
+	-- ด่าน 1 ไม่มีกำแพง จึงเป็น 0
+	TURRET_TOLL = { 0, 0.10, 0.11, 0.13, 0.14, 0.16, 0.17, 0.19, 0.20 },
+
 	-- อัตราปล่อยทหารออกจากจุดสปอน (ตัว/วินาที) ต่อด่าน
 	-- ⚠️ นี่คือ "เพดาน damage ต่อวินาที" ของผู้เล่น และเป็นคอขวดหลักตั้งแต่ด่าน 3 ขึ้นไป
 	-- ปล่อยเฉพาะตอนออนไลน์ · ออฟไลน์ไม่ปล่อย (แต่แม่ยังผลิตตามกติกาออฟไลน์เดิม)
@@ -1851,7 +1858,12 @@ end
 
 -- damage/วินาที ที่อาวุธป้องกันของกำแพงยิงใส่กองทัพเรา
 function Config.getStageTurretDps(stage: number): number
-	return Config.getStage(stage).turretDps
+	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
+	local toll = Config.Combat.TURRET_TOLL[clamped]
+	if toll <= 0 then
+		return 0
+	end
+	return toll * Config.getReferenceDps(clamped)
 end
 
 function Config.getStageDefenderHp(stage: number): number
@@ -2139,19 +2151,44 @@ end
 --     สัดส่วนกำลังพลที่เสีย = turretDps ÷ (damage/วินาทีของเรา)
 local function assertTurretIsSurvivable()
 	local check = Config.BalanceCheck
+	local tolls = Config.Combat.TURRET_TOLL
 
+	assert(
+		#tolls == Config.Stage.COUNT,
+		`Config: TURRET_TOLL มี {#tolls} ด่าน แต่เกมมี {Config.Stage.COUNT} ด่าน`
+	)
+	assert(tolls[1] == 0, "Config: ด่าน 1 ไม่มีกำแพง TURRET_TOLL[1] ต้องเป็น 0")
+
+	local previous = 0
 	for stage = 1, Config.Stage.COUNT do
-		local turret = Config.getStageTurretDps(stage)
-		if turret > 0 then
+		local toll = tolls[stage]
+		assert(toll >= 0, `Config: TURRET_TOLL ด่าน {stage} ติดลบ`)
+		assert(
+			toll <= check.TURRET_TOLL_CEILING,
+			`Config: turret ด่าน {stage} กินกำลังพล {string.format("%.1f", toll * 100)}% `
+				.. `(เพดาน {check.TURRET_TOLL_CEILING * 100}%) — ทหารจะตายก่อนถึงกำแพง`
+		)
+		assert(
+			toll >= previous,
+			`Config: TURRET_TOLL ด่าน {stage} ({toll}) ต่ำกว่าด่านก่อนหน้า ({previous}) `
+				.. `— กำแพงด่านสูงควรเขี้ยวขึ้น ไม่ใช่อ่อนลง`
+		)
+		previous = toll
+
+		-- ค่า damage ที่คำนวณออกมาต้องตรงกับสัดส่วนที่ตั้งใจเป๊ะ
+		-- (ดักกรณีมีคนเผลอไปเขียนทับ getStageTurretDps ให้คืนตัวเลขดิบอีก)
+		if toll > 0 then
 			local ourDps = Config.getReferenceDps(stage)
 			assert(ourDps > 0, `Config: ด่าน {stage} คำนวณ damage/วินาที ได้ 0`)
-
-			local toll = turret / ourDps
 			assert(
-				toll <= check.TURRET_TOLL_CEILING,
-				`Config: turret ด่าน {stage} กินกำลังพล {string.format("%.1f", toll * 100)}% `
-					.. `(เพดาน {check.TURRET_TOLL_CEILING * 100}%) — ทหารจะตายก่อนถึงกำแพง `
-					.. `ตั้ง turretDps เป็นสัดส่วนของ damage/วินาที ไม่ใช่ของ damage ทหารฝ่ายรับ`
+				math.abs(Config.getStageTurretDps(stage) / ourDps - toll) < 1e-9,
+				`Config: turretDps ด่าน {stage} ไม่ตรงกับ TURRET_TOLL ที่ตั้งไว้ `
+					.. `— getStageTurretDps ต้องคำนวณจาก TOLL × getReferenceDps เท่านั้น`
+			)
+		else
+			assert(
+				Config.getStageTurretDps(stage) == 0,
+				`Config: ด่าน {stage} TOLL เป็น 0 แต่ turretDps ไม่ใช่ 0`
 			)
 		end
 	end
@@ -2524,7 +2561,6 @@ function Config.validate()
 	for index, def in Stages do
 		assert(def.id == index, `Config: ตารางด่านแถวที่ {index} มี id = {def.id} (ต้องตรงกับลำดับ)`)
 		assert(def.defenders >= 0, `Config: ด่าน {def.id} มีทหารฝ่ายรับติดลบ`)
-		assert(def.turretDps >= 0, `Config: ด่าน {def.id} มี turretDps ติดลบ`)
 		assert(
 			def.defenders > previousDefenders,
 			`Config: ด่าน {def.id} มีทหารน้อยกว่าหรือเท่าด่านก่อนหน้า — ด่านต้องยากขึ้นเรื่อย ๆ`

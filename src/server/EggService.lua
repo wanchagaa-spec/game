@@ -1,12 +1,24 @@
 --!strict
--- egg-army-game :: ระบบไข่ (วาง → จับเวลา → ฟัก → สุ่มทหาร → เข้าคลัง)
+-- egg-army-game :: ระบบไข่ (สร้าง → ฟัก → ได้ตัวแม่ → เข้าคอก/กระเป๋า)
 --
 -- ⚠️ server-authoritative ทั้งหมด:
---   - เวลาฟักนับที่ server ด้วย os.clock() ซึ่งเป็นนาฬิกา monotonic client แก้ไม่ได้
---   - การสุ่มทหารเกิดที่ server ตอนไข่ครบเวลาเท่านั้น ไม่ได้สุ่มไว้ล่วงหน้า
+--   - เวลาฟักนับที่ server ด้วย os.time() (เซฟลง DataStore ได้ ต่างจาก os.clock())
+--   - การสุ่มทุกอย่างเกิดที่ server เท่านั้น client ไม่เคยส่งผลสุ่มมาเอง
 --   - client มีหน้าที่ "ขอ" อย่างเดียว ทุกค่าที่ส่งมาถือว่าเชื่อไม่ได้จนกว่าจะ validate
 --
--- Phase 1: คลังทหารอยู่ใน memory ของ server เท่านั้น
+-- ⚠️ กฎข้อเดียวที่ต้องจำ: **น้ำหนักมาก่อน และมาตั้งแต่ตอนสร้างไข่**
+--
+--   สร้างไข่ (บอสวาง / แจกผู้เล่นใหม่ / คำสั่งเทสต์)
+--       └─ สุ่ม "น้ำหนัก" ตรงนี้ ด้วย Config.rollMotherWeightForEgg()
+--   ไข่เข้ากระเป๋า (heldEggs) → เข้าสวนฟัก (hatching)
+--       └─ น้ำหนักเดินทางไปด้วยทุกขั้น ห้ามสุ่มใหม่ ห้ามคำนวณใหม่
+--   ครบเวลาฟัก
+--       └─ สุ่ม "ตัวละคร" ตรงนี้เท่านั้น ด้วย Config.rollCharacter()
+--
+--   เหตุผล: ขนาดโมเดลไข่ในรังบอกน้ำหนักให้ผู้เล่นเห็น (Phase 5) การแย่งไข่จึงมีเป้าหมายจริง
+--   ผลที่ตามมา: ไข่ชนิดเดียวกันน้ำหนักต่างกันได้ → เก็บ "รายฟอง" ไม่ใช่ตัวนับ
+--
+-- Phase 1.5: ข้อมูลอยู่ใน memory ของ server เท่านั้น
 -- ผู้เล่นออกจากเกม = ข้อมูลหาย (Phase 2 จะต่อ DataStore)
 
 local Players = game:GetService("Players")
@@ -15,134 +27,222 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
-local PlotService = require(ServerScriptService.PlotService)
+local PenService = require(ServerScriptService.PenService)
 
 local EggService = {}
 
-local FARM = Config.Farm
+local WORLD = Config.World
+local HATCHERY_SLOTS = Config.Hatchery.MAX_EGGS
 
--- ไข่ 1 ฟองที่กำลังฟักอยู่ในช่อง
-type EggSlot = {
+-- ไข่ 1 ฟองที่ถืออยู่ (ยังไม่เข้าสวนฟัก)
+-- ⚠️ มีน้ำหนักของตัวเองตั้งแต่วินาทีที่เกิด
+export type HeldEgg = {
 	eggId: string,
-	hatchAt: number, -- ค่า os.clock() ที่ครบกำหนดฟัก
-	total: number, -- เวลาฟักเต็ม (วินาที) ไว้ให้ client คิด progress
+	weight: number, -- น้ำหนักแม่ที่จะได้ตอนฟัก (จำนวนเต็ม)
 }
 
--- ทหาร 1 ตัวในคลัง
-type UnitRecord = {
-	uid: number, -- เลขประจำตัวไม่ซ้ำภายในผู้เล่นคนนั้น
-	unitId: string, -- อ้างถึง Config.UnitTypes
-	obtainedAt: number, -- os.time() ตอนได้มา
+-- ไข่ 1 ฟองที่กำลังฟักอยู่ในสวน
+export type HatchSlot = {
+	eggId: string,
+	weight: number, -- ยกมาจาก HeldEgg ตรง ๆ ห้ามสุ่มใหม่
+	startedAt: number, -- os.time() ตอนวาง
+	hatchAt: number, -- os.time() ที่ครบกำหนด
 }
 
--- รูปทรงของช่อง 1 ช่องที่ส่งไปให้ client
--- ช่องว่างจะมีแค่ occupied = false ฟิลด์ที่เหลือจึงเป็น optional
-type SlotView = {
+-- ตัวแม่ 1 ตัว — โครงตรงกับ docs/data-schema.md §3
+export type Mother = {
+	uid: string, -- "<UserId ผู้ฟักคนแรก>-<เลขนับ>" ไม่ซ้ำทั้งเกม
+	charId: string,
+	weight: number,
+	statuses: { string },
+	lastProducedAt: number?, -- มีเฉพาะแม่ในคอก (แม่ในกระเป๋าไม่ผลิตจึงไม่ต้องนับเวลา)
+	obtainedAt: number,
+	locked: boolean,
+}
+
+-- รูปทรงของ 1 ช่องที่ส่งไปให้ client
+-- ช่องว่างมีแค่ occupied = false ฟิลด์ที่เหลือจึงเป็น optional
+type EggView = {
 	occupied: boolean,
 	eggId: string?,
 	eggName: string?,
+	weight: number?,
+	weightText: string?,
 	remaining: number?,
 	total: number?,
 }
 
 type PlayerState = {
-	slots: { [number]: EggSlot }, -- [slotIndex] = ไข่ที่วางอยู่ (ช่องว่างจะไม่มีคีย์)
-	units: { UnitRecord },
-	nextUid: number,
-	lastPlaceAt: number, -- ไว้กันสแปม
+	-- อาเรย์ยาวคงที่ ช่องว่างใช้ false ห้ามใช้ nil (เหตุผลใน docs/data-schema.md §9.3)
+	heldEggs: { HeldEgg | false },
+	hatching: { HatchSlot | false },
+
+	-- ⚠️ แยกสองอาเรย์ ไม่ใช่ฟิลด์ inPen ในตัวเดียว
+	-- โค้ด settle การผลิต (Phase 2) ต้องวนเฉพาะแม่ในคอก แยกโครงไว้ทำให้ลืมกรองไม่ได้
+	mothersInPen: { Mother },
+	mothersInBag: { Mother },
+
+	nextUid: number, -- ตัวนับต่อผู้เล่น ห้ามรีเซ็ต ห้ามลด
+	penLevel: number,
+	lastRequestAt: number, -- ไว้กันสแปม
 }
 
 local states: { [number]: PlayerState } = {}
 local rng = Random.new()
 
 local placeEggRequest: RemoteEvent
+local moveMotherRequest: RemoteEvent
 local eggHatched: RemoteEvent
 local farmStateSync: RemoteEvent
 
 --------------------------------------------------------------------------------
--- ตัวช่วย
+-- สร้างไข่ — ทางเดียวที่ไข่เกิดได้
 --------------------------------------------------------------------------------
 
--- สุ่มทหารจากตารางน้ำหนักของไข่
--- วิธี: รวม weight ทั้งหมด สุ่มเลขในช่วง [0, total) แล้วไล่หักทีละแถว
-local function rollUnit(egg: Config.EggType): string
-	local total = 0
-	for _, entry in egg.hatchTable do
-		total += entry.weight
+-- ⚠️ ทุกทางที่ไข่เกิด (บอสวาง / แจกผู้เล่นใหม่ / คำสั่งเทสต์) ต้องผ่านตัวนี้
+-- เพื่อให้ไม่มีไข่ฟองไหนหลุดออกมาโดยไม่มีน้ำหนัก
+local function makeEgg(eggId: string): HeldEgg?
+	local egg = Config.getEgg(eggId)
+	if not egg or not egg.enabled then
+		return nil
 	end
 
-	local roll = rng:NextNumber() * total
-	local acc = 0
-	for _, entry in egg.hatchTable do
-		acc += entry.weight
-		if roll < acc then
-			return entry.unitId
+	local weight = Config.rollMotherWeightForEgg(eggId, rng)
+	if not weight then
+		return nil
+	end
+
+	return { eggId = egg.id, weight = weight }
+end
+
+-- หาช่องว่างช่องแรกในอาเรย์ยาวคงที่ คืน nil ถ้าเต็ม
+local function findFreeSlot(list: { any }, size: number): number?
+	for index = 1, size do
+		if list[index] == false then
+			return index
 		end
 	end
-
-	-- ตกมาถึงตรงนี้ได้เฉพาะกรณีปัดเศษ ให้คืนแถวสุดท้าย
-	return egg.hatchTable[#egg.hatchTable].unitId
+	return nil
 end
 
--- วางก้อนไข่บนแท่น ให้เห็นด้วยตาว่ามีไข่อยู่
-local function showEgg(player: Player, slotIndex: number, egg: Config.EggType)
-	local pad = PlotService.getPad(player, slotIndex)
-	if not pad then
-		return
+local function countFilled(list: { any }, size: number): number
+	local total = 0
+	for index = 1, size do
+		if list[index] ~= false then
+			total += 1
+		end
 	end
-
-	local old = pad:FindFirstChild("Egg")
-	if old then
-		old:Destroy()
-	end
-
-	local part = Instance.new("Part")
-	part.Name = "Egg"
-	part.Shape = Enum.PartType.Ball
-	part.Size = Vector3.new(3, 3, 3)
-	part.Position = pad.Position + Vector3.new(0, 2.2, 0)
-	part.Color = egg.color
-	part.Material = Enum.Material.SmoothPlastic
-	part.Anchored = true
-	part.CanCollide = false
-	part.Parent = pad
+	return total
 end
 
-local function hideEgg(player: Player, slotIndex: number)
-	local pad = PlotService.getPad(player, slotIndex)
-	if not pad then
-		return
+--------------------------------------------------------------------------------
+-- แจกไข่ (server เท่านั้น)
+--------------------------------------------------------------------------------
+
+-- ⚠️ ห้ามให้ client เรียกถึงได้ และห้ามรับน้ำหนักมาจาก client
+-- Phase 5 บอสจะเรียกตัวนี้ตอนผู้เล่นแย่งไข่สำเร็จ
+-- ระหว่างที่ยังไม่มีบอส ใช้เป็นคำสั่งเทสต์ใน command bar ฝั่ง server
+function EggService.grantEgg(player: Player, eggId: string): (boolean, string?)
+	local state = states[player.UserId]
+	if not state then
+		return false, "ยังไม่มีข้อมูลผู้เล่น"
 	end
-	local egg = pad:FindFirstChild("Egg")
-	if egg then
-		egg:Destroy()
+
+	local egg = makeEgg(eggId)
+	if not egg then
+		return false, `สร้างไข่ "{eggId}" ไม่ได้ (ไม่มีอยู่ หรือถูกปิดไปแล้ว)`
 	end
+
+	local slot = findFreeSlot(state.heldEggs, HATCHERY_SLOTS)
+	if not slot then
+		return false, "ถือไข่เต็มแล้ว"
+	end
+
+	state.heldEggs[slot] = egg
+	EggService.sync(player)
+
+	print(`[EggService] {player.Name} ได้ {egg.eggId} น้ำหนัก {Config.formatWeight(egg.weight)}`)
+	return true, nil
 end
 
--- ประกอบข้อมูลสถานะฟาร์มที่จะส่งให้ client
+--------------------------------------------------------------------------------
+-- ประกอบข้อมูลที่ส่งให้ client
+--------------------------------------------------------------------------------
+
+local function describeMother(mother: Mother)
+	local character = Config.getCharacter(mother.charId)
+	return {
+		uid = mother.uid,
+		charId = mother.charId,
+		charName = if character then character.name else mother.charId,
+		class = if character then character.class else "?",
+		weight = mother.weight,
+		weightText = Config.formatWeight(mother.weight),
+		locked = mother.locked,
+	}
+end
+
 local function buildSyncPayload(state: PlayerState)
-	local now = os.clock()
-	local slots: { SlotView } = table.create(FARM.EGG_SLOTS_PER_PLAYER)
+	local now = os.time()
 
-	for slotIndex = 1, FARM.EGG_SLOTS_PER_PLAYER do
-		local slot = state.slots[slotIndex]
-		if slot then
-			local egg = Config.getEgg(slot.eggId)
-			slots[slotIndex] = {
+	local held: { EggView } = table.create(HATCHERY_SLOTS)
+	for index = 1, HATCHERY_SLOTS do
+		local egg = state.heldEggs[index]
+		-- ⚠️ ใช้ type() ไม่ใช่ `~= false` — Luau ขยาย `X | false` เป็น `X | boolean`
+		-- ทำให้เทียบกับ false แล้วไม่แคบลง แต่ type() แคบลงได้เสมอ
+		if type(egg) == "table" then
+			local eggType = Config.getEgg(egg.eggId)
+			held[index] = {
 				occupied = true,
-				eggId = slot.eggId,
-				eggName = if egg then egg.name else slot.eggId,
-				remaining = math.max(0, slot.hatchAt - now),
-				total = slot.total,
+				eggId = egg.eggId,
+				eggName = if eggType then eggType.name else egg.eggId,
+				weight = egg.weight,
+				weightText = Config.formatWeight(egg.weight),
 			}
 		else
-			slots[slotIndex] = { occupied = false }
+			held[index] = { occupied = false }
 		end
+	end
+
+	local hatching: { EggView } = table.create(HATCHERY_SLOTS)
+	for index = 1, HATCHERY_SLOTS do
+		local slot = state.hatching[index]
+		if type(slot) == "table" then
+			local eggType = Config.getEgg(slot.eggId)
+			hatching[index] = {
+				occupied = true,
+				eggId = slot.eggId,
+				eggName = if eggType then eggType.name else slot.eggId,
+				weight = slot.weight,
+				weightText = Config.formatWeight(slot.weight),
+				remaining = math.max(0, slot.hatchAt - now),
+				total = math.max(1, slot.hatchAt - slot.startedAt),
+			}
+		else
+			hatching[index] = { occupied = false }
+		end
+	end
+
+	local pen = table.create(#state.mothersInPen)
+	for _, mother in state.mothersInPen do
+		table.insert(pen, describeMother(mother))
+	end
+
+	local bag = table.create(#state.mothersInBag)
+	for _, mother in state.mothersInBag do
+		table.insert(bag, describeMother(mother))
 	end
 
 	return {
-		slots = slots,
-		unitCount = #state.units,
+		heldEggs = held,
+		heldCount = countFilled(state.heldEggs, HATCHERY_SLOTS),
+		hatching = hatching,
+		hatchingCount = countFilled(state.hatching, HATCHERY_SLOTS),
+		hatcherySize = HATCHERY_SLOTS,
+		mothersInPen = pen,
+		mothersInBag = bag,
+		penCapacity = Config.getPenCapacity(state.penLevel),
+		bagCapacity = Config.Bag.CAPACITY,
 	}
 end
 
@@ -158,122 +258,202 @@ end
 -- ฟักไข่
 --------------------------------------------------------------------------------
 
-local function hatch(player: Player, slotIndex: number, slot: EggSlot)
+local function hatch(player: Player, slotIndex: number, slot: HatchSlot)
 	local state = states[player.UserId]
 	if not state then
 		return
 	end
 
-	local egg = Config.getEgg(slot.eggId)
-	if not egg then
-		-- ไข่ชนิดนี้ถูกลบออกจาก Config ระหว่างที่ฟักอยู่ ทิ้งไปเงียบ ๆ
-		state.slots[slotIndex] = nil
-		hideEgg(player, slotIndex)
+	state.hatching[slotIndex] = false
+	PenService.hideEgg(player, slotIndex)
+
+	-- ⚠️ สุ่มแค่ "ตัวละคร" ตรงนี้ · น้ำหนักยกมาจากตัวไข่ ไม่สุ่มใหม่
+	local charId = Config.rollCharacter(slot.eggId, rng)
+	if not charId then
+		warn(`[EggService] ไข่ "{slot.eggId}" ไม่มีตารางคลาส ฟักไม่ได้`)
 		return
 	end
 
-	local unitId = rollUnit(egg)
-	local unit = Config.getUnit(unitId)
-	if not unit then
-		warn(`[EggService] ตารางสุ่มของไข่ "{egg.id}" ชี้ไปที่ทหาร "{unitId}" ที่ไม่มีอยู่`)
-		state.slots[slotIndex] = nil
-		hideEgg(player, slotIndex)
+	local character = Config.getCharacter(charId)
+	if not character then
+		warn(`[EggService] ตารางคลาสของไข่ "{slot.eggId}" ชี้ไปที่ตัวละคร "{charId}" ที่ไม่มีอยู่`)
 		return
 	end
 
-	local record: UnitRecord = {
-		uid = state.nextUid,
-		unitId = unitId,
+	local mother: Mother = {
+		uid = Config.makeUid(player.UserId, state.nextUid),
+		charId = charId,
+		weight = slot.weight, -- ← น้ำหนักเดิมของไข่ เป๊ะ
+		statuses = {},
 		obtainedAt = os.time(),
+		locked = false,
 	}
 	state.nextUid += 1
-	table.insert(state.units, record)
 
-	state.slots[slotIndex] = nil
-	hideEgg(player, slotIndex)
+	-- คอกมีที่ว่างก็เข้าคอก (ผลิตได้) ไม่งั้นเข้ากระเป๋า
+	local placedIn: string
+	if #state.mothersInPen < Config.getPenCapacity(state.penLevel) then
+		mother.lastProducedAt = os.time()
+		table.insert(state.mothersInPen, mother)
+		placedIn = "pen"
+	elseif #state.mothersInBag < Config.Bag.CAPACITY then
+		table.insert(state.mothersInBag, mother)
+		placedIn = "bag"
+	else
+		-- คอกและกระเป๋าเต็มทั้งคู่ — แม่ตัวนี้หายไป
+		-- ⚠️ Phase 2 ต้องเปลี่ยนเป็น "ค้างไว้ในสวนจนกว่าจะมีที่ว่าง" (data-schema §13 ข้อ D)
+		warn(`[EggService] {player.Name} คอกและกระเป๋าเต็ม แม่ที่ฟักได้หายไป`)
+		return
+	end
+
+	PenService.refreshMothers(player, state.mothersInPen)
 
 	eggHatched:FireClient(player, {
 		slotIndex = slotIndex,
-		eggId = egg.id,
-		unitId = unit.id,
-		unitName = unit.name,
-		rarity = unit.rarity,
+		eggId = slot.eggId,
+		charId = charId,
+		charName = character.name,
+		class = character.class,
+		weight = mother.weight,
+		weightText = Config.formatWeight(mother.weight),
+		placedIn = placedIn,
 	})
 
-	print(`[EggService] {player.Name} ฟัก {egg.name} ช่อง {slotIndex} ได้ {unit.name} ({unit.rarity})`)
+	print(
+		`[EggService] {player.Name} ฟัก {slot.eggId} ช่อง {slotIndex} ได้ {character.name} `
+			.. `({character.class}) {Config.formatWeight(mother.weight)} → {placedIn}`
+	)
 end
 
 --------------------------------------------------------------------------------
--- วางไข่
+-- ย้ายไข่จากกระเป๋าเข้าสวนฟัก
 --------------------------------------------------------------------------------
 
 -- รับค่าดิบจาก client จึงประกาศเป็น unknown แล้วค่อย validate ทีละชั้น
--- คืน (สำเร็จ, เหตุผลที่ไม่สำเร็จ)
-function EggService.placeEgg(player: Player, rawEggId: unknown, rawSlotIndex: unknown): (boolean, string?)
+-- ⚠️ รับ "ตำแหน่งไข่ใน heldEggs" ไม่ใช่ชนิดไข่ — ไข่ชนิดเดียวกันน้ำหนักต่างกันได้
+function EggService.placeEgg(player: Player, rawHeldIndex: unknown, rawSlotIndex: unknown): (boolean, string?)
 	local state = states[player.UserId]
 	if not state then
 		return false, "ยังไม่มีข้อมูลผู้เล่น"
 	end
 
 	-- 1) กันสแปม
-	local now = os.clock()
-	if now - state.lastPlaceAt < FARM.PLACE_EGG_COOLDOWN then
+	local now = os.time()
+	if now - state.lastRequestAt < WORLD.REQUEST_COOLDOWN then
 		return false, "กดเร็วเกินไป"
 	end
-	state.lastPlaceAt = now
+	state.lastRequestAt = now
 
-	-- 2) eggId ต้องเป็น string และต้องมีอยู่จริงใน Config
-	if type(rawEggId) ~= "string" then
-		return false, "eggId ไม่ใช่ string"
+	-- 2) heldIndex ต้องเป็นจำนวนเต็มในช่วง และช่องนั้นต้องมีไข่จริง
+	if type(rawHeldIndex) ~= "number" then
+		return false, "heldIndex ไม่ใช่ number"
 	end
-	local egg = Config.getEgg(rawEggId)
-	if not egg then
-		return false, `ไม่มีไข่ชนิด "{rawEggId}"`
+	if rawHeldIndex % 1 ~= 0 or rawHeldIndex < 1 or rawHeldIndex > HATCHERY_SLOTS then
+		return false, "heldIndex อยู่นอกช่วงที่อนุญาต"
+	end
+	local heldEgg = state.heldEggs[rawHeldIndex]
+	if type(heldEgg) ~= "table" then
+		return false, "ช่องนั้นไม่มีไข่"
 	end
 
-	-- 3) ต้องมี plot ก่อนถึงจะวางไข่ได้
-	if not PlotService.getPlot(player) then
-		return false, "ยังไม่ได้รับ plot (ฟาร์มเต็ม)"
+	local eggType = Config.getEgg(heldEgg.eggId)
+	if not eggType then
+		return false, `ไข่ "{heldEgg.eggId}" ไม่มีใน Config แล้ว`
+	end
+
+	-- 3) ต้องมีคอกก่อนถึงจะวางไข่ได้
+	if not PenService.getPen(player) then
+		return false, "ยังไม่ได้รับคอก (เซิร์ฟเวอร์เต็ม)"
 	end
 
 	-- 4) slotIndex ส่งมาหรือไม่ส่งก็ได้ ถ้าไม่ส่ง server เลือกช่องว่างช่องแรกให้
 	local slotIndex: number
 	if rawSlotIndex == nil then
-		local free: number? = nil
-		for index = 1, FARM.EGG_SLOTS_PER_PLAYER do
-			if state.slots[index] == nil then
-				free = index
-				break
-			end
-		end
+		local free = findFreeSlot(state.hatching, HATCHERY_SLOTS)
 		if not free then
-			return false, "ช่องวางไข่เต็มแล้ว"
+			return false, "สวนฟักเต็มแล้ว"
 		end
 		slotIndex = free
 	else
 		if type(rawSlotIndex) ~= "number" then
 			return false, "slotIndex ไม่ใช่ number"
 		end
-		if rawSlotIndex % 1 ~= 0 or rawSlotIndex < 1 or rawSlotIndex > FARM.EGG_SLOTS_PER_PLAYER then
+		if rawSlotIndex % 1 ~= 0 or rawSlotIndex < 1 or rawSlotIndex > HATCHERY_SLOTS then
 			return false, "slotIndex อยู่นอกช่วงที่อนุญาต"
 		end
-		if state.slots[rawSlotIndex] ~= nil then
+		if state.hatching[rawSlotIndex] ~= false then
 			return false, "ช่องนี้มีไข่อยู่แล้ว"
 		end
 		slotIndex = rawSlotIndex
 	end
 
-	-- 5) ผ่านหมดแล้ว วางจริง
-	-- ราคาไข่ยังไม่ถูกหักใน Phase 1 เพราะระบบ currency อยู่ Phase 4
-	state.slots[slotIndex] = {
-		eggId = egg.id,
-		hatchAt = now + egg.hatchTime,
-		total = egg.hatchTime,
+	-- 5) ผ่านหมดแล้ว ย้ายทั้งฟอง (eggId + weight) เข้าสวน
+	state.heldEggs[rawHeldIndex] = false
+	state.hatching[slotIndex] = {
+		eggId = heldEgg.eggId,
+		weight = heldEgg.weight, -- ← เดินทางไปด้วย ไม่สุ่มใหม่
+		startedAt = now,
+		hatchAt = now + eggType.hatchTime,
 	}
 
-	showEgg(player, slotIndex, egg)
+	PenService.showEgg(player, slotIndex, eggType)
 	EggService.sync(player)
 
+	return true, nil
+end
+
+--------------------------------------------------------------------------------
+-- ย้ายแม่ระหว่างคอกกับกระเป๋า
+--------------------------------------------------------------------------------
+
+local function takeMother(list: { Mother }, uid: string): Mother?
+	for index, mother in list do
+		if mother.uid == uid then
+			return table.remove(list, index)
+		end
+	end
+	return nil
+end
+
+function EggService.moveMother(player: Player, rawUid: unknown, rawTarget: unknown): (boolean, string?)
+	local state = states[player.UserId]
+	if not state then
+		return false, "ยังไม่มีข้อมูลผู้เล่น"
+	end
+
+	if type(rawUid) ~= "string" then
+		return false, "uid ไม่ใช่ string"
+	end
+	if rawTarget ~= "pen" and rawTarget ~= "bag" then
+		return false, "ปลายทางต้องเป็น pen หรือ bag เท่านั้น"
+	end
+
+	if rawTarget == "pen" then
+		if #state.mothersInPen >= Config.getPenCapacity(state.penLevel) then
+			return false, "คอกเต็มแล้ว"
+		end
+		local mother = takeMother(state.mothersInBag, rawUid)
+		if not mother then
+			return false, "ไม่พบแม่ตัวนี้ในกระเป๋า"
+		end
+		-- เริ่มนับเวลาผลิตใหม่ตั้งแต่วินาทีที่เข้าคอก (Phase 2 จะใช้ค่านี้)
+		mother.lastProducedAt = os.time()
+		table.insert(state.mothersInPen, mother)
+	else
+		if #state.mothersInBag >= Config.Bag.CAPACITY then
+			return false, "กระเป๋าเต็มแล้ว"
+		end
+		local mother = takeMother(state.mothersInPen, rawUid)
+		if not mother then
+			return false, "ไม่พบแม่ตัวนี้ในคอก"
+		end
+		-- แม่ในกระเป๋าไม่ผลิตอะไรเลย จึงไม่ต้องเก็บเวลาผลิตไว้
+		mother.lastProducedAt = nil
+		table.insert(state.mothersInBag, mother)
+	end
+
+	PenService.refreshMothers(player, state.mothersInPen)
+	EggService.sync(player)
 	return true, nil
 end
 
@@ -282,27 +462,49 @@ end
 --------------------------------------------------------------------------------
 
 function EggService.onPlayerAdded(player: Player)
+	-- ⚠️ อาเรย์ยาวคงที่ ช่องว่างใช้ false ห้ามใช้ nil
+	-- (Phase 2 จะเซฟลง DataStore ซึ่งอ่านอาเรย์ที่มีรูกลับมาไม่ได้ — data-schema §9.3)
+	local heldEggs: { HeldEgg | false } = {}
+	local hatching: { HatchSlot | false } = {}
+	for index = 1, HATCHERY_SLOTS do
+		heldEggs[index] = false
+		hatching[index] = false
+	end
+
 	states[player.UserId] = {
-		slots = {},
-		units = {},
+		heldEggs = heldEggs,
+		hatching = hatching,
+		mothersInPen = {},
+		mothersInBag = {},
 		nextUid = 1,
-		lastPlaceAt = 0,
+		penLevel = 1,
+		lastRequestAt = 0,
 	}
+
+	-- ⚠️ แจกไข่เริ่มต้นทีละฟองผ่าน grantEgg เพื่อให้แต่ละฟองได้สุ่มน้ำหนักของตัวเอง
+	-- startingEggs เป็นแค่ "คำสั่งแจก" ไม่ใช่รูปแบบที่เก็บ
+	for eggId, amount in Config.NewPlayer.startingEggs do
+		for _ = 1, amount do
+			EggService.grantEgg(player, eggId)
+		end
+	end
+
 	EggService.sync(player)
 end
 
 function EggService.onPlayerRemoving(player: Player)
-	-- Phase 1 ทิ้งข้อมูลทั้งหมด Phase 2 ตรงนี้จะกลายเป็นจุดเซฟลง DataStore
+	-- Phase 1.5 ทิ้งข้อมูลทั้งหมด Phase 2 ตรงนี้จะกลายเป็นจุดเซฟลง DataStore
 	states[player.UserId] = nil
 end
 
--- อ่านคลังทหาร (Phase 2 จะเอาไปทำ UI คลังกับ DataStore)
-function EggService.getUnits(player: Player): { UnitRecord }
+function EggService.getMothersInPen(player: Player): { Mother }
 	local state = states[player.UserId]
-	if not state then
-		return {}
-	end
-	return state.units
+	return if state then state.mothersInPen else {}
+end
+
+function EggService.getMothersInBag(player: Player): { Mother }
+	local state = states[player.UserId]
+	return if state then state.mothersInBag else {}
 end
 
 --------------------------------------------------------------------------------
@@ -310,14 +512,22 @@ end
 --------------------------------------------------------------------------------
 
 function EggService.start()
-	placeEggRequest = Remotes.waitFor(Config.RemoteNames.PLACE_EGG_REQUEST)
+	placeEggRequest = Remotes.waitFor(Config.RemoteNames.PLACE_EGG_IN_HATCHERY_REQUEST)
+	moveMotherRequest = Remotes.waitFor(Config.RemoteNames.MOVE_MOTHER_REQUEST)
 	eggHatched = Remotes.waitFor(Config.RemoteNames.EGG_HATCHED)
 	farmStateSync = Remotes.waitFor(Config.RemoteNames.FARM_STATE_SYNC)
 
-	placeEggRequest.OnServerEvent:Connect(function(player, rawEggId, rawSlotIndex)
-		local ok, reason = EggService.placeEgg(player, rawEggId, rawSlotIndex)
+	placeEggRequest.OnServerEvent:Connect(function(player, rawHeldIndex, rawSlotIndex)
+		local ok, reason = EggService.placeEgg(player, rawHeldIndex, rawSlotIndex)
 		if not ok then
 			print(`[EggService] ปฏิเสธคำขอวางไข่ของ {player.Name}: {reason}`)
+		end
+	end)
+
+	moveMotherRequest.OnServerEvent:Connect(function(player, rawUid, rawTarget)
+		local ok, reason = EggService.moveMother(player, rawUid, rawTarget)
+		if not ok then
+			print(`[EggService] ปฏิเสธคำขอย้ายแม่ของ {player.Name}: {reason}`)
 		end
 	end)
 
@@ -325,14 +535,15 @@ function EggService.start()
 	-- ความละเอียดของตัวจับเวลา = SYNC_INTERVAL
 	task.spawn(function()
 		while true do
-			task.wait(FARM.SYNC_INTERVAL)
+			task.wait(WORLD.SYNC_INTERVAL)
 
-			local now = os.clock()
+			local now = os.time()
 			for _, player in Players:GetPlayers() do
 				local state = states[player.UserId]
 				if state then
-					for slotIndex, slot in state.slots do
-						if now >= slot.hatchAt then
+					for slotIndex = 1, HATCHERY_SLOTS do
+						local slot = state.hatching[slotIndex]
+						if type(slot) == "table" and now >= slot.hatchAt then
 							hatch(player, slotIndex, slot)
 						end
 					end

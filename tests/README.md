@@ -76,7 +76,7 @@ tests/
 
 **ย้ำ:** ข้อแรกสำคัญที่สุด ถ้าข้อนั้นไม่ผ่าน ที่เหลือไม่ต้องดู
 
-เช็คลิสต์เต็มอยู่ใน [`../docs/map-layout.md`](../docs/map-layout.md) §8 และ [`../docs/phase-1.5-rework.md`](../docs/phase-1.5-rework.md) §8
+เช็คลิสต์เต็มอยู่ใน [`../docs/map-layout.md`](../docs/map-layout.md) §9 และ [`../docs/phase-1.5-rework.md`](../docs/phase-1.5-rework.md) §8
 
 ### แจกไข่มาทดสอบระหว่างที่ยังไม่มีบอส
 

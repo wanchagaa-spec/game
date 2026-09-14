@@ -290,6 +290,11 @@ Config.Map = {
 	-- ขนาดโมเดล blockout
 	MOTHER_BLOCK_SIZE = vec3(2.6, 2.6, 4),
 	EGG_BLOCK_SIZE = vec3(2, 2.6, 2),
+
+	-- ความเร็วเดินของตัวละคร ใช้**แปลงระยะทางเป็นเวลาเดิน**ตอนประเมินว่าแมพยาวไปไหม
+	-- 16 คือค่าเริ่มต้นของ Roblox · ถ้าวันไหนเปลี่ยน WalkSpeed ของผู้เล่น ต้องแก้ตรงนี้ด้วย
+	-- ไม่งั้น tools/dump-map.luau จะรายงานเวลาเดินผิดโดยไม่มีใครรู้
+	WALK_SPEED_REFERENCE = 16,
 }
 
 --------------------------------------------------------------------------------
@@ -2522,6 +2527,7 @@ function Config.validate()
 	-- ══ แม่เดินไปมา ══
 	assert(map.WANDER_SPEED > 0, "Config: Map.WANDER_SPEED ต้องมากกว่า 0")
 	assert(map.WANDER_TICK > 0, "Config: Map.WANDER_TICK ต้องมากกว่า 0")
+	assert(map.WALK_SPEED_REFERENCE > 0, "Config: Map.WALK_SPEED_REFERENCE ต้องมากกว่า 0")
 	assert(
 		map.WANDER_PAUSE_MIN >= 0 and map.WANDER_PAUSE_MAX >= map.WANDER_PAUSE_MIN,
 		"Config: ช่วงเวลาหยุดพักของแม่กลับหัว (MAX ต้องไม่น้อยกว่า MIN)"

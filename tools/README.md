@@ -1,6 +1,30 @@
-# tools — สร้างตารางสมดุลจาก Config
+# tools — เครื่องมืออ่านค่าจาก Config
 
-## รันยังไง
+| คำสั่ง | ได้อะไร |
+|---|---|
+| `python3 tools/gen-balance-tables.py` | สร้าง `docs/balance-tables.html` (ตารางสมดุลทั้งหมด) |
+| `luau tools/dump-map.luau` | พิมพ์ผังแมพ + เวลาเดิน — ใช้ประเมินว่าแมพยาวไปไหม |
+| `python3 tools/check-hardcoded-numbers.py` | หาตัวเลขที่พิมพ์มือในย่อหน้าของ generator |
+
+ทั้งหมดอ่านค่าจาก `src/shared/Config.lua` ตัวจริง ไม่มีตัวเลขพิมพ์ซ้ำ
+
+---
+
+## ดูผังแมพ
+
+```bash
+luau tools/dump-map.luau
+```
+
+พิมพ์พิกัดทุกโซน ตารางรายด่าน และเวลาเดินจากจุดหนึ่งไปอีกจุด
+**ปรับ `Config.Map` แล้วรันใหม่เพื่อเทียบได้ทันที ไม่ต้องเปิด Studio**
+
+⚠️ เวลาเดินอิงที่ `Config.Map.WALK_SPEED_REFERENCE` (16 = ค่าเริ่มต้นของ Roblox)
+ถ้าวันไหนเปลี่ยน WalkSpeed ของผู้เล่นจริง ต้องแก้ค่านั้นด้วย ไม่งั้นรายงานผิดโดยไม่มีใครรู้
+
+---
+
+## สร้างตารางสมดุล
 
 ```bash
 python3 tools/gen-balance-tables.py

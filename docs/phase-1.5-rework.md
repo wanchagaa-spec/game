@@ -10,7 +10,7 @@ Phase 1 เขียนตามกลไกเก่า ซึ่งต่า�
 
 | | กลไกเก่า (โค้ดปัจจุบัน) | ดีไซน์ใหม่ |
 |---|---|---|
-| **ฟักไข่แล้วได้อะไร** | ทหาร 1 ตัวจาก `hatchTable` (recruit/archer/…) ไม่มีน้ำหนัก | **ตัวแม่** = ตัวละคร (12 ตัว 5 คลาส) + น้ำหนักสุ่ม 7 ชั้น |
+| **ฟักไข่แล้วได้อะไร** | ทหาร 1 ตัวจาก `hatchTable` (recruit/archer/…) ไม่มีน้ำหนัก | **ตัวแม่** = ตัวละคร (12 ตัว 5 คลาส) + น้ำหนักที่**ล็อกมาตั้งแต่ตอนเป็นไข่แล้ว** (ตอนฟักสุ่มแค่ตัวละคร) |
 | **ไข่มาจากไหน** | ผู้เล่นกดปุ่มวางไข่ได้เลย มี `price` เตรียมไว้ให้ซื้อด้วยเงินในเกม | ไข่ปกติ**แย่งจากรังบอสเท่านั้น** · ไข่ตำนาน**ซื้อด้วย Robux เท่านั้น** ซื้อด้วยเงินในเกมไม่ได้เลย |
 | **ที่เก็บ** | `plot` มี 4 ช่องวางไข่ · คลังทหารเป็น array เดียว | **คอก** (แม่ที่ผลิต) + **กระเป๋า** (แม่ที่ไม่ผลิต 100 ตัว) + **สวนฟัก** 50 ฟอง |
 
@@ -30,7 +30,7 @@ Phase 1 เขียนตามกลไกเก่า ซึ่งต่า�
 | `state.nextUid` เริ่มที่ 1 ต่อผู้เล่น | ยังเป็นตัวนับต่อผู้เล่น แต่ uid เต็ม = `Config.makeUid(player.UserId, nextUid)` | รองรับการเทรดแม่ |
 | **`os.clock()` ทุกจุด** (บรรทัด 124, 219, 330 และใน `EggSlot.hatchAt`) | **`os.time()`** | `os.clock()` รีเซ็ตทุกครั้งที่เซิร์ฟเวอร์ใหม่ เซฟลง DataStore ไม่ได้ |
 | `EggSlot` 4 ช่องตาม `Config.Farm.EGG_SLOTS_PER_PLAYER` | สวนฟัก `Config.Hatchery.MAX_EGGS` = 50 ช่อง | ดีไซน์ใหม่ |
-| `EggService.placeEgg()` — client ขอวางไข่จาก `eggId` ตรง ๆ | ต้องเช็คว่าผู้เล่น**มีไข่ฟองนั้นในกระเป๋าจริง** (`heldEggs`) ก่อน แล้วหักออก | ตอนนี้ขอไข่ชนิดไหนก็ได้ฟรี = ช่องโหว่ |
+| `EggService.placeEgg()` — client ขอวางไข่จาก `eggId` ตรง ๆ | ต้องอ้าง**ไข่ฟองที่มีอยู่จริงใน `heldEggs`** ด้วย index ไม่ใช่ `eggId` (ไข่ชนิดเดียวกันน้ำหนักต่างกันได้) แล้วย้ายทั้งฟอง (`eggId` + `weight`) เข้าสวน | ตอนนี้ขอไข่ชนิดไหนก็ได้ฟรี = ช่องโหว่ |
 | `EggService.getUnits()` | `getMothersInPen()` / `getMothersInBag()` | ชื่อเดิมสื่อผิดแล้ว |
 | `hatch()` ยิง `EggHatched` ด้วย `{ unitId, unitName, rarity }` | `{ charId, charName, class, weight }` | payload เปลี่ยน — ดู §4 |
 
@@ -80,7 +80,7 @@ UI จริง (สองแถบแม่/ลูก + กล่องยื�
 | Remote | ตอนนี้ | ต้องเป็น |
 |---|---|---|
 | `PlaceEggRequest` | `FireServer(eggId, slotIndex?)` — client ขอไข่ชนิดไหนก็ได้ | `FireServer(eggId, slotIndex?)` เหมือนเดิม **แต่ server ต้องเช็ค `heldEggs` ก่อน** · ชื่ออาจเปลี่ยนเป็น `PlaceEggInHatcheryRequest` ให้ตรงความหมาย |
-| `EggHatched` | `{ slotIndex, eggId, unitId, unitName, rarity }` | `{ slotIndex, eggId, charId, charName, class, weight, placedIn }` (`placedIn` = "pen" หรือ "bag") |
+| `EggHatched` | `{ slotIndex, eggId, unitId, unitName, rarity }` | `{ slotIndex, eggId, charId, charName, class, weight, placedIn }` (`placedIn` = "pen" หรือ "bag") · `weight` มาจากตัวไข่ ไม่ได้สุ่มตอนนี้ |
 | `FarmStateSync` | `{ slots = {...}, unitCount }` | `{ hatching = {...}, penCount, penCapacity, bagCount, coins }` |
 
 **Remote ที่ต้องเพิ่มใน Phase 1.5** (ยังไม่สร้างในรอบนี้): ย้ายแม่คอก↔กระเป๋า · ขายแม่ · อัปเกรดคอก
@@ -96,7 +96,9 @@ UI จริง (สองแถบแม่/ลูก + กล่องยื�
 | `Config.Rarities` (Common/Rare/Epic/Legendary) | **ตกยุค** — คลาสใหม่คือ SS/S/A/B/C | เลิกใช้พร้อม `UnitTypes` |
 | `Config.Farm.EGG_SLOTS_PER_PLAYER` = 4 | **ตกยุค** — สวนฟักคือ `Config.Hatchery.MAX_EGGS` = 50 | เลิกใช้เมื่อ EggService ย้ายไปใช้ Hatchery |
 | `Config.Farm.PLOT_SIZE` / `PLOT_SPACING` / `PLOT_ORIGIN` / `MAX_PLOTS` | **ยังใช้ได้** แต่ควรเปลี่ยนชื่อเป็น Pen | เปลี่ยนชื่อพร้อม PenService |
-| `Config.DEFAULT_EGG_ID` | **ยังใช้ได้** แต่ความหมายเปลี่ยน — เดิมคือ "ไข่ที่ปุ่มทดสอบใช้" | ใช้เป็นไข่เริ่มต้นของผู้เล่นใหม่แทน |
+| `Config.DEFAULT_EGG_ID` | **ยังใช้ได้** แต่ความหมายเปลี่ยน — เดิมคือ "ไข่ที่ปุ่มทดสอบใช้" | ใช้เป็นไข่เริ่มต้นของผู้เล่นใหม่แทน · ตอนนี้ชี้ที่ `egg_stage1` แล้ว |
+| `egg.hatchTable` (ตารางสุ่ม "ทหาร") | ตายทั้งหมด — ระบบจริงใช้ `Config.rollCharacter()` + น้ำหนักที่ติดมากับไข่ | ไข่ `egg_stage1..9` ยังมี `hatchTable` ค้างไว้ 1 บรรทัดเพื่อให้โค้ด Phase 1 ยังรันได้ ลบทิ้งพร้อม `UnitTypes` ตอนรื้อ |
+| `egg_common` / `egg_rare` | `enabled = false` แล้ว ห้ามแจกให้ผู้เล่นอีก | ยัง `getEgg()` ได้ตามกฎ eggId (ห้ามลบ ห้าม reuse) |
 | `EggType.price` | **ลบไปแล้วในรอบนี้** | ✅ เสร็จแล้ว |
 
 > **ทั้งหมดนี้ใช้วิธี `enabled = false` ไม่ใช่ลบทิ้ง** เพราะ id พวกนี้อาจอยู่ในข้อมูลผู้เล่นที่เซฟไปแล้ว (ตอนนี้ยังไม่มี DataStore จึงยังปลอดภัย แต่ทำให้ชินไว้ก่อน)

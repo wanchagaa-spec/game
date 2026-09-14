@@ -1,6 +1,6 @@
 # egg-army-game
 
-เกม Roblox แนวผสม: **เก็บ/ฟักไข่ → ได้ทหาร → เก็บในฟาร์ม → ปล่อยทหารไปตีฐานศัตรู**
+เกม Roblox แนวผสม: **แย่งไข่จากบอส → ฟักได้ตัวแม่ → วางในคอก → แม่ผลิตลูก → ปล่อยลูกไปพังกำแพงด่านถัดไป**
 (loop คล้าย Age of War ผสมระบบสะสมแบบ pet simulator)
 
 รายละเอียดแผนพัฒนา กฎการทำงาน และสถานะปัจจุบัน อยู่ใน [`CLAUDE.md`](./CLAUDE.md)
@@ -89,21 +89,23 @@ egg-army-game/
 ├── CLAUDE.md               ← บรีฟโปรเจกต์ แผนเฟส กฎการทำงาน
 ├── README.md               ← ไฟล์นี้
 ├── .gitignore              ← กัน build output หลุดขึ้น repo
-└── src/
-    ├── server/             → ServerScriptService
-    ├── client/             → StarterPlayer.StarterPlayerScripts
-    └── shared/             → ReplicatedStorage.Shared
+├── src/
+│   ├── server/             → ServerScriptService
+│   ├── client/             → StarterPlayer.StarterPlayerScripts
+│   └── shared/             → ReplicatedStorage.Shared
+├── tests/                  ← ชุดเทสต์ Config (รันด้วย luau CLI ไม่ต้องใช้ Studio)
+└── tools/                  ← สคริปต์สร้างตารางสมดุลเป็น HTML
 ```
 
 ### แต่ละส่วนทำอะไร
 
 | โฟลเดอร์ | ปลายทางใน Roblox | หน้าที่ |
 |---|---|---|
-| `src/server/` | `ServerScriptService` | logic ทั้งหมดที่เชื่อถือได้ — ฟักไข่, สุ่มผลทหาร, คลังทหาร, คำนวณ combat, ให้ currency, DataStore |
-| `src/client/` | `StarterPlayer.StarterPlayerScripts` | UI ทั้งหมด — หน้าฟาร์ม, คลังทหาร, จัดทีม, shop, สนามรบ |
-| `src/shared/` | `ReplicatedStorage.Shared` | ของที่สองฝั่งใช้ร่วมกัน — ตาราง rarity ไข่, ค่าสถิติทหาร, สูตร currency, ชื่อ Remote, type |
+| `src/server/` | `ServerScriptService` | logic ทั้งหมดที่เชื่อถือได้ — สร้าง/ฟักไข่, สุ่มผล, คอก + กระเป๋า, คำนวณ combat, ให้ currency, DataStore |
+| `src/client/` | `StarterPlayer.StarterPlayerScripts` | UI ทั้งหมด — หน้าคอก, กระเป๋า, สวนฟัก, จัดทีม, shop, สนามรบ |
+| `src/shared/` | `ReplicatedStorage.Shared` | ของที่สองฝั่งใช้ร่วมกัน — ตัวละคร/คลาส, tier น้ำหนัก, ตารางคลาสของไข่, สูตร damage/เงิน, ชื่อ Remote, type |
 
-**server-authoritative:** การฟักไข่ สุ่มผล คำนวณ combat และการให้ currency ต้องทำฝั่ง server ทั้งหมด
+**server-authoritative:** การสร้างไข่ ฟักไข่ สุ่มผล คำนวณ combat และการให้ currency ต้องทำฝั่ง server ทั้งหมด
 client มีหน้าที่แสดงผลกับส่งคำสั่งเท่านั้น และทุก input จาก client ต้อง validate ก่อนใช้เสมอ (กัน exploit)
 
 ### กฎการตั้งชื่อไฟล์ (Rojo)
@@ -133,6 +135,33 @@ rojo serve                  # เปิดค้างไว้ แล้ว Con
 # --- ถ้าจะแก้เองที่เครื่องบ้าน ---
 git add -A && git commit -m "fix: ..." && git push
 ```
+
+## รันเทสต์
+
+```bash
+luau tests/run.luau
+```
+
+คำสั่งเดียวจบ **ไม่ต้องเปิด Studio ไม่ต้อง build ก่อน** — ผ่านหมดจะจบด้วย
+`=== ผ่าน 337 / ตก 0 ===` และ exit code 0 · มีเทสต์ตกจะพิมพ์รายการที่ตกแล้ว exit 1
+
+ต้องมี [luau CLI](https://github.com/luau-lang/luau/releases) ก่อน (ไฟล์เดียว ไม่ต้องติดตั้งอะไรเพิ่ม)
+
+**รันทุกครั้งที่แก้ `src/shared/Config.lua`** — ตัวเลขสมดุลในไฟล์นั้นผูกกันเป็นลูกโซ่
+แก้ตัวเดียวแล้วอีกหลายตัวต้องขยับตาม ซึ่งมองด้วยตาไม่เห็นและเคยพลาดมาแล้วหลายรอบ
+
+⚠️ เทสต์ชุดนี้ตรวจ **`Config.lua` เท่านั้น** ไม่ได้แตะ `src/server` / `src/client`
+รายการที่ยังต้องเปิด Studio ทดสอบเอง อยู่ใน [`tests/README.md`](./tests/README.md)
+
+## สร้างตารางสมดุลใหม่
+
+```bash
+python3 tools/gen-balance-tables.py
+```
+
+เขียนทับ `docs/balance-tables.html` — เปิดด้วยเบราว์เซอร์ดูเส้นเวลาทุกด่าน ราคาของ turret และที่มาของตัวเลขสมดุล
+**ตัวเลขทุกตัวในหน้านั้นมาจาก Config จริง ทั้งในตารางและในคำอธิบาย** ไม่มีพิมพ์มือ
+รันใหม่ทุกครั้งหลังปรับสมดุล · รายละเอียดใน [`tools/README.md`](./tools/README.md)
 
 ## ตรวจว่า config ยังใช้ได้
 

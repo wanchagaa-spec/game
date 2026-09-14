@@ -246,15 +246,21 @@ local WeightTiers: { WeightTier } = {
 }
 
 -- ตารางสุ่มน้ำหนักแยกตามด่านของบอสที่ไข่ฟองนั้นมาจาก
--- ⚠️ บอสด่านสูง = ไข่ดีกว่า แต่ยังไม่ได้กำหนดตัวเลขของด่าน 2-9
--- ตอนนี้เว้นเป็น nil ไว้ → getWeightTiers() จะถอยไปใช้ด่านที่ต่ำกว่าที่ใกล้ที่สุด
--- เติมด่านไหนก็ใส่ตารางของด่านนั้นลงไป ไม่ต้องแก้โค้ดที่อื่น
+--
+-- ✅ **ตัดสินถาวรแล้ว: ทุกด่านใช้ตารางเดียวกัน ไม่ใช่ของค้างรอเติม**
+--
+-- เหตุผล: ถ้าด่านสูงให้แม่หนักกว่าด้วย เกมจะมีแกนไต่สองแกนพร้อมกัน
+-- (น้ำหนัก ×1,000 ตลอดเกม + คลาส ×216) ซึ่งคุมสมดุลไม่ไหว
+-- และที่แย่กว่านั้นคือ **น้ำหนักดี ๆ หายากเกินกว่าจะเป็นเส้นทางหลักได้**
+-- (tier 6 = 1 ใน 111,111 ฟอง ที่อัตราไข่จริงคือหลักหมื่นชั่วโมง)
+--
+-- แกนที่ไต่ตามด่านจึงเป็น "คลาส" อย่างเดียว ผ่านตารางคลาสของไข่รายด่าน
+-- ส่วนน้ำหนักเป็นมิติของ "ดวง" ที่ใช้ได้ตลอดเกมโดยไม่ผูกกับด่าน
+--
+-- โครง [stage] ยังคงไว้เพราะ getWeightTiers() กับไข่รายด่านเรียกใช้อยู่
+-- และเผื่อวันหนึ่งอยากทำอีเวนต์ที่ด่านใดด่านหนึ่งสุ่มต่างออกไป
 local StageWeightTiers: { [number]: { WeightTier } } = {
 	[1] = WeightTiers,
-	-- [2] = { ... },  ← รอกำหนด
-	-- [3] = { ... },
-	-- ...
-	-- [9] = { ... },
 }
 
 Config.StageWeightTiers = StageWeightTiers
@@ -527,11 +533,25 @@ Config.Rarities = Rarities
 -- คลาสเป็นตัวคูณ damage และ HP (HP = damage ตามที่ตกลงกัน)
 -- คลาสไม่มีผลต่อรายได้เงิน — เงินคิดจากน้ำหนักแม่กับด่านเท่านั้น
 
+-- ⚠️ ตัวคูณคลาส = "แกนที่ไต่ตามด่าน" ของเกมนี้
+--
+-- ตารางสุ่มน้ำหนักเหมือนกันทุกด่าน (ตัดสินถาวรแล้ว) ด่านสูงจึงไม่ได้ให้แม่หนักกว่า
+-- สิ่งที่ด่านสูงให้คือ "โอกาสได้คลาสดีกว่า" → คลาสต้องรับภาระเป็นตัวไต่ทั้งหมด
+-- ไล่ ×6 ต่อขั้นจาก C ถึง S (1 → 6 → 36 → 216)
+--
+-- ⚠️⚠️ SS ตั้งไว้แค่ ×2 เหนือ S โดยตั้งใจ ไม่ใช่ ×6 — ห้ามแก้เป็น 1,296
+--
+--   SS ออกจากไข่ Robux เท่านั้น ถ้าไล่ ×6 ต่อไปจนถึง 1,296 คนจ่ายเงินจะแรงกว่า
+--   คนไม่จ่าย 1,296 เท่า = pay-to-win เต็มรูปแบบ เกมจะตายเพราะคนไม่จ่ายเลิกเล่น
+--   บีบให้ห่างจาก S แค่เท่าตัว → ไข่ตำนานยังคุ้มซื้อ (ได้ ×2 บวกกับรับประกัน tier 3+)
+--   แต่ไม่ถึงกับ "ซื้อแล้วชนะ" เพราะ S หาได้ฟรีจากบอสด่าน 7 ขึ้นไป
+--
+--   validate() บังคับว่า SS ÷ S ต้องไม่เกิน MAX_SS_OVER_S_RATIO (2.5) — เกินแล้วเซิร์ฟไม่บูต
 local CharacterClasses: { [string]: CharacterClass } = {
-	SS = { id = "SS", multiplier = 5, order = 1 },
-	S = { id = "S", multiplier = 3, order = 2 },
-	A = { id = "A", multiplier = 2, order = 3 },
-	B = { id = "B", multiplier = 1.5, order = 4 },
+	SS = { id = "SS", multiplier = 432, order = 1 }, -- = S × 2 เท่านั้น (ดูบล็อกข้างบน)
+	S = { id = "S", multiplier = 216, order = 2 },
+	A = { id = "A", multiplier = 36, order = 3 },
+	B = { id = "B", multiplier = 6, order = 4 },
 	C = { id = "C", multiplier = 1, order = 5 },
 }
 
@@ -675,6 +695,30 @@ Config.Economy = {
 	-- ราคาขายแม่ = รายได้ของแม่ตัวนั้นคูณจำนวนนาทีนี้
 	-- ผูกกับสูตรเงินอัตโนมัติ ไม่ต้องตั้งตารางแยก
 	SELL_MOTHER_MINUTES = 30,
+
+	----------------------------------------------------------------------------
+	-- เงินจากการฆ่า (บ่อเงินที่สอง นอกเหนือจากแม่ในคอก)
+	----------------------------------------------------------------------------
+	-- ⚠️ server เป็นคนคำนวณและมอบเงินเท่านั้น ห้าม client แจ้งยอดมาเอง
+	--
+	-- ทหารฝ่ายรับ: KILL_DEFENDER_BASE × KILL_DEFENDER_MULTIPLIER^(ด่าน-1) ต่อตัว
+	--   จำนวนทหารโต ×10 ต่อด่านอยู่แล้ว เงินต่อตัวโตอีก ×2
+	--   → เงินรวมทั้งด่านโต ×20 ต่อด่าน ซึ่งเร็วกว่าราคาของที่โต ×10
+	--   → บ่อนี้ไม่ตกยุค (validate() บังคับข้อนี้ไว้)
+	--
+	-- ⚠️ ทหารฝ่ายรับตายแล้วไม่เกิดใหม่ และ stageProgress เซฟความคืบหน้าถาวร
+	--   ทหาร 1 ตัวจึงจ่ายเงินได้ "ครั้งเดียวตลอดกาล" ต่อผู้เล่น 1 คน
+	--   ห้ามจ่ายซ้ำตอนโหลดข้อมูลกลับมา (ดู docs/data-schema.md §12)
+	KILL_DEFENDER_BASE = 100,
+	KILL_DEFENDER_MULTIPLIER = 2,
+
+	-- บอส: KILL_BOSS_BASE × KILL_BOSS_MULTIPLIER^(ด่าน-1) ต่อการฆ่า 1 ครั้ง
+	--   ใช้ ×10 ไม่ใช่ ×2 เพราะบอสฆ่าซ้ำได้เรื่อย ๆ (รีเกิดทุก 5 นาที)
+	--   ต้องตามราคาของที่โต ×10 ให้ทัน ไม่งั้นบอสกลายเป็นเศษเงินตั้งแต่กลางเกม
+	--
+	-- ⚠️ บอสช่วยกันฆ่าได้ 7 คน — วิธีแบ่งเงินยังไม่ตัดสิน (ดู docs/data-schema.md §13)
+	KILL_BOSS_BASE = 10000,
+	KILL_BOSS_MULTIPLIER = 10,
 }
 
 --------------------------------------------------------------------------------
@@ -750,14 +794,14 @@ local Stages: { StageDef } = {
 	-- เป็นด่านเริ่มต้น ผู้เล่นเดินไปสู้บอสตัวเล็กเอาไข่ได้เลยตั้งแต่เข้าเกมครั้งแรก
 	-- แก้ปัญหาไก่กับไข่: ต้องมีแม่ถึงจะมีกองทัพ ต้องมีไข่ถึงจะมีแม่
 	{ id = 1, defenders = 0, turretDps = 0 },
-	{ id = 2, defenders = 100, turretDps = 0.57 }, -- 10% ของ damage/วิ
-	{ id = 3, defenders = 1000, turretDps = 6.1 }, -- 11%
-	{ id = 4, defenders = 10000, turretDps = 53 }, -- 13%
-	{ id = 5, defenders = 100000, turretDps = 480 }, -- 14%
-	{ id = 6, defenders = 1000000, turretDps = 2800 }, -- 16%
-	{ id = 7, defenders = 10000000, turretDps = 28000 }, -- 17%
-	{ id = 8, defenders = 100000000, turretDps = 160000 }, -- 19%
-	{ id = 9, defenders = 1000000000, turretDps = 840000 }, -- 20%
+	{ id = 2, defenders = 100, turretDps = 0.25 }, -- 10% ของ damage/วิ
+	{ id = 3, defenders = 1000, turretDps = 1.6 }, -- 11%
+	{ id = 4, defenders = 10000, turretDps = 54 }, -- 13%
+	{ id = 5, defenders = 100000, turretDps = 220 }, -- 14%
+	{ id = 6, defenders = 1000000, turretDps = 820 }, -- 16%
+	{ id = 7, defenders = 10000000, turretDps = 20000 }, -- 17%
+	{ id = 8, defenders = 100000000, turretDps = 73000 }, -- 19%
+	{ id = 9, defenders = 1000000000, turretDps = 250000 }, -- 20%
 }
 
 Config.Stages = Stages
@@ -813,31 +857,38 @@ Config.Boss = {
 -- ผลข้างเคียงที่ตั้งใจ: ลูกที่สะสมไว้ตั้งแต่ด่านต้นแรงขึ้นตามผู้เล่น ไม่มีกองที่ตกยุค
 --
 --------------------------------------------------------------------------------
--- ⚠️ ทำไม BASE = 2 ไม่ใช่ 8
+-- ⚠️ ทำไม BASE = 2.5 ไม่ใช่ 5 (และไม่ใช่ 8 ตามที่เคยสั่งมาก่อนหน้า)
 --------------------------------------------------------------------------------
--- ระบบรบใหม่ (ปล่อยต่อเนื่อง) เปลี่ยนสมการทั้งหมด
--- เดิม: damage รวม = "จำนวนที่สะสมได้" × damage/ตัว → upgrade อัตราผลิตคูณ damage ตรง ๆ
--- ใหม่: damage/วินาที = min(อัตราผลิต, อัตราปล่อย) × damage/ตัว × BASE^(N-1)
---       พอชนเพดานปล่อยแล้ว upgrade อัตราผลิต "หลุดออกจากสมการ damage" ทันที
---       (ยังมีประโยชน์เพราะเติมคลังเร็วขึ้น แต่ไม่ใช่ตัวคูณ damage อีกต่อไป)
+-- สมการของระบบรบแบบปล่อยต่อเนื่อง:
+--     เวลาต่อด่าน = HP ÷ (อัตราปล่อย × damage/ตัว × BASE^(N-1))
 --
--- เวลาต่อด่าน = HP ÷ (อัตราปล่อย × damage/ตัว × BASE^(N-1))
---     HP ด่านโต ×10/ด่าน · damage/ตัวโต ×1.99/ด่าน (น้ำหนักแม่ ×3.96 ผ่าน sqrt)
---     → ต้องการ 1.99 × R × BASE ≈ 10 ถึงจะยากเท่ากันทุกด่าน (R = อัตราโตของการปล่อย)
+-- HP ของด่านโต ×10 ต่อด่าน ส่วนฝั่งเราโตจาก 2 ทางเท่านั้น (น้ำหนักคงที่แล้ว):
+--     คลาสไต่ C → A ตามด่าน   ≈ ×1.70/ด่าน
+--     อัตราปล่อย 1 → 10       ≈ ×1.39/ด่าน
 --
---     BASE = 8 → R = 0.63/ด่าน = อัตราปล่อยต้อง "ลดลง" ทุกด่าน ซึ่งเป็นไปไม่ได้
---                และด่าน 4 ขึ้นไปจะจบทันที (~0 ชม.)
---     BASE = 1 → ด่าน 9 ใช้เวลา 2,536 ชม. เกินเพดาน 72 ชม.
---     BASE = 2 → R = 2.51/ด่าน เข้ากับตารางปล่อยข้างล่างพอดี
---                ด่าน 2 = 0.73 ชม. → ด่าน 9 = 9.9 ชม. (ไต่ขึ้น 13.5 เท่า)
+-- ถ้าดูแค่ "อัตราการโต" จะได้ BASE ≈ 10 ÷ (1.70 × 1.39) ≈ 4.2 ซึ่งเป็นที่มาของ 5
+-- แต่อัตราการโตไม่ใช่ข้อจำกัดเดียว — **ระดับสัมบูรณ์ก็ถูกบังคับด้วย**
+-- BalanceCheck บอกว่าทุกด่านต้องใช้เวลา 0.5–72 ชั่วโมง และตัวคูณคลาสชุดใหม่
+-- (S = ×216) ทำให้ damage ต่อตัวสูงมากอยู่แล้ว BASE ที่สูงไปจึงดันให้ด่านจบเร็วเกิน
 --
--- BASE = 2 เป็นค่าเดียวที่ผ่าน assertProgressionIsSane() ข้างล่าง
--- (ตั้ง 8 แล้วยามจะไม่ยอมให้เซิร์ฟบูต — ทดสอบแล้ว)
+-- ตัวเลขจริงที่คำนวณได้ (แม่ 500 kg คงที่ · คลาส C,C,C,B,B,B,A,A,A):
+--
+--     BASE | ด่าน 2 | ด่าน 5 | ด่าน 9 | ผ่านยาม
+--     -----|--------|--------|--------|---------
+--      1   | 4.4 ชม | 216 ชม | 47 ปี  | ❌ เกินเพดาน 72 ชม.
+--      2.5 | 1.7 ชม | 2.6 ชม | 34 ชม  | ✅
+--      5   | 0.8 ชม | 0.1 ชม | 2 นาที | ❌ ต่ำกว่าพื้น 0.5 ชม. และเกมง่ายลงเรื่อย ๆ
+--      8   | 0.5 ชม | 0.0 ชม | ~0     | ❌
+--
+-- ช่วงที่ผ่านยามทั้งหมดคือ 2.28–3.07 → เลือก 2.5 เพราะอยู่กลางช่วงและเป็นเลขกลม
+-- (ต่ำสุด 0.99 ชม. · สูงสุด 33.9 ชม. · เวลาฟาร์มไม่เกิน 2.4 เท่าของเวลาตี)
+--
+-- assertProgressionIsSane() ข้างล่างจะไม่ยอมให้เซิร์ฟบูตถ้าตั้งค่าที่หลุดช่วงนี้
 
 Config.Combat = {
 	-- ฐานของตัวคูณ damage ต่อ 1 กำแพงที่พังได้ (1 = ปิด)
-	-- ⚠️ ดูเหตุผลที่ไม่ใช้ 8 ในบล็อกด้านบน
-	STAGE_DAMAGE_BASE = 2,
+	-- ⚠️ ดูเหตุผลที่ไม่ใช้ 5 ในบล็อกด้านบน — ช่วงที่ใช้ได้คือ 2.28–3.07 เท่านั้น
+	STAGE_DAMAGE_BASE = 2.5,
 
 	-- อัตราปล่อยทหารออกจากจุดสปอน (ตัว/วินาที) ต่อด่าน
 	-- ⚠️ นี่คือ "เพดาน damage ต่อวินาที" ของผู้เล่น และเป็นคอขวดหลักตั้งแต่ด่าน 3 ขึ้นไป
@@ -883,10 +934,32 @@ Config.BalanceCheck = {
 	MIN_HOURS_PER_STAGE = 0.5, -- เร็วกว่านี้ = ด่านไม่มีความหมาย
 	MAX_HOURS_PER_STAGE = 72, -- ช้ากว่านี้ = ผู้เล่นเลิกเล่น
 
-	-- น้ำหนักแม่ที่ผู้เล่นทั่วไปหาได้ตอนอยู่ด่านนั้น
-	REFERENCE_WEIGHT = { 500, 2000, 8000, 30000, 120000, 500000, 2000000, 8000000, 30000000 },
-	-- คลาสที่ผู้เล่นทั่วไปมีตอนอยู่ด่านนั้น
-	REFERENCE_CLASS = { "C", "C", "B", "B", "A", "A", "S", "S", "S" },
+	-- ══ ผู้เล่นอ้างอิง ══
+	--
+	-- ⚠️ เคยตั้งเป็น "แม่หนักขึ้น ×4 ทุกด่าน" (500 → 30,000,000 kg) ซึ่งผิด
+	-- เพราะตารางสุ่มน้ำหนักเหมือนกันทุกด่าน แม่ 30M kg คือ tier 6 = 1 ใน 111,111
+	-- ที่อัตราไข่จริง (5 ฟอง/5 นาที ÷ 7 คน) ต้องฟาร์มหลักหมื่นชั่วโมง
+	-- ขณะที่เวลาตีกำแพงด่าน 9 อยู่หลักสิบชั่วโมง → ยามผ่าน ทั้งที่เกมเล่นไม่ไหว
+	--
+	-- ตอนนี้จึงใช้ **น้ำหนักคงที่ระดับ tier 1** (ซึ่ง 90% ของไข่ให้)
+	-- แล้วให้ "คลาส" เป็นตัวไต่ตามด่านแทน — นี่คือเส้นทางที่ผู้เล่นจริงเดิน
+	REFERENCE_WEIGHT = { 500, 500, 500, 500, 500, 500, 500, 500, 500 },
+
+	-- คลาสที่ผู้เล่นทั่วไปหาได้จริงตอนอยู่ด่านนั้น
+	-- เทียบกับตารางคลาสของไข่ด่านนั้น: A ที่ด่าน 7 = 25% ของไข่ · S = 1% เท่านั้น
+	-- จึงตั้งเพดานไว้ที่ A ไม่ใช่ S — S/SS เป็นของแถมที่ทำให้เร็วขึ้น ไม่ใช่ของที่ต้องมี
+	REFERENCE_CLASS = { "C", "C", "C", "B", "B", "B", "A", "A", "A" },
+
+	-- ══ โมเดลอัตราได้ไข่ ══ ใช้ตรวจว่า "เวลาฟาร์ม" ไม่บานเกินเวลาตี
+	-- บอสรีเกิดทุก RESPAWN_SECONDS วางไข่ EGGS_PER_SPAWN ฟอง หารกันทั้งเซิร์ฟ
+	PLAYERS_PER_SERVER = 7,
+
+	-- เวลาฟาร์มไข่ให้ได้ของที่ด่านนั้นต้องการ ต้องไม่เกินเวลาตีกำแพงกี่เท่า
+	-- เกินเมื่อไหร่แปลว่าเกมกลายเป็น "นั่งรอไข่" ไม่ใช่ "ตีกำแพง"
+	MAX_FARM_TO_CLEAR_RATIO = 5,
+
+	-- เพดานอัตราส่วนตัวคูณคลาส SS ÷ S — กัน pay-to-win
+	MAX_SS_OVER_S_RATIO = 2.5,
 
 	-- ⚠️ เพดานสัดส่วนกำลังพลที่ turret กินได้ของผู้เล่นชั้นกลาง
 	-- turretDps ที่ตั้งไว้ตอนนี้ไล่ 10% → 20% เผื่อไว้ถึง 35% กันตั้งพลาด
@@ -1296,7 +1369,8 @@ end
 -- สุ่ม 2 ขั้นตามที่อธิบายไว้ข้างบน: เลือก tier ก่อน แล้วค่อยสุ่มในช่วงของ tier นั้น
 -- rng ส่งเข้ามาจากข้างนอกเพื่อให้เทสต์ซ้ำได้ด้วย seed เดิม
 
--- ตารางสุ่มน้ำหนักของด่านนั้น ถ้ายังไม่กำหนดให้ถอยไปใช้ด่านที่ต่ำกว่าที่ใกล้ที่สุด
+-- ตารางสุ่มน้ำหนักของด่านนั้น
+-- ตอนนี้ทุกด่านถอยมาใช้ตารางด่าน 1 ซึ่งเป็น **พฤติกรรมที่ต้องการ ไม่ใช่ของค้าง**
 -- (ด่าน 1 กำหนดไว้แล้วเสมอ จึงมีของให้ถอยไปใช้แน่นอน)
 function Config.getWeightTiers(stage: number): { WeightTier }
 	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
@@ -1746,6 +1820,23 @@ end
 -- (ลูกของแม่ตัวเล็กหนักไม่ถึง 10 kg เช่นแม่ 999 → ลูก 9.99)
 -- ไม่ใส่หน่วย "kg" ให้ ผู้เรียกเติมเองตามบริบท
 
+-- เงินที่ได้จากการฆ่าทหารฝ่ายรับ 1 ตัวในด่านนั้น
+function Config.getDefenderKillReward(stage: number): number
+	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
+	return Config.Economy.KILL_DEFENDER_BASE * Config.Economy.KILL_DEFENDER_MULTIPLIER ^ (clamped - 1)
+end
+
+-- เงินรวมที่ได้จากการกวาดทหารฝ่ายรับทั้งด่านจนหมด (ได้ครั้งเดียวต่อผู้เล่น)
+function Config.getStageDefenderRewardTotal(stage: number): number
+	return Config.getStageDefenderCount(stage) * Config.getDefenderKillReward(stage)
+end
+
+-- เงินที่ได้จากการฆ่าบอสของด่านนั้น 1 ครั้ง (ก่อนแบ่งให้ผู้เล่นที่ร่วมตี)
+function Config.getBossKillReward(stage: number): number
+	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
+	return Config.Economy.KILL_BOSS_BASE * Config.Economy.KILL_BOSS_MULTIPLIER ^ (clamped - 1)
+end
+
 function Config.formatWeight(kg: number): string
 	local abs = math.abs(kg)
 
@@ -1778,43 +1869,78 @@ end
 -- ยามตัวนี้จึงคำนวณ "ผู้เล่นชั้นกลางใช้เวลากี่ชั่วโมงกว่าจะพังกำแพงด่าน N"
 -- แล้วบังคับให้อยู่ในช่วงที่ยอมรับได้ **ทั้งสองด้าน**
 -- ช้าไป = ผู้เล่นเลิกเล่น · เร็วไป = ด่านนั้นไม่มีความหมาย
+-- ชั่วโมงที่ผู้เล่นชั้นกลางใช้ตีกำแพงด่านนั้นจนพัง (0 = ด่านที่ไม่มีกำแพง)
+-- แยกออกมาเป็นฟังก์ชันของโมดูลเพราะยามสองตัวและเทสต์ต้องใช้ค่าเดียวกัน
+local function referenceCharForClass(class: string): string
+	for id, character in Characters do
+		if character.class == class and character.enabled then
+			return id
+		end
+	end
+	error(`Config: BalanceCheck อ้างคลาส "{class}" ที่ไม่มีตัวละครที่เปิดใช้อยู่เลย`)
+end
+
+-- damage/วินาทีของผู้เล่นชั้นกลางที่ด่านนั้น
+-- ⚠️ ระบบปล่อยต่อเนื่อง: อัตราจริง = min(ผลิตได้, ปล่อยได้)
+-- พอชนเพดานปล่อยแล้ว upgrade อัตราผลิตหยุดเพิ่ม damage ทันที
+function Config.getReferenceDps(stage: number): number
+	local check = Config.BalanceCheck
+	local weight = check.REFERENCE_WEIGHT[stage]
+	local charId = referenceCharForClass(check.REFERENCE_CLASS[stage])
+
+	-- ผู้เล่นชั้นกลางที่ด่าน N: คอกเลเวล N · upgrade อัตราผลิตขั้น N-1
+	local producedPerSecond = Config.getPenCapacity(stage)
+		* Config.getProductionPerMinute(weight, nil, stage - 1, true)
+		/ 60
+	local effectiveRate = math.min(producedPerSecond, Config.getReleaseRate(stage))
+
+	return effectiveRate * Config.computeBattlePower(Config.getChildWeight(weight), charId, nil, stage)
+end
+
+-- ชั่วโมงที่ใช้ตีกำแพงด่านนั้นจนพัง (0 = ด่านที่ไม่มีกำแพง)
+function Config.getReferenceClearHours(stage: number): number
+	local totalHp = Config.getStageTotalHp(stage)
+	if totalHp <= 0 then
+		return 0
+	end
+	return totalHp / (Config.getReferenceDps(stage) * 3600)
+end
+
+-- ไข่ที่ผู้เล่น 1 คนได้ต่อชั่วโมง (บอสรีเกิดเรื่อย ๆ หารกันทั้งเซิร์ฟ)
+function Config.getEggsPerHour(): number
+	local boss = Config.Boss
+	local spawnsPerHour = 3600 / boss.RESPAWN_SECONDS
+	return spawnsPerHour * boss.EGGS_PER_SPAWN / Config.BalanceCheck.PLAYERS_PER_SERVER
+end
+
+-- ชั่วโมงที่ใช้ฟาร์มไข่จนเติมคอกเต็มด้วยแม่คลาสอ้างอิงของด่านนั้น (หรือดีกว่า)
+-- ⚠️ น้ำหนักอ้างอิงอยู่ใน tier 1 ซึ่ง 90% ของไข่ให้อยู่แล้ว จึงคิดเฉพาะโอกาสของคลาส
+function Config.getReferenceFarmHours(stage: number): number
+	local check = Config.BalanceCheck
+	local wanted = check.REFERENCE_CLASS[stage]
+	local wantedOrder = CharacterClasses[wanted].order
+
+	-- โอกาสที่ไข่ของด่านนั้นให้คลาสที่ "ดีเท่าหรือดีกว่า" ที่ต้องการ
+	-- (order น้อย = คลาสสูงกว่า)
+	local pool = EggCharacterPools[Config.getBossEggId(stage)]
+	local chance = 0
+	for _, entry in pool do
+		if CharacterClasses[entry.class].order <= wantedOrder then
+			chance += entry.weight
+		end
+	end
+	chance /= Config.CLASS_ROLL_MAX
+
+	if chance <= 0 then
+		return math.huge
+	end
+
+	local eggsNeeded = Config.getPenCapacity(stage) / chance
+	return eggsNeeded / Config.getEggsPerHour()
+end
+
 local function assertProgressionIsSane()
 	local check = Config.BalanceCheck
-
-	-- damage/วินาทีที่ผู้เล่นทำได้จริงที่ด่านนั้น
-	-- ⚠️ ระบบใหม่เป็นการปล่อยต่อเนื่อง ไม่ใช่ส่งกองทัพทีเดียว
-	-- อัตราจริงจึงเป็น min(ผลิตได้, ปล่อยได้) ไม่ใช่ "จำนวนที่สะสมได้ทั้งหมด"
-	-- ผลสำคัญ: พอชนเพดานปล่อยแล้ว **upgrade อัตราผลิตหยุดเพิ่ม damage ทันที**
-	-- (ยังมีประโยชน์อยู่ เพราะเติมคลังเร็วขึ้น แต่ไม่ใช่ตัวคูณ damage อีกต่อไป)
-	local function damagePerSecondAt(stage: number): number
-		local weight = check.REFERENCE_WEIGHT[stage]
-		local class = check.REFERENCE_CLASS[stage]
-
-		local charId: string? = nil
-		for id, character in Characters do
-			if character.class == class then
-				charId = id
-				break
-			end
-		end
-		assert(charId ~= nil, `Config: BalanceCheck อ้างคลาส "{class}" ที่ไม่มีตัวละครอยู่เลย`)
-
-		-- ผู้เล่นชั้นกลางที่ด่าน N: คอกเลเวล N · upgrade อัตราผลิตขั้น N-1
-		local producedPerSecond = Config.getPenCapacity(stage)
-			* Config.getProductionPerMinute(weight, nil, stage - 1, true)
-			/ 60
-		local effectiveRate = math.min(producedPerSecond, Config.getReleaseRate(stage))
-
-		return effectiveRate * Config.computeBattlePower(Config.getChildWeight(weight), charId, nil, stage)
-	end
-
-	local function hoursAt(stage: number): number
-		local totalHp = Config.getStageTotalHp(stage)
-		if totalHp <= 0 then
-			return 0 -- ด่านที่ไม่มีกำแพง (ด่าน 1) ไม่ต้องตี
-		end
-		return totalHp / (damagePerSecondAt(stage) * 3600)
-	end
 
 	local firstGuarded: number? = nil
 	local lastGuarded: number? = nil
@@ -1826,7 +1952,7 @@ local function assertProgressionIsSane()
 		)
 
 		if Config.getStageTotalHp(stage) > 0 then
-			local hours = hoursAt(stage)
+			local hours = Config.getReferenceClearHours(stage)
 
 			assert(
 				hours <= check.MAX_HOURS_PER_STAGE,
@@ -1837,6 +1963,19 @@ local function assertProgressionIsSane()
 				hours >= check.MIN_HOURS_PER_STAGE,
 				`Config: ด่าน {stage} ใช้เวลาแค่ {string.format("%.3f", hours)} ชั่วโมง (ขั้นต่ำ {check.MIN_HOURS_PER_STAGE}) `
 					.. `— เร็วเกินจนด่านไม่มีความหมาย มักเกิดจากตัวคูณฝั่ง damage โตเร็วกว่า HP ของด่าน`
+			)
+
+			-- ⚠️ ยามข้อที่สำคัญที่สุดของรอบนี้
+			-- เวลาตีอย่างเดียวไม่พอ ต้องดูด้วยว่า "กว่าจะหาของมาตีได้" ใช้เวลาเท่าไหร่
+			-- เคยพลาดมาแล้ว: ยามผ่านทุกด่าน ทั้งที่ของที่ยามสมมติว่าผู้เล่นมี
+			-- ต้องฟาร์มหลักหมื่นชั่วโมงถึงจะได้ (แม่ tier 6 = 1 ใน 111,111)
+			local farmHours = Config.getReferenceFarmHours(stage)
+			assert(
+				farmHours <= hours * check.MAX_FARM_TO_CLEAR_RATIO,
+				`Config: ด่าน {stage} ใช้เวลาฟาร์มไข่ {string.format("%.1f", farmHours)} ชม. `
+					.. `แต่ตีกำแพงแค่ {string.format("%.1f", hours)} ชม. `
+					.. `(เกิน {check.MAX_FARM_TO_CLEAR_RATIO} เท่า) — เกมกลายเป็นนั่งรอไข่ ไม่ใช่ตีกำแพง `
+					.. `ตรวจ BalanceCheck.REFERENCE_CLASS กับตารางคลาสของไข่ด่านนั้น`
 			)
 
 			if firstGuarded == nil then
@@ -1871,25 +2010,7 @@ local function assertTurretIsSurvivable()
 	for stage = 1, Config.Stage.COUNT do
 		local turret = Config.getStageTurretDps(stage)
 		if turret > 0 then
-			local weight = check.REFERENCE_WEIGHT[stage]
-			local class = check.REFERENCE_CLASS[stage]
-
-			local charId: string? = nil
-			for id, character in Characters do
-				if character.class == class then
-					charId = id
-					break
-				end
-			end
-			assert(charId ~= nil, `Config: BalanceCheck อ้างคลาส "{class}" ที่ไม่มีตัวละครอยู่เลย`)
-
-			local producedPerSecond = Config.getPenCapacity(stage)
-				* Config.getProductionPerMinute(weight, nil, stage - 1, true)
-				/ 60
-			local effectiveRate = math.min(producedPerSecond, Config.getReleaseRate(stage))
-			local ourDps = effectiveRate
-				* Config.computeBattlePower(Config.getChildWeight(weight), charId, nil, stage)
-
+			local ourDps = Config.getReferenceDps(stage)
 			assert(ourDps > 0, `Config: ด่าน {stage} คำนวณ damage/วินาที ได้ 0`)
 
 			local toll = turret / ourDps
@@ -2417,6 +2538,75 @@ function Config.validate()
 		Config.BalanceCheck.TURRET_TOLL_CEILING > 0 and Config.BalanceCheck.TURRET_TOLL_CEILING < 1,
 		"Config: TURRET_TOLL_CEILING ต้องอยู่ระหว่าง 0 กับ 1 (เป็นสัดส่วนของกำลังพล)"
 	)
+	assert(
+		Config.BalanceCheck.MAX_FARM_TO_CLEAR_RATIO > 0,
+		"Config: MAX_FARM_TO_CLEAR_RATIO ต้องมากกว่า 0"
+	)
+	assert(
+		Config.BalanceCheck.PLAYERS_PER_SERVER > 0,
+		"Config: PLAYERS_PER_SERVER ต้องมากกว่า 0"
+	)
+
+	----------------------------------------------------------------------------
+	-- ตัวคูณคลาส — กัน pay-to-win
+	----------------------------------------------------------------------------
+	-- SS ออกจากไข่ Robux เท่านั้น ถ้าปล่อยให้ห่างจาก S มาก ๆ คนจ่ายเงินจะชนะขาด
+	-- เพดานนี้คือสิ่งเดียวที่กันไม่ให้ใครมาไล่ ×6 ต่อจาก S เป็น 1,296 ทีหลัง
+	local ssMultiplier = CharacterClasses.SS.multiplier
+	local sMultiplier = CharacterClasses.S.multiplier
+	assert(sMultiplier > 0, "Config: ตัวคูณคลาส S ต้องมากกว่า 0")
+	assert(
+		ssMultiplier / sMultiplier <= Config.BalanceCheck.MAX_SS_OVER_S_RATIO,
+		`Config: คลาส SS แรงกว่า S อยู่ {string.format("%.2f", ssMultiplier / sMultiplier)} เท่า `
+			.. `(เพดาน {Config.BalanceCheck.MAX_SS_OVER_S_RATIO}) — SS ออกจากไข่ Robux เท่านั้น `
+			.. `ปล่อยให้ห่างกว่านี้ = pay-to-win`
+	)
+
+	-- คลาสต้องเรียงจากแรงมากไปน้อยตาม order ไม่งั้นตาราง UI กับสมดุลจะขัดกันเอง
+	local byOrder: { CharacterClass } = {}
+	for _, class in CharacterClasses do
+		table.insert(byOrder, class)
+	end
+	table.sort(byOrder, function(a, b)
+		return a.order < b.order
+	end)
+	for index = 2, #byOrder do
+		assert(
+			byOrder[index].multiplier < byOrder[index - 1].multiplier,
+			`Config: คลาส "{byOrder[index].id}" ไม่ได้อ่อนกว่าคลาสที่อยู่เหนือมัน ("{byOrder[index - 1].id}")`
+		)
+	end
+
+	----------------------------------------------------------------------------
+	-- เงินจากการฆ่า — ต้องไม่ตกยุค
+	----------------------------------------------------------------------------
+	-- ราคาของทุกอย่างโต ×10 ต่อขั้น ถ้าบ่อเงินโตช้ากว่านั้น มันจะกลายเป็นเศษเงิน
+	-- กลางเกม แล้วผู้เล่นจะกลับไปติดปัญหาเดิม: มีบ่อเงินแต่ซื้ออะไรไม่ได้
+	local priceGrowth = math.max(
+		Config.Pen.UPGRADE_COST_MULTIPLIER,
+		Config.Production.UPGRADE_COST_MULTIPLIER,
+		Config.Weapon.UPGRADE_COST_MULTIPLIER
+	)
+
+	assert(economy.KILL_DEFENDER_BASE > 0, "Config: KILL_DEFENDER_BASE ต้องมากกว่า 0")
+	assert(economy.KILL_BOSS_BASE > 0, "Config: KILL_BOSS_BASE ต้องมากกว่า 0")
+	assert(
+		economy.KILL_BOSS_MULTIPLIER >= priceGrowth,
+		`Config: เงินจากบอสโต ×{economy.KILL_BOSS_MULTIPLIER} ต่อด่าน แต่ราคาของโต ×{priceGrowth} `
+			.. `— บอสจะกลายเป็นเศษเงินตั้งแต่กลางเกม`
+	)
+
+	for rewardStage = 2, Config.Stage.COUNT do
+		local previous = Config.getStageDefenderRewardTotal(rewardStage - 1)
+		if previous > 0 then
+			local growth = Config.getStageDefenderRewardTotal(rewardStage) / previous
+			assert(
+				growth >= priceGrowth,
+				`Config: เงินจากการกวาดทหารด่าน {rewardStage} โตแค่ ×{string.format("%.2f", growth)} จากด่านก่อน `
+					.. `แต่ราคาของโต ×{priceGrowth} — บ่อเงินนี้จะตกยุค`
+			)
+		end
+	end
 
 	-- ทำท้ายสุด เพราะต้องใช้ค่าที่เช็คไปแล้วข้างบนทั้งหมด
 	assertProgressionIsSane()

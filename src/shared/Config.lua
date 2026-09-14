@@ -48,6 +48,10 @@ export type EggType = {
 	source: string, -- "boss" = แย่งจากรังบอส | "robux" = Developer Product
 	hatchTime: number, -- เวลาฟักเป็นวินาที นับฝั่ง server เท่านั้น
 
+	-- ด่านที่ไข่ฟองนี้มาจาก (บอสด่าน N วางไข่ของด่าน N เท่านั้น)
+	-- nil = ไม่ผูกกับด่าน (ไข่ Robux ใช้ด่านที่ผู้ซื้ออยู่)
+	stage: number?,
+
 	-- รับประกัน tier น้ำหนักขั้นต่ำ (nil = ไม่รับประกัน สุ่มตามตารางล้วน)
 	-- สุ่มตามตารางปกติก่อน ถ้าได้ต่ำกว่านี้ค่อยดันขึ้นมา — ยังลุ้นตัวใหญ่กว่าได้
 	-- ใช้กับไข่ที่จ่ายเงินจริง เพื่อให้ "จ่ายแล้วไม่มีทางเสียใจ"
@@ -303,8 +307,8 @@ Config.Production = {
 	-- ตรงกับ cap ออฟไลน์ 8 ชั่วโมงพอดี ระบบจึงสม่ำเสมอกันทั้งเกม
 	-- 500 ตัวปล่อยที่ 1 ตัว/วินาที = ระบายหมดใน ~8 นาที (นั่งดูได้จริง)
 	-- คลังเต็ม → แม่ตัวนั้น **หยุดผลิต** + แจ้งเตือนผู้เล่น
+	-- ⚠️ ตายตัว 500 ไม่มีระบบอัปเกรด (ตัดสินแล้ว)
 	STACK_CAP = 500,
-	STACK_CAP_START = 200, -- เผื่ออัปเกรดทีหลัง: เริ่ม 200 อัปได้ถึง STACK_CAP
 
 	OFFLINE_CAP_SECONDS = 8 * 60 * 60, -- สะสมออฟไลน์ได้สูงสุด 8 ชั่วโมง (= 48 ตัวต่อแม่ 1 ตัว)
 
@@ -490,9 +494,12 @@ Config.Inventory = {
 -- ค่าตั้งต้นตอนสร้าง PlayerData ครั้งแรก อยู่ที่นี่ไม่ใช่ฝังใน DataService
 -- จะได้ปรับ onboarding ได้โดยไม่ต้องแตะโค้ดเซฟ
 
--- [eggId] = จำนวน — แถมไข่ให้ลองวางทันทีโดยไม่ต้องซื้อ
+-- [eggId] = จำนวน — แถมไข่ให้ลองฟักทันที
+-- ⚠️ เป็นแค่ "คำสั่งแจกไข่" ไม่ใช่รูปแบบที่เก็บใน PlayerData
+-- ตอนแจกจริง server ต้องสุ่มน้ำหนักให้ไข่แต่ละฟองด้วย rollMotherWeightForEgg()
+-- แล้วเก็บเป็นรายฟอง (ดู docs/data-schema.md §3 — heldEggs เป็นอาเรย์ ไม่ใช่ตัวนับ)
 local startingEggs: { [string]: number } = {
-	egg_common = 1,
+	egg_stage1 = 1,
 }
 
 Config.NewPlayer = {
@@ -570,6 +577,10 @@ Config.Characters = Characters
 --
 -- weight เป็นจำนวนเต็มต่อ 10,000 (validate() บังคับผลรวมให้เท่ากับ CLASS_ROLL_MAX)
 -- สุ่ม 2 ขั้นเหมือนน้ำหนัก: สุ่มคลาสก่อน แล้วค่อยสุ่มตัวละครในคลาสนั้นแบบเท่า ๆ กัน
+--
+-- ⚠️ ไข่จากบอส "คนละใบต่อด่าน" — ด่านสูงออกคลาสสูงบ่อยขึ้น
+-- นี่คือสิ่งเดียวที่ต่างกันระหว่างด่าน ตารางสุ่ม "น้ำหนัก" ใช้ชุดเดียวกันทุกด่าน
+-- (ความคุ้มของการไต่ด่านจึงมาจากโอกาสได้คลาสดี ไม่ใช่โอกาสได้ตัวหนัก)
 
 Config.CLASS_ROLL_MAX = 10000
 
@@ -583,6 +594,52 @@ local EggCharacterPools: { [string]: { ClassChance } } = {
 		{ class = "B", weight = 7000 }, -- 70%
 		{ class = "A", weight = 2700 }, -- 27%
 		{ class = "S", weight = 300 }, -- 3%   ← เพดานของไข่จากบอส
+	},
+	egg_stage1 = {
+		{ class = "C", weight = 9000 }, -- 90%
+		{ class = "B", weight = 1000 }, -- 10%
+	},
+	egg_stage2 = {
+		{ class = "C", weight = 8000 }, -- 80%
+		{ class = "B", weight = 2000 }, -- 20%
+	},
+	egg_stage3 = {
+		{ class = "C", weight = 7000 }, -- 70%
+		{ class = "B", weight = 2990 }, -- 29.9%
+		{ class = "A", weight = 10 }, -- 0.1%
+	},
+	egg_stage4 = {
+		{ class = "C", weight = 6000 }, -- 60%
+		{ class = "B", weight = 3900 }, -- 39%
+		{ class = "A", weight = 100 }, -- 1%
+	},
+	egg_stage5 = {
+		{ class = "C", weight = 5000 }, -- 50%
+		{ class = "B", weight = 4500 }, -- 45%
+		{ class = "A", weight = 500 }, -- 5%
+	},
+	egg_stage6 = {
+		{ class = "C", weight = 4000 }, -- 40%
+		{ class = "B", weight = 5000 }, -- 50%
+		{ class = "A", weight = 1000 }, -- 10%
+	},
+	egg_stage7 = {
+		{ class = "C", weight = 3000 }, -- 30%
+		{ class = "B", weight = 4500 }, -- 45%
+		{ class = "A", weight = 2400 }, -- 24%
+		{ class = "S", weight = 100 }, -- 1%
+	},
+	egg_stage8 = {
+		{ class = "C", weight = 2000 }, -- 20%
+		{ class = "B", weight = 3000 }, -- 30%
+		{ class = "A", weight = 4000 }, -- 40%
+		{ class = "S", weight = 1000 }, -- 10%
+	},
+	egg_stage9 = {
+		{ class = "C", weight = 1000 }, -- 10%
+		{ class = "B", weight = 2000 }, -- 20%
+		{ class = "A", weight = 5000 }, -- 50%
+		{ class = "S", weight = 2000 }, -- 20%
 	},
 	egg_legendary = {
 		{ class = "B", weight = 3500 }, -- 35%
@@ -671,35 +728,36 @@ Config.Hatchery = {
 -- เพื่อให้ปรับด่านใดด่านหนึ่งตอน balance ได้โดยไม่ต้องรื้อทั้งแถว
 --
 -- turretDps = อาวุธป้องกันของกำแพง ยิงใส่กองทัพเราตลอดเวลาที่ตี
--- ตั้งไว้ที่ 10% ของ damage รวมที่ทหารฝ่ายรับทำได้ (ทหาร N ตัว × 10 × 10%)
 --
--- 🔴 ห้ามเอาค่าชุดนี้ไปใช้ตรง ๆ ตอนทำ Phase 3 — รอตัดสินก่อน
---    ระบบรบใหม่ (ปล่อยต่อเนื่อง) ทำให้การรบมี "ระยะเวลา" จริงเป็นชั่วโมง
---    ค่าพวกนี้ตั้งไว้ตอนที่การรบยังคำนวณครั้งเดียว จึงแรงเกินไปมาก
+-- ⚠️ ตัวเลขชุดนี้ไม่ได้มาจากสูตร "10% ของ damage ทหารฝ่ายรับ" อีกแล้ว
+-- ในระบบรบแบบปล่อยต่อเนื่อง สิ่งที่กำหนดว่า turret แรงแค่ไหนคือสูตรนี้:
 --
 --        กำลังพลที่เสียให้ turret = turretDps ÷ (damage/วินาทีของเรา)
---        (เวลาตัดกันทั้งสองฝั่ง เพราะ HP ของตัวเรา = damage ของตัวเรา)
+--        (ระยะเวลารบตัดกันทั้งสองฝั่ง เพราะ HP ของตัวเรา = damage ของตัวเรา)
 --
---    ผลที่ได้: turret แรงกว่า damage/วิ ของผู้เล่นชั้นกลาง 17.6× (ด่าน 2)
---    ถึง 237.7× (ด่าน 9) → ทหารตายก่อนถึงกำแพงทุกตัว ผ่านไม่ได้สักด่าน
---    ค่าที่ควรเป็นถ้าอยากให้ turret กินกำลังพล 10%: ด่าน 2 = 0.57 · ด่าน 9 = 420,651
---    รายละเอียดและทางเลือก: docs/data-schema.md §8.6.1 และ §13
+-- จึงตั้ง turretDps = TURRET_TOLL ของด่านนั้น × damage/วินาทีของผู้เล่นชั้นกลาง
+-- ไล่จาก 10% ที่ด่าน 2 ถึง 20% ที่ด่าน 9 (ด่านสูงกำแพงเขี้ยวขึ้น)
 --
--- ⚠️ ค่านี้ผมตั้งเอง รอยืนยัน
+-- ผลข้างเคียงที่ตั้งใจ: แม่หนักกว่า = damage ต่อตัวสูงกว่า = เสียสัดส่วนน้อยกว่า
+-- ผู้เล่นที่ลงทุนกับแม่ได้รางวัลตรงนี้ฟรีโดยไม่ต้องเขียนกฎเพิ่ม
+--
+-- ⚠️ ห้ามตั้งค่านี้ด้วยมือโดยไม่คิดเป็นสัดส่วน — assertTurretIsSurvivable() ข้างล่าง
+-- จะไม่ยอมให้เซิร์ฟบูตถ้า turret กินกำลังพลเกิน TURRET_TOLL_CEILING
+-- (ชุดเดิมที่ตั้งเป็น 10% ของ damage ทหารรวม แรงกว่าที่ควรเป็น 17–238 เท่า)
 local Stages: { StageDef } = {
 	-- id  ทหารฝ่ายรับ          turretDps
 	-- ⚠️ ด่าน 1 ไม่มีกำแพงและไม่มีทหารฝ่ายรับ
 	-- เป็นด่านเริ่มต้น ผู้เล่นเดินไปสู้บอสตัวเล็กเอาไข่ได้เลยตั้งแต่เข้าเกมครั้งแรก
 	-- แก้ปัญหาไก่กับไข่: ต้องมีแม่ถึงจะมีกองทัพ ต้องมีไข่ถึงจะมีแม่
 	{ id = 1, defenders = 0, turretDps = 0 },
-	{ id = 2, defenders = 100, turretDps = 100 },
-	{ id = 3, defenders = 1000, turretDps = 1000 },
-	{ id = 4, defenders = 10000, turretDps = 10000 },
-	{ id = 5, defenders = 100000, turretDps = 100000 },
-	{ id = 6, defenders = 1000000, turretDps = 1000000 },
-	{ id = 7, defenders = 10000000, turretDps = 10000000 },
-	{ id = 8, defenders = 100000000, turretDps = 100000000 },
-	{ id = 9, defenders = 1000000000, turretDps = 1000000000 },
+	{ id = 2, defenders = 100, turretDps = 0.57 }, -- 10% ของ damage/วิ
+	{ id = 3, defenders = 1000, turretDps = 6.1 }, -- 11%
+	{ id = 4, defenders = 10000, turretDps = 53 }, -- 13%
+	{ id = 5, defenders = 100000, turretDps = 480 }, -- 14%
+	{ id = 6, defenders = 1000000, turretDps = 2800 }, -- 16%
+	{ id = 7, defenders = 10000000, turretDps = 28000 }, -- 17%
+	{ id = 8, defenders = 100000000, turretDps = 160000 }, -- 19%
+	{ id = 9, defenders = 1000000000, turretDps = 840000 }, -- 20%
 }
 
 Config.Stages = Stages
@@ -829,6 +887,11 @@ Config.BalanceCheck = {
 	REFERENCE_WEIGHT = { 500, 2000, 8000, 30000, 120000, 500000, 2000000, 8000000, 30000000 },
 	-- คลาสที่ผู้เล่นทั่วไปมีตอนอยู่ด่านนั้น
 	REFERENCE_CLASS = { "C", "C", "B", "B", "A", "A", "S", "S", "S" },
+
+	-- ⚠️ เพดานสัดส่วนกำลังพลที่ turret กินได้ของผู้เล่นชั้นกลาง
+	-- turretDps ที่ตั้งไว้ตอนนี้ไล่ 10% → 20% เผื่อไว้ถึง 35% กันตั้งพลาด
+	-- เกินจากนี้ = ทหารตายเร็วกว่าที่ทำ damage ได้ → ด่านนั้นผ่านไม่ได้เลย
+	TURRET_TOLL_CEILING = 0.35,
 }
 
 --------------------------------------------------------------------------------
@@ -951,9 +1014,11 @@ Config.UnitTypes = UnitTypes
 -- อยากเพิ่มโอกาสตัวไหนก็เพิ่มตัวเลข weight ของตัวนั้น
 
 local EggTypes: { [string]: EggType } = {
+	-- ⚠️ ไข่เดิมสองใบนี้ "เลิกใช้แล้ว" แต่ห้ามลบ (กฎ eggId ใน CLAUDE.md)
+	-- ระบบใหม่ใช้ไข่รายด่าน egg_stage1..egg_stage9 แทน
 	egg_common = {
 		id = "egg_common",
-		enabled = true,
+		enabled = false,
 		guaranteedTier = nil,
 		name = "ไข่ธรรมดา",
 		source = "boss",
@@ -968,7 +1033,7 @@ local EggTypes: { [string]: EggType } = {
 	},
 	egg_rare = {
 		id = "egg_rare",
-		enabled = true,
+		enabled = false,
 		guaranteedTier = nil,
 		name = "ไข่หายาก",
 		source = "boss",
@@ -982,12 +1047,148 @@ local EggTypes: { [string]: EggType } = {
 			{ unitId = "dragon_rider", weight = 1 },
 		},
 	},
+	egg_stage1 = {
+		id = "egg_stage1",
+		enabled = true,
+		guaranteedTier = nil,
+		name = "ไข่ด่าน 1",
+		source = "boss",
+		stage = 1,
+		hatchTime = 30,
+		color = Color3.fromRGB(235, 235, 225),
+		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
+		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
+		hatchTable = {
+			{ unitId = "recruit", weight = 100 },
+		},
+	},
+	egg_stage2 = {
+		id = "egg_stage2",
+		enabled = true,
+		guaranteedTier = nil,
+		name = "ไข่ด่าน 2",
+		source = "boss",
+		stage = 2,
+		hatchTime = 60,
+		color = Color3.fromRGB(200, 225, 235),
+		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
+		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
+		hatchTable = {
+			{ unitId = "recruit", weight = 100 },
+		},
+	},
+	egg_stage3 = {
+		id = "egg_stage3",
+		enabled = true,
+		guaranteedTier = nil,
+		name = "ไข่ด่าน 3",
+		source = "boss",
+		stage = 3,
+		hatchTime = 90,
+		color = Color3.fromRGB(150, 200, 235),
+		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
+		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
+		hatchTable = {
+			{ unitId = "spearman", weight = 100 },
+		},
+	},
+	egg_stage4 = {
+		id = "egg_stage4",
+		enabled = true,
+		guaranteedTier = nil,
+		name = "ไข่ด่าน 4",
+		source = "boss",
+		stage = 4,
+		hatchTime = 120,
+		color = Color3.fromRGB(120, 215, 180),
+		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
+		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
+		hatchTable = {
+			{ unitId = "spearman", weight = 100 },
+		},
+	},
+	egg_stage5 = {
+		id = "egg_stage5",
+		enabled = true,
+		guaranteedTier = nil,
+		name = "ไข่ด่าน 5",
+		source = "boss",
+		stage = 5,
+		hatchTime = 150,
+		color = Color3.fromRGB(150, 220, 120),
+		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
+		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
+		hatchTable = {
+			{ unitId = "archer", weight = 100 },
+		},
+	},
+	egg_stage6 = {
+		id = "egg_stage6",
+		enabled = true,
+		guaranteedTier = nil,
+		name = "ไข่ด่าน 6",
+		source = "boss",
+		stage = 6,
+		hatchTime = 180,
+		color = Color3.fromRGB(235, 215, 110),
+		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
+		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
+		hatchTable = {
+			{ unitId = "archer", weight = 100 },
+		},
+	},
+	egg_stage7 = {
+		id = "egg_stage7",
+		enabled = true,
+		guaranteedTier = nil,
+		name = "ไข่ด่าน 7",
+		source = "boss",
+		stage = 7,
+		hatchTime = 210,
+		color = Color3.fromRGB(240, 170, 80),
+		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
+		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
+		hatchTable = {
+			{ unitId = "knight", weight = 100 },
+		},
+	},
+	egg_stage8 = {
+		id = "egg_stage8",
+		enabled = true,
+		guaranteedTier = nil,
+		name = "ไข่ด่าน 8",
+		source = "boss",
+		stage = 8,
+		hatchTime = 240,
+		color = Color3.fromRGB(230, 110, 90),
+		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
+		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
+		hatchTable = {
+			{ unitId = "mage", weight = 100 },
+		},
+	},
+	egg_stage9 = {
+		id = "egg_stage9",
+		enabled = true,
+		guaranteedTier = nil,
+		name = "ไข่ด่าน 9",
+		source = "boss",
+		stage = 9,
+		hatchTime = 270,
+		color = Color3.fromRGB(190, 110, 235),
+		-- ⚠️ ตกค้างจาก Phase 1 (ฟักแล้วได้ "ทหาร") ตายตอน Phase 1.5
+		-- ระบบจริงใช้ EggCharacterPools + rollMotherWeightForEgg แทน
+		hatchTable = {
+			{ unitId = "dragon_rider", weight = 100 },
+		},
+	},
 	egg_legendary = {
 		id = "egg_legendary",
 		enabled = true,
 		guaranteedTier = 3,
 		name = "ไข่ตำนาน",
 		source = "robux",
+		stage = nil, -- ไม่ผูกด่าน — ใช้ด่านที่ผู้ซื้ออยู่ตอนกด
 		hatchTime = 300,
 		color = Color3.fromRGB(240, 185, 60),
 		hatchTable = {
@@ -1001,7 +1202,7 @@ local EggTypes: { [string]: EggType } = {
 Config.EggTypes = EggTypes
 
 -- ไข่ที่ปุ่มทดสอบฝั่ง client ใช้ (Phase 1 มีปุ่มเดียว)
-Config.DEFAULT_EGG_ID = "egg_common"
+Config.DEFAULT_EGG_ID = "egg_stage1"
 
 --------------------------------------------------------------------------------
 -- ตัวช่วยอ่านค่า
@@ -1140,12 +1341,26 @@ function Config.rollMotherWeight(rng: Random, stage: number?, guaranteedTier: nu
 end
 
 -- สุ่มน้ำหนักโดยอ่านการรับประกันจากตัวไข่เอง — ใช้ตัวนี้เป็นหลัก
+--
+-- ⚠️ เรียกตอน "บอสวางไข่ในรัง" ไม่ใช่ตอนฟัก
+-- น้ำหนักถูกล็อกตั้งแต่ไข่โผล่ในรัง แล้วเอาไปกำหนดขนาดโมเดลไข่ให้ผู้เล่นเห็น
+-- (ไข่ใหญ่ = หนัก) การแย่งไข่จึงมีเป้าหมายจริง ไม่ใช่กดสุ่มมั่ว ๆ
+-- ส่วนการสุ่ม "ตัวละคร" ทำตอนฟัก ด้วย Config.rollCharacter()
+--
+-- ไข่ที่ผูกด่านไว้แล้ว (ไข่จากบอส) ใช้ด่านของตัวเองเสมอ
+-- ไข่ที่ไม่ผูกด่าน (ไข่ Robux) ใช้ค่า stage ที่ผู้เรียกส่งมา
 function Config.rollMotherWeightForEgg(eggId: string, rng: Random, stage: number?): number?
 	local egg = EggTypes[eggId]
 	if not egg then
 		return nil
 	end
-	return Config.rollMotherWeight(rng, stage, egg.guaranteedTier)
+	return Config.rollMotherWeight(rng, egg.stage or stage, egg.guaranteedTier)
+end
+
+-- ไข่ที่บอสของด่านนั้นวางในรัง (ด่านนอกช่วงถูก clamp)
+function Config.getBossEggId(stage: number): string
+	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
+	return `egg_stage{clamped}`
 end
 
 --------------------------------------------------------------------------------
@@ -1641,6 +1856,53 @@ local function assertProgressionIsSane()
 	)
 end
 
+-- ⚠️ ยามตัวที่สอง: turret ต้องไม่แรงจนกองทัพไปไม่ถึงกำแพง
+--
+-- เรื่องนี้เคยพลาดมาแล้วและมองไม่เห็นด้วยตาเปล่า: turretDps ชุดแรกตั้งจาก
+-- "10% ของ damage ทหารฝ่ายรับทั้งด่าน" ซึ่งดูสมเหตุสมผลมากบนกระดาษ
+-- แต่มันเป็นตัวเลขระดับ "ทั้งกองทัพ" ที่ไปยิงใส่ทหารที่ปล่อยได้ทีละ 1-10 ตัว/วินาที
+-- ผลจริงคือ turret แรงกว่า damage/วิ ของผู้เล่น 17-238 เท่า = ผ่านไม่ได้สักด่าน
+--
+-- สูตรที่ใช้ตรวจ (ระยะเวลารบตัดกันออก เพราะ HP ของตัวเรา = damage ของตัวเรา):
+--     สัดส่วนกำลังพลที่เสีย = turretDps ÷ (damage/วินาทีของเรา)
+local function assertTurretIsSurvivable()
+	local check = Config.BalanceCheck
+
+	for stage = 1, Config.Stage.COUNT do
+		local turret = Config.getStageTurretDps(stage)
+		if turret > 0 then
+			local weight = check.REFERENCE_WEIGHT[stage]
+			local class = check.REFERENCE_CLASS[stage]
+
+			local charId: string? = nil
+			for id, character in Characters do
+				if character.class == class then
+					charId = id
+					break
+				end
+			end
+			assert(charId ~= nil, `Config: BalanceCheck อ้างคลาส "{class}" ที่ไม่มีตัวละครอยู่เลย`)
+
+			local producedPerSecond = Config.getPenCapacity(stage)
+				* Config.getProductionPerMinute(weight, nil, stage - 1, true)
+				/ 60
+			local effectiveRate = math.min(producedPerSecond, Config.getReleaseRate(stage))
+			local ourDps = effectiveRate
+				* Config.computeBattlePower(Config.getChildWeight(weight), charId, nil, stage)
+
+			assert(ourDps > 0, `Config: ด่าน {stage} คำนวณ damage/วินาที ได้ 0`)
+
+			local toll = turret / ourDps
+			assert(
+				toll <= check.TURRET_TOLL_CEILING,
+				`Config: turret ด่าน {stage} กินกำลังพล {string.format("%.1f", toll * 100)}% `
+					.. `(เพดาน {check.TURRET_TOLL_CEILING * 100}%) — ทหารจะตายก่อนถึงกำแพง `
+					.. `ตั้ง turretDps เป็นสัดส่วนของ damage/วินาที ไม่ใช่ของ damage ทหารฝ่ายรับ`
+			)
+		end
+	end
+end
+
 -- เช็คความถูกต้องของตารางตอนเซิร์ฟเวอร์บูต
 -- ถ้าพิมพ์ unitId ผิดในตารางสุ่ม จะได้รู้ทันทีตอนเปิดเกม ไม่ใช่ตอนผู้เล่นฟักไข่
 function Config.validate()
@@ -1731,10 +1993,6 @@ function Config.validate()
 		"Config: OFFLINE_RATE_RATIO ต้องอยู่ระหว่าง 0 ถึง 1 — ออฟไลน์ห้ามเร็วกว่าออนไลน์"
 	)
 	assert(production.STACK_CAP > 0, "Config: STACK_CAP ต้องมากกว่า 0")
-	assert(
-		production.STACK_CAP_START > 0 and production.STACK_CAP_START <= production.STACK_CAP,
-		"Config: STACK_CAP_START ต้องมากกว่า 0 และไม่เกิน STACK_CAP"
-	)
 	assert(production.OFFLINE_CAP_SECONDS > 0, "Config: OFFLINE_CAP_SECONDS ต้องมากกว่า 0")
 	assert(production.TICK_INTERVAL > 0, "Config: TICK_INTERVAL ต้องมากกว่า 0")
 	assert(production.MAX_PER_SETTLE > 0, "Config: MAX_PER_SETTLE ต้องมากกว่า 0")
@@ -1905,6 +2163,56 @@ function Config.validate()
 
 	for eggId in EggTypes do
 		assert(EggCharacterPools[eggId] ~= nil, `Config: ไข่ "{eggId}" ยังไม่มีตารางคลาสใน EggCharacterPools`)
+	end
+
+	----------------------------------------------------------------------------
+	-- ไข่รายด่าน — บอสด่าน N ต้องมีไข่ของตัวเองครบทุกด่าน
+	----------------------------------------------------------------------------
+	-- ถ้าด่านไหนไม่มีไข่ ผู้เล่นที่ไปถึงด่านนั้นจะแย่งไข่ไม่ได้เลย = ตันถาวร
+	local eggOfStage: { [number]: string } = {}
+	for eggId, egg in EggTypes do
+		if egg.stage ~= nil then
+			local stageId = egg.stage :: number
+			assert(
+				stageId % 1 == 0 and stageId >= 1 and stageId <= Config.Stage.COUNT,
+				`Config: ไข่ "{eggId}" ผูกกับด่าน {stageId} ที่อยู่นอกช่วง 1..{Config.Stage.COUNT}`
+			)
+			assert(
+				egg.source == "boss",
+				`Config: ไข่ "{eggId}" ผูกกับด่านแต่ source ไม่ใช่ "boss" — ไข่ที่ซื้อด้วย Robux ห้ามผูกด่าน`
+			)
+			assert(
+				eggOfStage[stageId] == nil,
+				`Config: ด่าน {stageId} มีไข่สองใบ ("{eggOfStage[stageId]}" กับ "{eggId}") — ต้องใบเดียวต่อด่าน`
+			)
+			eggOfStage[stageId] = eggId
+		end
+	end
+
+	for stageId = 1, Config.Stage.COUNT do
+		local eggId = Config.getBossEggId(stageId)
+		local egg = EggTypes[eggId]
+		assert(egg ~= nil, `Config: ด่าน {stageId} ไม่มีไข่ "{eggId}" — ผู้เล่นที่ไปถึงด่านนี้จะแย่งไข่ไม่ได้`)
+		assert(
+			(egg :: EggType).enabled,
+			`Config: ไข่ของด่าน {stageId} ("{eggId}") ถูกปิดอยู่ — ด่านนั้นจะไม่มีไข่ให้แย่ง`
+		)
+		assert(
+			eggOfStage[stageId] == eggId,
+			`Config: getBossEggId({stageId}) คืน "{eggId}" แต่ไข่ที่ผูกด่าน {stageId} ไว้คือ "{tostring(eggOfStage[stageId])}"`
+		)
+	end
+
+	-- ของที่แจกให้ผู้เล่นใหม่และไข่ default ต้องไม่ใช่ไข่ที่ปิดไปแล้ว
+	assert(
+		(EggTypes[Config.DEFAULT_EGG_ID] :: EggType).enabled,
+		`Config: DEFAULT_EGG_ID ชี้ไปที่ไข่ "{Config.DEFAULT_EGG_ID}" ที่ถูกปิดอยู่`
+	)
+	for eggId in Config.NewPlayer.startingEggs do
+		assert(
+			(EggTypes[eggId] :: EggType).enabled,
+			`Config: NewPlayer.startingEggs แจกไข่ "{eggId}" ที่ถูกปิดอยู่`
+		)
 	end
 
 	----------------------------------------------------------------------------
@@ -2105,9 +2413,14 @@ function Config.validate()
 		Config.BalanceCheck.MIN_HOURS_PER_STAGE < Config.BalanceCheck.MAX_HOURS_PER_STAGE,
 		"Config: ช่วงเวลาที่ยอมรับได้ของ BalanceCheck กลับหัว"
 	)
+	assert(
+		Config.BalanceCheck.TURRET_TOLL_CEILING > 0 and Config.BalanceCheck.TURRET_TOLL_CEILING < 1,
+		"Config: TURRET_TOLL_CEILING ต้องอยู่ระหว่าง 0 กับ 1 (เป็นสัดส่วนของกำลังพล)"
+	)
 
 	-- ทำท้ายสุด เพราะต้องใช้ค่าที่เช็คไปแล้วข้างบนทั้งหมด
 	assertProgressionIsSane()
+	assertTurretIsSurvivable()
 end
 
 return Config

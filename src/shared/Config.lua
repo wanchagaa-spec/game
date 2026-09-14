@@ -171,17 +171,14 @@ export type DamageFormula = {
 --------------------------------------------------------------------------------
 
 -- ⚠️ เปลี่ยนชื่อจาก Config.Farm ตอน Phase 1.5 — ดีไซน์ใหม่เรียกพื้นที่ของผู้เล่นว่า "คอก"
--- ตรงนี้เก็บเฉพาะ "รูปทรงของโลก" ส่วนความจุคอกอยู่ที่ Config.Pen (ตามเลเวล)
+-- ตรงนี้เก็บ "กติกาของเซิร์ฟเวอร์" ส่วน **รูปทรงของโลกย้ายไป Config.Map แล้ว**
+-- และความจุคอก (กี่ตัว) อยู่ที่ Config.Pen ซึ่งโตตามเลเวล
 Config.World = {
 	-- จำนวนคอกสูงสุดในเซิร์ฟเวอร์ = จำนวนผู้เล่นสูงสุดที่มีคอกได้พร้อมกัน
-	-- ⚠️ ต้องเท่ากับ BalanceCheck.PLAYERS_PER_SERVER เสมอ (validate() บังคับ)
+	-- ⚠️ ต้องเท่ากับ BalanceCheck.PLAYERS_PER_SERVER เสมอ (validate() บังคับแบบเท่ากันเป๊ะ)
 	-- เคยตั้งไม่ตรงกัน (6 กับ 7) ซึ่งทำให้โมเดลสมดุลกับโลกจริงไม่ตรงกัน
-	MAX_PENS = 7,
-
-	-- ขนาดพื้นคอกและระยะห่างระหว่างคอก (studs)
-	PEN_SIZE = vec3(48, 1, 40),
-	PEN_SPACING = 56,
-	PEN_ORIGIN = vec3(0, 0, 0),
+	-- ⚠️ ต้องเท่ากับ Map.PEN_ROWS × Map.PEN_PER_ROW ด้วย (validate() บังคับเช่นกัน)
+	MAX_PENS = 6,
 
 	-- ทุกกี่วินาที server จะเช็คไข่ที่ครบเวลา แล้ว sync สถานะกลับไปหา client
 	-- ค่านี้เป็นความละเอียดของตัวจับเวลาด้วย (1 = คลาดเคลื่อนได้ไม่เกิน 1 วินาที)
@@ -189,6 +186,110 @@ Config.World = {
 
 	-- กันผู้เล่นสแปมคำขอ (วินาที) — ด่านแรกของการกัน exploit
 	REQUEST_COOLDOWN = 0.25,
+}
+
+--------------------------------------------------------------------------------
+-- รูปทรงของแมพ (Map) — blockout
+--------------------------------------------------------------------------------
+-- ⚠️ **โครงหลัก** — ทุกพิกัดในโลกมาจากที่นี่ที่เดียว
+-- src/server/MapBuilder.lua อ่านค่าจากตรงนี้ล้วน ๆ ห้าม hardcode ตัวเลขในสคริปต์สร้างแมพ
+-- ปรับค่าที่นี่แล้ว generate ใหม่ได้ทันที ไม่ต้องปั้นโมเดลใหม่
+--
+-- ══ ระบบพิกัด ══ มองจากด้านบน
+--
+--   X เดินจากซ้ายไปขวา:   ร้านค้า → ลานคอก → เลนรบ (ยาวออกไป 9 ด่าน)
+--   Z เป็นแกนขวาง:        คอกแถวบน (+Z) · ทางเดินกลาง (Z=0) · คอกแถวล่าง (−Z)
+--   Y คือความสูง พื้นทุกอย่างอยู่ที่ Y = 0
+--
+--        +Z  ┌─────┐ ┌─────┐ ┌─────┐
+--            │คอก 1│ │คอก 2│ │คอก 3│
+--   ┌────┐   └─────┘ └─────┘ └─────┘
+--   │ร้าน│  ═══════ ทางเดินกลาง ═══════╗
+--   └────┘   ┌─────┐ ┌─────┐ ┌─────┐   ║  จุดปล่อย → เลนรบ →→→ ด่าน 1..9
+--        −Z  │คอก 4│ │คอก 5│ │คอก 6│   ╚═════════════════════════════════→
+--            └─────┘ └─────┘ └─────┘
+--
+-- ══ ลำดับของเลนรบ ══ ด่าน N กินช่วง X ยาว LANE_LENGTH_PER_STAGE
+--   กำแพงด่าน N อยู่ที่ **ต้นช่วง** · รังบอสด่าน N อยู่ที่ **ท้ายช่วง** (คือหลังกำแพง)
+--   ด่าน 1 ไม่มีกำแพง → เดินเข้ารังบอสด่าน 1 ได้ตั้งแต่เข้าเกมครั้งแรก
+--
+-- ⚠️ กำแพง / ทหารฝ่ายรับ / กองทัพตัวเอง **วาดฝั่ง client เท่านั้น**
+-- เพราะแต่ละคนพังกำแพงคนละด่านแต่ยืนบนเลนเดียวกัน (ดู docs/map-layout.md)
+-- ความกว้างต่ำสุดที่ตัวละคร Roblox มาตรฐาน (กว้างราว 4 studs) เดินผ่านได้แบบสวนกันได้
+-- ใช้เป็นเกณฑ์ของ validate() กันตั้งทางเดิน/เลนแคบจนแมพขาดเป็นสองส่วน
+local MIN_WALKABLE_WIDTH = 8
+
+Config.Map = {
+	-- ══ ลานคอก ══
+	-- ⚠️ PEN_ROWS × PEN_PER_ROW ต้องเท่ากับ World.MAX_PENS เป๊ะ (validate() บังคับ)
+	PEN_ROWS = 2,
+	PEN_PER_ROW = 3,
+
+	-- ขนาดพื้นคอก 1 แปลง (กว้างตาม X · สูง · ลึกตาม Z)
+	-- พื้นที่เปิดโล่ง **ไม่แบ่งเป็นช่องตาราง** แม่เดินได้อิสระ ไข่วางตรงไหนก็ได้
+	PEN_PLOT_SIZE = vec3(40, 1, 32),
+
+	-- ช่องว่างระหว่างแปลงในแถวเดียวกัน (studs)
+	PEN_PLOT_GAP = 8,
+
+	-- ความกว้างทางเดินกลางระหว่างสองแถว (studs) เชื่อมร้านค้ากับต้นเลนรบ
+	WALKWAY_WIDTH = 16,
+
+	-- ระยะที่แม่/ไข่ต้องอยู่ห่างจากขอบคอก กันไม่ให้โผล่ทะลุรั้ว
+	PEN_EDGE_MARGIN = 3,
+
+	-- รั้วรอบคอก
+	FENCE_HEIGHT = 3,
+	FENCE_THICKNESS = 0.6,
+
+	-- ══ เลนรบ ══
+	-- เลนเดียว ทุกคนใช้ร่วมกัน กึ่งกลางอยู่ที่ Z = 0 ให้ตรงกับทางเดินกลาง
+	LANE_WIDTH = 24,
+
+	-- ระยะจากขอบขวาของลานคอก ถึงต้นเลน (จุดปล่อยทหารอยู่ตรงนี้)
+	LANE_START_GAP = 24,
+
+	-- ความยาวเลนต่อ 1 ด่าน (studs) — เลนทั้งเส้น = ค่านี้ × Stage.COUNT
+	LANE_LENGTH_PER_STAGE = 120,
+
+	-- แท่นปล่อยทหาร อยู่ที่ต้นเลน ทหารโผล่ที่นี่เลย ไม่ต้องเดินมาจากคอก
+	RELEASE_PAD_SIZE = vec3(12, 1, 20),
+
+	-- ══ กำแพง ══ (client วาด — ค่าตรงนี้ให้ทั้งสองฝั่งอ่านตรงกัน)
+	WALL_THICKNESS = 4,
+	WALL_HEIGHT = 20,
+
+	-- ══ รังบอส ══ อยู่ท้ายช่วงของแต่ละด่าน = หลังกำแพงด่านนั้น
+	NEST_SIZE = vec3(44, 1, 44),
+
+	-- ระยะจากท้ายช่วงด่าน ถอยกลับมาถึงกึ่งกลางรัง
+	NEST_INSET = 30,
+
+	-- ไข่ในรังวางเป็นวงกลมรัศมีนี้ (จำนวนจุด = Boss.EGGS_PER_SPAWN)
+	NEST_EGG_RADIUS = 13,
+	NEST_EGG_PAD_SIZE = vec3(5, 0.4, 5),
+
+	-- ══ ร้านค้า ══ ซ้ายสุด เป็นแค่ฉาก ของจริงคือ UI
+	SHOP_GAP = 24, -- ระยะจากขอบซ้ายของลานคอก ถึงขอบขวาของร้าน
+	SHOP_SIZE = vec3(36, 1, 36),
+	SHOP_WALL_HEIGHT = 14,
+
+	-- แท่นวาป: หนึ่งอันที่ทางเดินกลาง อีกอันที่ร้าน
+	TELEPORT_PAD_SIZE = vec3(8, 0.4, 8),
+
+	-- ══ แม่เดินไปมาในคอก ══
+	-- ⚠️ **ห้ามใช้ Humanoid** — แม่เต็มคอก × ผู้เล่นเต็มเซิร์ฟ = Humanoid หลักร้อยตัว หนักเกินไป
+	-- ใช้ CFrame lerp: สุ่มจุดหมายในคอก เดินไปหา หยุดพัก แล้วสุ่มใหม่
+	-- ⚠️ **ห้ามเซฟตำแหน่งลง DataStore** — สุ่มใหม่ทุกครั้งที่เข้าเกม
+	-- ตำแหน่งไม่มีความหมายเชิงเกม และเซฟแล้วกิน DataStore ฟรี ๆ
+	WANDER_SPEED = 4, -- studs ต่อวินาที
+	WANDER_PAUSE_MIN = 1.5, -- หยุดพักก่อนออกเดินรอบถัดไป (วินาที)
+	WANDER_PAUSE_MAX = 5,
+	WANDER_TICK = 0.1, -- ความถี่ที่ขยับ (วินาที) — ยิ่งถี่ยิ่งลื่นแต่กิน CPU
+
+	-- ขนาดโมเดล blockout
+	MOTHER_BLOCK_SIZE = vec3(2.6, 2.6, 4),
+	EGG_BLOCK_SIZE = vec3(2, 2.6, 2),
 }
 
 --------------------------------------------------------------------------------
@@ -553,6 +654,11 @@ Config.NewPlayer = {
 	coins = 500, -- ซื้อไข่ธรรมดาได้ 5 ฟอง
 	gems = 0,
 	startingEggs = startingEggs,
+
+	-- ด่านที่ยืนอยู่ = กำแพงที่พังแล้ว + 1 → ผู้เล่นใหม่อยู่ด่าน 1
+	-- ⚠️ ต้องเป็น 1 ไม่ใช่ 0 ไม่งั้นเพดาน upgrade damage (wallProgress × STEPS_PER_STAGE)
+	-- จะกลายเป็น 0 แล้วผู้เล่นใหม่ซื้ออะไรไม่ได้เลย (ดู getMaxDamageLevel)
+	wallProgress = 1,
 }
 
 --------------------------------------------------------------------------------
@@ -1055,7 +1161,7 @@ Config.BalanceCheck = {
 	--
 	-- ⚠️ เคยตั้งเป็น "แม่หนักขึ้น ×4 ทุกด่าน" (500 → 30,000,000 kg) ซึ่งผิด
 	-- เพราะตารางสุ่มน้ำหนักเหมือนกันทุกด่าน แม่ 30M kg คือ tier 6 = 1 ใน 111,111
-	-- ที่อัตราไข่จริง (5 ฟอง/5 นาที ÷ 7 คน) ต้องฟาร์มหลักหมื่นชั่วโมง
+	-- ที่อัตราไข่จริง (5 ฟอง/5 นาที ÷ 6 คน) ต้องฟาร์มหลักหมื่นชั่วโมง
 	-- ขณะที่เวลาตีกำแพงด่าน 9 อยู่หลักสิบชั่วโมง → ยามผ่าน ทั้งที่เกมเล่นไม่ไหว
 	--
 	-- ตอนนี้จึงใช้ **น้ำหนักคงที่ระดับ tier 1** (ซึ่ง 90% ของไข่ให้)
@@ -1069,7 +1175,7 @@ Config.BalanceCheck = {
 
 	-- ══ โมเดลอัตราได้ไข่ ══ ใช้ตรวจว่า "เวลาฟาร์ม" ไม่บานเกินเวลาตี
 	-- บอสรีเกิดทุก RESPAWN_SECONDS วางไข่ EGGS_PER_SPAWN ฟอง หารกันทั้งเซิร์ฟ
-	PLAYERS_PER_SERVER = 7,
+	PLAYERS_PER_SERVER = 6,
 
 	-- เวลาฟาร์มไข่ให้ได้ของที่ด่านนั้นต้องการ ต้องไม่เกินเวลาตีกำแพงกี่เท่า
 	-- เกินเมื่อไหร่แปลว่าเกมกลายเป็น "นั่งรอไข่" ไม่ใช่ "ตีกำแพง"
@@ -1786,6 +1892,98 @@ end
 -- คอก / กระเป๋า
 --------------------------------------------------------------------------------
 
+--------------------------------------------------------------------------------
+-- พิกัดในแมพ — คำนวณจาก Config.Map ทั้งหมด
+--------------------------------------------------------------------------------
+-- ⚠️ ทุกอย่างที่ต้องรู้ "ของอยู่ตรงไหน" ให้เรียกฟังก์ชันพวกนี้
+-- ห้ามคำนวณพิกัดเองใน MapBuilder / PenService / client — ไม่งั้นแก้ Config แล้วจะหลุดกัน
+
+-- ความกว้างรวมของลานคอกตามแกน X
+function Config.getPenYardWidth(): number
+	local map = Config.Map
+	return map.PEN_PER_ROW * map.PEN_PLOT_SIZE.X + (map.PEN_PER_ROW - 1) * map.PEN_PLOT_GAP
+end
+
+-- กึ่งกลางคอกแปลงที่ index (1..MAX_PENS) — ลานคอกอยู่กลางแมพที่ X = 0
+-- เรียงซ้าย→ขวาในแถวบนก่อน (1..PER_ROW) แล้วค่อยแถวล่าง
+function Config.getPenPlotCenter(index: number): Vector3
+	local map = Config.Map
+	local perRow = map.PEN_PER_ROW
+	local row = math.floor((index - 1) / perRow) -- 0 = แถวบน (+Z)
+	local col = (index - 1) % perRow
+
+	local step = map.PEN_PLOT_SIZE.X + map.PEN_PLOT_GAP
+	local x = (col - (perRow - 1) / 2) * step
+
+	-- แถวบนอยู่ +Z แถวล่างอยู่ −Z ห่างจากกึ่งกลางทางเดินเท่ากัน
+	local offset = map.WALKWAY_WIDTH / 2 + map.PEN_PLOT_SIZE.Z / 2
+	local z = if row == 0 then offset else -offset
+
+	return vec3(x, 0, z)
+end
+
+-- ขอบขวาของลานคอก (ด้านที่ติดเลนรบ)
+function Config.getPenYardRightX(): number
+	return Config.getPenYardWidth() / 2
+end
+
+-- ต้นเลนรบ = จุดปล่อยทหาร
+function Config.getLaneStartX(): number
+	return Config.getPenYardRightX() + Config.Map.LANE_START_GAP
+end
+
+-- ความยาวเลนทั้งเส้น
+function Config.getLaneLength(): number
+	return Config.Map.LANE_LENGTH_PER_STAGE * Config.Stage.COUNT
+end
+
+-- X ที่ช่วงของด่านนั้นเริ่ม
+function Config.getStageStartX(stage: number): number
+	local clamped = math.clamp(stage, 1, Config.Stage.COUNT)
+	return Config.getLaneStartX() + (clamped - 1) * Config.Map.LANE_LENGTH_PER_STAGE
+end
+
+-- X ของกำแพงด่านนั้น (อยู่ที่ต้นช่วง)
+-- ⚠️ คืน nil เมื่อด่านนั้นไม่มีกำแพง (ด่าน 1) — ผู้เรียกต้องเช็ค
+function Config.getWallX(stage: number): number?
+	if Config.getStageWallHp(stage) <= 0 then
+		return nil
+	end
+	return Config.getStageStartX(stage)
+end
+
+-- กึ่งกลางรังบอสของด่านนั้น — อยู่ท้ายช่วง คือ **หลังกำแพง**ของด่านนั้น
+function Config.getBossNestCenter(stage: number): Vector3
+	local map = Config.Map
+	local endX = Config.getStageStartX(stage) + map.LANE_LENGTH_PER_STAGE
+	return vec3(endX - map.NEST_INSET, 0, 0)
+end
+
+-- จุดวางไข่ที่ i ในรังบอสด่านนั้น (i = 1..Boss.EGGS_PER_SPAWN) วางเป็นวงกลม
+function Config.getBossEggSpot(stage: number, index: number): Vector3
+	local map = Config.Map
+	local total = Config.Boss.EGGS_PER_SPAWN
+	local center = Config.getBossNestCenter(stage)
+	local angle = (index - 1) / total * math.pi * 2
+	return vec3(
+		center.X + math.cos(angle) * map.NEST_EGG_RADIUS,
+		center.Y,
+		center.Z + math.sin(angle) * map.NEST_EGG_RADIUS
+	)
+end
+
+-- กึ่งกลางร้านค้า (ซ้ายสุดของแมพ)
+function Config.getShopCenter(): Vector3
+	local map = Config.Map
+	local x = -Config.getPenYardRightX() - map.SHOP_GAP - map.SHOP_SIZE.X / 2
+	return vec3(x, 0, 0)
+end
+
+-- จุดที่ผู้เล่นเกิดตอนเข้าเกม — กลางทางเดิน ให้เห็นทั้งร้านและเลนรบ
+function Config.getSpawnPoint(): Vector3
+	return vec3(0, 0, 0)
+end
+
 function Config.getPenCapacity(level: number): number
 	local clamped = math.clamp(math.floor(level), 1, Config.Pen.MAX_LEVEL)
 	return Config.Pen.BASE_CAPACITY + (clamped - 1) * Config.Pen.CAPACITY_PER_LEVEL
@@ -2205,6 +2403,128 @@ function Config.validate()
 		`Config: จำนวนคอก ({Config.World.MAX_PENS}) ไม่ตรงกับ PLAYERS_PER_SERVER `
 			.. `({Config.BalanceCheck.PLAYERS_PER_SERVER}) — อัตราได้ไข่ที่ยามคำนวณจะเพี้ยน`
 	)
+
+	----------------------------------------------------------------------------
+	-- รูปทรงของแมพ
+	----------------------------------------------------------------------------
+	local map = Config.Map
+
+	-- ⚠️ ผังคอกต้องรองรับผู้เล่นได้พอดี ไม่ขาดไม่เกิน
+	-- เกิน = มีคอกร้างที่ไม่มีวันมีเจ้าของ · ขาด = ผู้เล่นเข้ามาแล้วไม่มีที่ยืน
+	assert(
+		map.PEN_ROWS * map.PEN_PER_ROW == Config.World.MAX_PENS,
+		`Config: ผังคอก {map.PEN_ROWS}×{map.PEN_PER_ROW} = {map.PEN_ROWS * map.PEN_PER_ROW} แปลง `
+			.. `ไม่ตรงกับ MAX_PENS ({Config.World.MAX_PENS})`
+	)
+	assert(map.PEN_ROWS >= 1 and map.PEN_ROWS % 1 == 0, "Config: Map.PEN_ROWS ต้องเป็นจำนวนเต็มบวก")
+	assert(map.PEN_PER_ROW >= 1 and map.PEN_PER_ROW % 1 == 0, "Config: Map.PEN_PER_ROW ต้องเป็นจำนวนเต็มบวก")
+
+	-- ขนาดต้องเป็นบวกทุกตัว ไม่งั้น Part ที่สร้างจะพังหรือมองไม่เห็น
+	for _, entry in
+		{
+			{ name = "PEN_PLOT_SIZE", value = map.PEN_PLOT_SIZE },
+			{ name = "NEST_SIZE", value = map.NEST_SIZE },
+			{ name = "SHOP_SIZE", value = map.SHOP_SIZE },
+			{ name = "RELEASE_PAD_SIZE", value = map.RELEASE_PAD_SIZE },
+			{ name = "TELEPORT_PAD_SIZE", value = map.TELEPORT_PAD_SIZE },
+			{ name = "MOTHER_BLOCK_SIZE", value = map.MOTHER_BLOCK_SIZE },
+			{ name = "EGG_BLOCK_SIZE", value = map.EGG_BLOCK_SIZE },
+			{ name = "NEST_EGG_PAD_SIZE", value = map.NEST_EGG_PAD_SIZE },
+		}
+	do
+		assert(
+			entry.value.X > 0 and entry.value.Y > 0 and entry.value.Z > 0,
+			`Config: Map.{entry.name} ต้องเป็นบวกทั้งสามแกน`
+		)
+	end
+
+	-- ⚠️ ขอบกันชนต้องเล็กกว่าครึ่งหนึ่งของด้านที่สั้นที่สุด
+	-- ไม่งั้นพื้นที่ที่แม่เดินได้จะติดลบ → สุ่มจุดหมายไม่ได้เลย แม่จะยืนนิ่งทั้งคอก
+	local shortSide = math.min(map.PEN_PLOT_SIZE.X, map.PEN_PLOT_SIZE.Z)
+	assert(
+		map.PEN_EDGE_MARGIN >= 0 and map.PEN_EDGE_MARGIN < shortSide / 2,
+		`Config: Map.PEN_EDGE_MARGIN ({map.PEN_EDGE_MARGIN}) ต้องน้อยกว่าครึ่งของด้านสั้นสุดของคอก ({shortSide / 2})`
+	)
+
+	assert(map.WALKWAY_WIDTH > 0, "Config: Map.WALKWAY_WIDTH ต้องมากกว่า 0")
+	assert(map.LANE_WIDTH > 0, "Config: Map.LANE_WIDTH ต้องมากกว่า 0")
+	assert(map.LANE_LENGTH_PER_STAGE > 0, "Config: Map.LANE_LENGTH_PER_STAGE ต้องมากกว่า 0")
+	assert(map.LANE_START_GAP >= 0, "Config: Map.LANE_START_GAP ติดลบไม่ได้")
+	assert(map.SHOP_GAP >= 0, "Config: Map.SHOP_GAP ติดลบไม่ได้")
+	assert(map.WALL_THICKNESS > 0 and map.WALL_HEIGHT > 0, "Config: ขนาดกำแพงต้องเป็นบวก")
+
+	-- ⚠️ รังบอสต้องอยู่ในช่วงของด่านตัวเอง และ **อยู่หลังกำแพง** ของด่านนั้น
+	-- หลุดออกไปเมื่อไหร่ = รังไปโผล่ในด่านอื่น หรือโผล่หน้ากำแพงจนเข้าได้ทั้งที่ยังพังไม่ได้
+	assert(
+		map.NEST_INSET > 0 and map.NEST_INSET < map.LANE_LENGTH_PER_STAGE,
+		`Config: Map.NEST_INSET ({map.NEST_INSET}) ต้องอยู่ระหว่าง 0 กับความยาวเลนต่อด่าน ({map.LANE_LENGTH_PER_STAGE})`
+	)
+	assert(
+		map.NEST_SIZE.Z <= map.LANE_WIDTH * 3,
+		"Config: รังบอสกว้างเกินเลนไปมาก ผู้เล่นจะเดินอ้อมกำแพงได้"
+	)
+	for nestStage = 1, Config.Stage.COUNT do
+		local center = Config.getBossNestCenter(nestStage)
+		local startX = Config.getStageStartX(nestStage)
+		local endX = startX + map.LANE_LENGTH_PER_STAGE
+		assert(
+			center.X > startX and center.X < endX,
+			`Config: รังบอสด่าน {nestStage} หลุดออกนอกช่วงของด่านตัวเอง`
+		)
+		-- ด่านที่มีกำแพงต้องมีรังอยู่หลังกำแพงเสมอ (กำแพงอยู่ต้นช่วง)
+		local wallX = Config.getWallX(nestStage)
+		if wallX then
+			assert(
+				center.X - map.NEST_SIZE.X / 2 > wallX + map.WALL_THICKNESS / 2,
+				`Config: รังบอสด่าน {nestStage} ล้ำมาหน้ากำแพง — เข้าได้ทั้งที่ยังพังกำแพงไม่ได้`
+			)
+		end
+	end
+
+	-- ด่าน 1 ต้องไม่มีกำแพง ผู้เล่นใหม่ต้องเดินเข้ารังด่าน 1 ได้ทันที
+	assert(Config.getWallX(1) == nil, "Config: ด่าน 1 ต้องไม่มีกำแพง (getWallX(1) ต้องเป็น nil)")
+
+	-- ══ โซนต้องไม่ทับกัน ══ เรียงจากซ้ายไปขวา: ร้าน → ลานคอก → เลนรบ
+	local shop = Config.getShopCenter()
+	assert(
+		shop.X + map.SHOP_SIZE.X / 2 < -Config.getPenYardRightX(),
+		"Config: ร้านค้าทับลานคอก"
+	)
+	assert(
+		Config.getLaneStartX() > Config.getPenYardRightX(),
+		"Config: ต้นเลนรบทับลานคอก"
+	)
+
+	-- ⚠️ ทางเดินกลางต้องกว้างพอให้ตัวละครเดินผ่านได้จริง
+	-- แคบกว่านี้ = เดินจากร้านไปเลนรบไม่ได้ = แมพขาดเป็นสองส่วน
+	-- (ไม่ต้องเช็คว่าคอกล้ำทางเดินไหม เพราะ getPenPlotCenter วางคอกถอยตามความกว้างทางเดินอยู่แล้ว)
+	assert(
+		map.WALKWAY_WIDTH >= MIN_WALKABLE_WIDTH,
+		`Config: ทางเดินกลางกว้าง {map.WALKWAY_WIDTH} แคบกว่าที่ตัวละครเดินผ่านได้ ({MIN_WALKABLE_WIDTH})`
+	)
+	assert(
+		map.LANE_WIDTH >= MIN_WALKABLE_WIDTH,
+		`Config: เลนรบกว้าง {map.LANE_WIDTH} แคบกว่าที่ตัวละครเดินผ่านได้ ({MIN_WALKABLE_WIDTH})`
+	)
+
+	-- ══ คอกต้องไม่ทับกันเอง ══
+	for a = 1, Config.World.MAX_PENS do
+		local ca = Config.getPenPlotCenter(a)
+		for b = a + 1, Config.World.MAX_PENS do
+			local cb = Config.getPenPlotCenter(b)
+			local apartX = math.abs(ca.X - cb.X) >= map.PEN_PLOT_SIZE.X - 1e-6
+			local apartZ = math.abs(ca.Z - cb.Z) >= map.PEN_PLOT_SIZE.Z - 1e-6
+			assert(apartX or apartZ, `Config: คอกแปลง {a} กับ {b} ทับกัน`)
+		end
+	end
+
+	-- ══ แม่เดินไปมา ══
+	assert(map.WANDER_SPEED > 0, "Config: Map.WANDER_SPEED ต้องมากกว่า 0")
+	assert(map.WANDER_TICK > 0, "Config: Map.WANDER_TICK ต้องมากกว่า 0")
+	assert(
+		map.WANDER_PAUSE_MIN >= 0 and map.WANDER_PAUSE_MAX >= map.WANDER_PAUSE_MIN,
+		"Config: ช่วงเวลาหยุดพักของแม่กลับหัว (MAX ต้องไม่น้อยกว่า MIN)"
+	)
 	assert(Config.World.SYNC_INTERVAL > 0, "Config: SYNC_INTERVAL ต้องมากกว่า 0")
 	assert(Config.World.REQUEST_COOLDOWN >= 0, "Config: REQUEST_COOLDOWN ติดลบไม่ได้")
 
@@ -2360,6 +2680,16 @@ function Config.validate()
 		assert(amount > 0, `Config: NewPlayer.startingEggs["{eggId}"] ต้องมากกว่า 0`)
 	end
 	assert(Config.NewPlayer.coins >= 0 and Config.NewPlayer.gems >= 0, "Config: ของเริ่มต้นติดลบไม่ได้")
+	-- ⚠️ off-by-one ที่เคยพลาด: wallProgress = 0 ทำให้เพดาน upgrade damage เป็น 0
+	-- ผู้เล่นใหม่จะซื้ออะไรไม่ได้เลยและตันตั้งแต่ด่านแรก
+	assert(
+		Config.NewPlayer.wallProgress >= 1 and Config.NewPlayer.wallProgress <= Config.Stage.COUNT,
+		`Config: NewPlayer.wallProgress ({Config.NewPlayer.wallProgress}) ต้องอยู่ระหว่าง 1 ถึง {Config.Stage.COUNT}`
+	)
+	assert(
+		Config.getMaxDamageLevel(Config.NewPlayer.wallProgress) > 0,
+		"Config: ผู้เล่นใหม่ซื้อ upgrade damage ไม่ได้เลย — เช็ค wallProgress เริ่มต้น"
+	)
 
 	----------------------------------------------------------------------------
 	-- ความหายาก

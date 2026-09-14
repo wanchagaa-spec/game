@@ -723,7 +723,13 @@ return function(t, Config)
 	check("คลาสอ้างอิงสูงสุดคือ A ไม่ใช่ S", Config.BalanceCheck.REFERENCE_CLASS[9], "A")
 
 	print("── ยามเวลาฟาร์ม ──")
-	check("ไข่/ชม./คน = 8.57", math.abs(Config.getEggsPerHour() - 60 / 5 * 5 / 7) < 1e-9, true)
+	-- ⚠️ อย่า hardcode จำนวนผู้เล่น — ผูกกับ Config เพื่อให้เทสต์ตามไปเองเวลาปรับ
+	local expectedEggs = (3600 / Config.Boss.RESPAWN_SECONDS)
+		* Config.Boss.EGGS_PER_SPAWN
+		/ Config.BalanceCheck.PLAYERS_PER_SERVER
+	check("ไข่/ชม./คน ตรงสูตร บอสวาง ÷ จำนวนผู้เล่น",
+		math.abs(Config.getEggsPerHour() - expectedEggs) < 1e-9, true)
+	check("ที่ 6 คน ได้ 10 ฟอง/ชม./คน", math.abs(Config.getEggsPerHour() - 10) < 1e-9, true)
 	local farmOk = true
 	for st = 2, 9 do
 		local ratio = Config.getReferenceFarmHours(st) / Config.getReferenceClearHours(st)
@@ -800,4 +806,127 @@ return function(t, Config)
 	check("ช่องฟักเป็นทศนิยมแล้ว validate ต้องล้ม", (pcall(Config.validate)), false)
 	Config.Hatchery.MAX_SLOTS = savedSlots
 	check("คืนค่าเดิมแล้ว validate กลับมาผ่าน", (pcall(Config.validate)), true)
+
+	--------------------------------------------------------------------------
+	-- ผังแมพ (blockout)
+	--------------------------------------------------------------------------
+	print("── ผังแมพ: โซนต้องไม่ทับกันและเรียงถูกลำดับ ──")
+	local map = Config.Map
+
+	-- ผังคอกต้องพอดีจำนวนผู้เล่นเป๊ะ ไม่ขาดไม่เกิน
+	check("คอก = แถว × ต่อแถว", map.PEN_ROWS * map.PEN_PER_ROW, Config.World.MAX_PENS)
+	check("คอก = จำนวนผู้เล่นต่อเซิร์ฟ", Config.World.MAX_PENS, Config.BalanceCheck.PLAYERS_PER_SERVER)
+	check("ผู้เล่นต่อเซิร์ฟ = 6", Config.BalanceCheck.PLAYERS_PER_SERVER, 6)
+
+	-- เรียงจากซ้ายไปขวา: ร้านค้า → ลานคอก → เลนรบ
+	local shopRight = Config.getShopCenter().X + map.SHOP_SIZE.X / 2
+	check("ร้านค้าอยู่ซ้ายลานคอก", shopRight < -Config.getPenYardRightX(), true)
+	check("เลนรบอยู่ขวาลานคอก", Config.getLaneStartX() > Config.getPenYardRightX(), true)
+
+	-- คอกทุกแปลงต้องไม่ทับกัน และอยู่คนละฝั่งของทางเดินตามจำนวนแถว
+	local overlap, rowsSeen = false, {}
+	for a = 1, Config.World.MAX_PENS do
+		local ca = Config.getPenPlotCenter(a)
+		rowsSeen[ca.Z] = true
+		for b = a + 1, Config.World.MAX_PENS do
+			local cb = Config.getPenPlotCenter(b)
+			if math.abs(ca.X - cb.X) < map.PEN_PLOT_SIZE.X - 1e-6
+				and math.abs(ca.Z - cb.Z) < map.PEN_PLOT_SIZE.Z - 1e-6 then
+				overlap = true
+			end
+		end
+	end
+	check("ไม่มีคอกทับกัน", overlap, false)
+	local rowCount = 0
+	for _ in rowsSeen do rowCount += 1 end
+	check("คอกกระจายครบทุกแถว", rowCount, map.PEN_ROWS)
+
+	-- ══ เลนรบกับกำแพง ══
+	check("ด่าน 1 ไม่มีกำแพง", Config.getWallX(1), nil)
+	local wallsOk, wallsAscending = true, true
+	for st = 2, Config.Stage.COUNT do
+		local w = Config.getWallX(st)
+		if w == nil then
+			wallsOk = false
+		elseif st > 2 then
+			-- ⚠️ เทียบกับด่านก่อนหน้าได้เฉพาะตั้งแต่ด่าน 3 ขึ้นไป
+			-- เพราะ getWallX(1) เป็น nil (ด่าน 1 ไม่มีกำแพง) เทียบตรง ๆ แล้ว error
+			local prev = Config.getWallX(st - 1)
+			if prev and w <= prev then
+				wallsAscending = false
+			end
+		end
+	end
+	check("ด่าน 2 ขึ้นไปมีกำแพงครบ", wallsOk, true)
+	check("กำแพงเรียงไปทางขวาเรื่อย ๆ", wallsAscending, true)
+	check("เลนยาว = ยาวต่อด่าน × จำนวนด่าน",
+		Config.getLaneLength(), map.LANE_LENGTH_PER_STAGE * Config.Stage.COUNT)
+
+	-- ══ รังบอส ══ ต้องอยู่ในช่วงของด่านตัวเอง และหลังกำแพงเสมอ
+	local nestInRange, nestBehindWall = true, true
+	for st = 1, Config.Stage.COUNT do
+		local center = Config.getBossNestCenter(st)
+		local startX = Config.getStageStartX(st)
+		if center.X <= startX or center.X >= startX + map.LANE_LENGTH_PER_STAGE then
+			nestInRange = false
+		end
+		local wallX = Config.getWallX(st)
+		if wallX and center.X - map.NEST_SIZE.X / 2 <= wallX + map.WALL_THICKNESS / 2 then
+			nestBehindWall = false
+		end
+	end
+	check("รังบอสอยู่ในช่วงด่านตัวเองทุกด่าน", nestInRange, true)
+	check("รังบอสอยู่หลังกำแพงทุกด่านที่มีกำแพง", nestBehindWall, true)
+	check("จุดวางไข่ในรัง = จำนวนไข่ที่บอสวาง", Config.Boss.EGGS_PER_SPAWN, 5)
+
+	-- จุดวางไข่ต้องอยู่ในรัง ไม่หลุดขอบ
+	local spotsInside = true
+	for st = 1, Config.Stage.COUNT do
+		local center = Config.getBossNestCenter(st)
+		for i = 1, Config.Boss.EGGS_PER_SPAWN do
+			local spot = Config.getBossEggSpot(st, i)
+			if math.abs(spot.X - center.X) > map.NEST_SIZE.X / 2
+				or math.abs(spot.Z - center.Z) > map.NEST_SIZE.Z / 2 then
+				spotsInside = false
+			end
+		end
+	end
+	check("จุดวางไข่อยู่ในขอบรังทุกจุด", spotsInside, true)
+
+	-- ══ พื้นที่ที่แม่เดินได้ต้องเป็นบวก ══
+	-- ติดลบเมื่อไหร่ = สุ่มจุดหมายไม่ได้ แม่จะยืนนิ่งทั้งคอก
+	check("ขอบกันชนเล็กกว่าครึ่งด้านสั้นสุดของคอก",
+		map.PEN_EDGE_MARGIN < math.min(map.PEN_PLOT_SIZE.X, map.PEN_PLOT_SIZE.Z) / 2, true)
+	check("ผู้เล่นใหม่เริ่มที่ด่าน 1", Config.NewPlayer.wallProgress, 1)
+	check("ผู้เล่นใหม่ซื้อ upgrade damage ได้ทันที",
+		Config.getMaxDamageLevel(Config.NewPlayer.wallProgress) > 0, true)
+
+	-- ══ ยามต้องจับค่าที่ทำให้แมพพัง ══
+	print("── ยามแมพ ต้องจับค่าที่พังได้จริง ──")
+	local function mapGuardCatches(mutate, restore): boolean
+		mutate()
+		local ok = (pcall(Config.validate))
+		restore()
+		return not ok
+	end
+	check("ผังคอกไม่ตรงจำนวนผู้เล่น → ล้ม", mapGuardCatches(
+		function() map.PEN_PER_ROW += 1 end, function() map.PEN_PER_ROW -= 1 end), true)
+	check("ขอบกันชนกว้างเกินคอก → ล้ม", mapGuardCatches(
+		function() map.PEN_EDGE_MARGIN = map.PEN_PLOT_SIZE.Z end,
+		function() map.PEN_EDGE_MARGIN = 3 end), true)
+	check("รังบอสหลุดนอกช่วงด่าน → ล้ม", mapGuardCatches(
+		function() map.NEST_INSET = map.LANE_LENGTH_PER_STAGE + 10 end,
+		function() map.NEST_INSET = 30 end), true)
+	check("รังบอสล้ำมาหน้ากำแพง → ล้ม", mapGuardCatches(
+		function() map.NEST_INSET = map.LANE_LENGTH_PER_STAGE - 10 end,
+		function() map.NEST_INSET = 30 end), true)
+	check("ทางเดินกลางแคบจนเดินไม่ผ่าน → ล้ม", mapGuardCatches(
+		function() map.WALKWAY_WIDTH = 2 end, function() map.WALKWAY_WIDTH = 16 end), true)
+	check("เลนรบแคบจนเดินไม่ผ่าน → ล้ม", mapGuardCatches(
+		function() map.LANE_WIDTH = 2 end, function() map.LANE_WIDTH = 24 end), true)
+	check("เวลาพักของแม่กลับหัว → ล้ม", mapGuardCatches(
+		function() map.WANDER_PAUSE_MAX = 0 end, function() map.WANDER_PAUSE_MAX = 5 end), true)
+	check("ความเร็วเดินเป็น 0 → ล้ม", mapGuardCatches(
+		function() map.WANDER_SPEED = 0 end, function() map.WANDER_SPEED = 4 end), true)
+	check("คืนค่าแมพเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
 end

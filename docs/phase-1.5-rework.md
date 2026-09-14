@@ -6,15 +6,39 @@
 
 ## ทำไมต้องรื้อ
 
-Phase 1 เขียนตามกลไกเก่า ซึ่งต่างจากดีไซน์ปัจจุบันในสามเรื่องหลัก:
+Phase 1 เขียนตามกลไกเก่า ซึ่งต่างจากดีไซน์ปัจจุบันในสี่เรื่องหลัก:
 
 | | กลไกเก่า (โค้ดปัจจุบัน) | ดีไซน์ใหม่ |
 |---|---|---|
-| **ฟักไข่แล้วได้อะไร** | ทหาร 1 ตัวจาก `hatchTable` (recruit/archer/…) ไม่มีน้ำหนัก | **ตัวแม่** = ตัวละคร (12 ตัว 5 คลาส) + น้ำหนักที่**ล็อกมาตั้งแต่ตอนเป็นไข่แล้ว** (ตอนฟักสุ่มแค่ตัวละคร) |
-| **ไข่มาจากไหน** | ผู้เล่นกดปุ่มวางไข่ได้เลย มี `price` เตรียมไว้ให้ซื้อด้วยเงินในเกม | ไข่ปกติ**แย่งจากรังบอสเท่านั้น** · ไข่ตำนาน**ซื้อด้วย Robux เท่านั้น** ซื้อด้วยเงินในเกมไม่ได้เลย |
+| **ฟักไข่แล้วได้อะไร** | ทหาร 1 ตัวจาก `hatchTable` (recruit/archer/…) ไม่มีน้ำหนัก | **ตัวแม่** = ตัวละคร (12 ตัว 5 คลาส) + น้ำหนัก |
+| **สุ่มตอนไหน** | สุ่มทุกอย่างตอนฟัก | **น้ำหนักสุ่มตั้งแต่ตอนเป็นไข่** · ตอนฟักสุ่มแค่ **ตัวละคร** |
+| **ไข่มาจากไหน** | ผู้เล่นกดปุ่มวางไข่ได้เลย มี `price` ให้ซื้อด้วยเงินในเกม | ไข่ปกติ **แย่งจากรังบอสเท่านั้น** (คนละชนิดต่อด่าน) · ไข่ตำนาน **Robux เท่านั้น** |
 | **ที่เก็บ** | `plot` มี 4 ช่องวางไข่ · คลังทหารเป็น array เดียว | **คอก** (แม่ที่ผลิต) + **กระเป๋า** (แม่ที่ไม่ผลิต 100 ตัว) + **สวนฟัก** 50 ฟอง |
 
-`Config.lua` อัปเดตให้ตรงดีไซน์ใหม่ครบแล้ว **โค้ดที่เหลือยังตามไม่ทัน**
+`Config.lua` อัปเดตให้ตรงดีไซน์ใหม่ครบแล้ว (ผ่านเทสต์ 276 เคส) **โค้ดที่เหลือยังตามไม่ทัน**
+
+---
+
+## 0. ⚠️ กฎข้อเดียวที่ต้องจำก่อนเริ่ม: น้ำหนักมาก่อน
+
+นี่คือจุดที่ต่างจากแผนเดิมมากที่สุด และเป็นต้นทางของงานเกือบทุกข้อข้างล่าง
+
+```
+สร้างไข่ (บอสวาง / แจกให้ผู้เล่นใหม่ / คำสั่งเทสต์)
+    └─ สุ่ม "น้ำหนัก" ตรงนี้ ด้วย Config.rollMotherWeightForEgg(eggId, rng)
+       → ไข่ทุกฟองถือน้ำหนักของตัวเองตั้งแต่วินาทีที่เกิด
+
+ไข่เข้ากระเป๋า (heldEggs) → เข้าสวนฟัก (hatching)
+    └─ น้ำหนักเดินทางไปด้วยทุกขั้น ห้ามสุ่มใหม่ ห้ามคำนวณใหม่
+
+ครบเวลาฟัก
+    └─ สุ่ม "ตัวละคร" ตรงนี้เท่านั้น ด้วย Config.rollCharacter(eggId, rng)
+       → ตัวแม่ = { charId ที่เพิ่งสุ่ม, weight ที่ติดมากับไข่ }
+```
+
+**ผลที่ตามมา:** ไข่ชนิดเดียวกันสองฟองมีน้ำหนักต่างกันได้ → `heldEggs` เก็บเป็น `[eggId] = จำนวน` ไม่ได้อีกแล้ว ต้องเก็บ **รายฟอง**
+
+**ทำไมต้องเป็นแบบนี้:** ขนาดโมเดลไข่ในรังบอกน้ำหนักให้ผู้เล่นเห็น (ไข่ใหญ่ = หนัก) การแย่งไข่จึงมีเป้าหมายจริง — ถึงจะยังไม่ทำรังบอสใน Phase 1.5 แต่ **โครงข้อมูลต้องรองรับตั้งแต่ตอนนี้** ไม่งั้นต้องรื้อซ้ำใน Phase 5
 
 ---
 
@@ -24,21 +48,35 @@ Phase 1 เขียนตามกลไกเก่า ซึ่งต่า�
 
 | ตอนนี้ | เปลี่ยนเป็น | เหตุผล |
 |---|---|---|
-| `rollUnit(egg)` → คืน `unitId` จาก `egg.hatchTable` | `rollMother(egg, stage)` → คืน `{ charId, weight }` ใช้ `Config.rollCharacter()` + `Config.rollMotherWeight(rng, stage)` | สองค่านี้แทนที่ `unitId` เดิมทั้งหมด |
-| `type UnitRecord = { uid: number, unitId, obtainedAt }` | `type Mother = { uid: string, charId, weight, statuses, lastProducedAt, obtainedAt, locked }` | uid เป็น **global string** แล้ว (`Config.makeUid`) และต้องมีฟิลด์ครบตาม `docs/data-schema.md` §3 |
+| `rollUnit(egg)` → คืน `unitId` จาก `egg.hatchTable` | `rollCharacter(eggId, rng)` ของ Config → คืน `charId` **อย่างเดียว** | น้ำหนักไม่ได้สุ่มตอนนี้แล้ว (ดู §0) |
+| — (ยังไม่มี) | ฟังก์ชันสร้างไข่ `makeEgg(eggId, rng)` → `{ eggId, weight = Config.rollMotherWeightForEgg(eggId, rng) }` | ทุกทางที่ไข่เกิดต้องผ่านตัวนี้ทางเดียว |
+| — (ยังไม่มี) | `state.heldEggs` = อาเรย์ยาวคงที่ 50 ช่อง เก็บ `{ eggId, weight }` หรือ `false` | ไข่ที่ยังไม่เข้าสวน ([§3 ของ data-schema](data-schema.md#3-โครงสร้าง-playerdata)) |
+| `type EggSlot = { eggId, hatchAt }` | เพิ่มฟิลด์ `weight` | น้ำหนักต้องเดินทางไปกับไข่ |
+| `type UnitRecord = { uid: number, unitId, obtainedAt }` | `type Mother = { uid: string, charId, weight, statuses, lastProducedAt, obtainedAt, locked }` | uid เป็น **global string** แล้ว (`Config.makeUid`) และต้องครบตาม data-schema §3 |
 | `state.units` เป็น array เดียว | `state.mothersInPen` + `state.mothersInBag` แยกสองอาเรย์ | โค้ด settle การผลิตต้องวนเฉพาะแม่ในคอก แยกโครงไว้ทำให้ลืมกรองไม่ได้ |
 | `state.nextUid` เริ่มที่ 1 ต่อผู้เล่น | ยังเป็นตัวนับต่อผู้เล่น แต่ uid เต็ม = `Config.makeUid(player.UserId, nextUid)` | รองรับการเทรดแม่ |
-| **`os.clock()` ทุกจุด** (บรรทัด 124, 219, 330 และใน `EggSlot.hatchAt`) | **`os.time()`** | `os.clock()` รีเซ็ตทุกครั้งที่เซิร์ฟเวอร์ใหม่ เซฟลง DataStore ไม่ได้ |
+| **`os.clock()`** (บรรทัด 124, 219, 330 และใน `EggSlot.hatchAt`) | **`os.time()`** | `os.clock()` รีเซ็ตทุกครั้งที่เซิร์ฟเวอร์ใหม่ เซฟลง DataStore ไม่ได้ |
 | `EggSlot` 4 ช่องตาม `Config.Farm.EGG_SLOTS_PER_PLAYER` | สวนฟัก `Config.Hatchery.MAX_EGGS` = 50 ช่อง | ดีไซน์ใหม่ |
-| `EggService.placeEgg()` — client ขอวางไข่จาก `eggId` ตรง ๆ | ต้องอ้าง**ไข่ฟองที่มีอยู่จริงใน `heldEggs`** ด้วย index ไม่ใช่ `eggId` (ไข่ชนิดเดียวกันน้ำหนักต่างกันได้) แล้วย้ายทั้งฟอง (`eggId` + `weight`) เข้าสวน | ตอนนี้ขอไข่ชนิดไหนก็ได้ฟรี = ช่องโหว่ |
-| `EggService.getUnits()` | `getMothersInPen()` / `getMothersInBag()` | ชื่อเดิมสื่อผิดแล้ว |
-| `hatch()` ยิง `EggHatched` ด้วย `{ unitId, unitName, rarity }` | `{ charId, charName, class, weight }` | payload เปลี่ยน — ดู §4 |
+| `placeEgg(player, eggId, slotIndex)` — client ส่ง **ชนิดไข่** มา | `placeEgg(player, heldIndex, slotIndex?)` — client ส่ง **ตำแหน่งไข่ใน `heldEggs`** | ไข่ชนิดเดียวกันน้ำหนักต่างกัน ระบุด้วยชนิดไม่ได้ · และของเดิมขอไข่ชนิดไหนก็ได้ฟรี = ช่องโหว่ |
+| `getUnits()` | `getMothersInPen()` / `getMothersInBag()` | ชื่อเดิมสื่อผิดแล้ว |
+| `hatch()` ยิง `EggHatched` ด้วย `{ unitId, unitName, rarity }` | `{ charId, charName, class, weight, placedIn }` | payload เปลี่ยน — ดู §4 |
 
 ### เก็บไว้ได้
 
 - โครง `placeEgg()` ที่ validate ทีละชั้น (ชนิดข้อมูล → ช่วงค่า → สถานะ) — ใช้ได้ต่อ แค่เปลี่ยนเงื่อนไข
 - ลูป tick เดียวที่ทั้งเช็คการฟักและ sync — โครงถูกแล้ว
-- `showEgg()` / `hideEgg()` — ยังต้องมีโมเดลไข่บนแท่น
+- `showEgg()` / `hideEgg()` — ยังต้องมีโมเดลไข่บนแท่น (Phase 1.5 ยังไม่ต้องผูกขนาดกับน้ำหนัก)
+
+### ฟังก์ชัน Config ที่มีให้ใช้แล้ว — อย่าเขียนเอง
+
+| งาน | เรียกตัวนี้ |
+|---|---|
+| สุ่มน้ำหนักตอนสร้างไข่ | `Config.rollMotherWeightForEgg(eggId, rng)` |
+| สุ่มตัวละครตอนฟัก | `Config.rollCharacter(eggId, rng)` |
+| ไข่ของบอสด่านไหน | `Config.getBossEggId(stage)` |
+| ประกอบ/แยก uid | `Config.makeUid()` / `Config.parseUid()` |
+| ความจุคอก | `Config.getPenCapacity(penLevel)` |
+| โชว์น้ำหนักใน UI | `Config.formatWeight(kg)` |
 
 ---
 
@@ -51,7 +89,7 @@ Phase 1 เขียนตามกลไกเก่า ซึ่งต่า�
 | ชื่อไฟล์ `PlotService` | `PenService` — "plot" เป็นคำของกลไกเก่า ดีไซน์ใหม่เรียก **คอก** |
 | `Config.Farm.EGG_SLOTS_PER_PLAYER` = 4 แท่นวางไข่ต่อ plot | คอกมีที่วาง**แม่** ตาม `Config.getPenCapacity(penLevel)` = 5–19 ตัว + สวนฟักแยกอีก 50 ช่อง |
 | ความจุคงที่ | ความจุ**เปลี่ยนตามเลเวลคอก** → ต้องสร้าง/ซ่อนที่วางเพิ่มตอนอัปเกรด |
-| `assign()` / `release()` จอง plot ทั้งก้อน | ยังต้องมี แต่ต้องเพิ่ม `addMotherToPen()` / `moveToBag()` / `sellMother()` |
+| `assign()` / `release()` จอง plot ทั้งก้อน | ยังต้องมี แต่ต้องเพิ่ม `addMotherToPen()` / `moveToBag()` / `moveToPen()` |
 | แสดงก้อนไข่บนแท่น | ต้องแสดง**โมเดลตัวแม่**ในคอก พร้อมป้ายชื่อตัวละคร + น้ำหนัก (`Config.formatWeight`) |
 
 ### เก็บไว้ได้
@@ -66,10 +104,16 @@ Phase 1 เขียนตามกลไกเก่า ซึ่งต่า�
 
 ตอนนี้เป็นแผงเทสต์: ปุ่ม "วางไข่ธรรมดา" + สถานะ 4 ช่อง + ข้อความผลฟัก
 
-ปุ่มวางไข่ต้องหายไปก่อนเป็นอันดับแรก เพราะ**ไข่ซื้อ/สร้างเองไม่ได้แล้ว** ต้องแย่งจากบอส
+**ปุ่มวางไข่ต้องหายไปก่อนเป็นอันดับแรก** เพราะไข่ซื้อ/สร้างเองไม่ได้แล้ว ต้องแย่งจากบอส
 
-Phase 1.5 ทำแค่แผงเทสต์ที่โชว์: แม่ในคอก (ตัวละคร + น้ำหนัก) · แม่ในกระเป๋า · สวนฟัก
-UI จริง (สองแถบแม่/ลูก + กล่องยืนยัน) อยู่ Phase 3
+Phase 1.5 ทำแค่แผงเทสต์ที่โชว์:
+
+- **ไข่ในกระเป๋า** — ชนิด + **น้ำหนักที่ล็อกไว้แล้ว** (ตรงนี้คือจุดที่ดูออกว่า §0 ทำงานถูก)
+- **สวนฟัก** — ไข่ที่กำลังฟัก + เวลาที่เหลือ + น้ำหนักของแต่ละฟอง
+- **แม่ในคอก** / **แม่ในกระเป๋า** — ตัวละคร + คลาส + น้ำหนัก
+- ปุ่มเดียวที่มีได้: **ย้ายไข่จากกระเป๋าเข้าสวนฟัก** (ส่ง index ไม่ใช่ชนิดไข่)
+
+UI จริง (สองแถบแม่/ลูก + กล่องยืนยัน + % ความคืบหน้า) อยู่ Phase 3
 
 ---
 
@@ -79,11 +123,14 @@ UI จริง (สองแถบแม่/ลูก + กล่องยื�
 
 | Remote | ตอนนี้ | ต้องเป็น |
 |---|---|---|
-| `PlaceEggRequest` | `FireServer(eggId, slotIndex?)` — client ขอไข่ชนิดไหนก็ได้ | `FireServer(eggId, slotIndex?)` เหมือนเดิม **แต่ server ต้องเช็ค `heldEggs` ก่อน** · ชื่ออาจเปลี่ยนเป็น `PlaceEggInHatcheryRequest` ให้ตรงความหมาย |
-| `EggHatched` | `{ slotIndex, eggId, unitId, unitName, rarity }` | `{ slotIndex, eggId, charId, charName, class, weight, placedIn }` (`placedIn` = "pen" หรือ "bag") · `weight` มาจากตัวไข่ ไม่ได้สุ่มตอนนี้ |
-| `FarmStateSync` | `{ slots = {...}, unitCount }` | `{ hatching = {...}, penCount, penCapacity, bagCount, coins }` |
+| `PlaceEggRequest` | `FireServer(eggId, slotIndex?)` | `FireServer(heldIndex, slotIndex?)` — **ส่งตำแหน่งไข่ใน `heldEggs` ไม่ใช่ชนิดไข่** · เปลี่ยนชื่อเป็น `PlaceEggInHatcheryRequest` ให้ตรงความหมาย |
+| `EggHatched` | `{ slotIndex, eggId, unitId, unitName, rarity }` | `{ slotIndex, eggId, charId, charName, class, weight, placedIn }` (`placedIn` = `"pen"` หรือ `"bag"`) · `weight` มาจากตัวไข่ **ไม่ได้สุ่มตอนนี้** |
+| `FarmStateSync` | `{ slots = {...}, unitCount }` | `{ heldEggs = {...}, hatching = {...}, penCount, penCapacity, bagCount, coins }` |
 
-**Remote ที่ต้องเพิ่มใน Phase 1.5** (ยังไม่สร้างในรอบนี้): ย้ายแม่คอก↔กระเป๋า · ขายแม่ · อัปเกรดคอก
+**Remote ที่ต้องเพิ่มใน Phase 1.5:** ย้ายแม่คอก↔กระเป๋า
+**ยังไม่ต้องเพิ่มในรอบนี้:** ขายแม่ · อัปเกรดคอก (Phase 2 — ต้องมีเงินก่อน)
+
+⚠️ **server ต้อง validate `heldIndex` ทุกครั้ง** — เป็น number, จำนวนเต็ม, อยู่ในช่วง 1..50, และช่องนั้นต้องมีไข่จริง (ไม่ใช่ `false`) ถ้าไม่ผ่านให้ปฏิเสธเงียบ ๆ ห้าม error
 
 ---
 
@@ -92,14 +139,15 @@ UI จริง (สองแถบแม่/ลูก + กล่องยื�
 | ค่า | สถานะ | ทำอะไรกับมัน |
 |---|---|---|
 | `Config.UnitTypes` (recruit/spearman/archer/knight/mage/dragon_rider) | **ตกยุค** — แทนที่ด้วย `Config.Characters` | ตั้ง `enabled = false` ทุกตัว **อย่าลบ** (กฎ CLAUDE.md: id ที่เคยเซฟไปแล้วห้ามลบ) |
-| `EggType.hatchTable` | **ตกยุค** — แทนที่ด้วย `Config.EggCharacterPools` | ปล่อยไว้จนกว่า `EggService.rollUnit()` จะถูกลบ แล้วค่อยตั้ง comment ว่าเลิกใช้ |
+| `EggType.hatchTable` | **ตกยุค** — แทนที่ด้วย `Config.EggCharacterPools` | ไข่ `egg_stage1..9` ยังมี `hatchTable` ค้างไว้ 1 บรรทัดเพื่อให้โค้ด Phase 1 ยังคอมไพล์ผ่าน → **ลบพร้อม `UnitTypes` ตอนขั้น 7** และเปลี่ยน type ให้ฟิลด์นี้เป็น optional |
 | `Config.Rarities` (Common/Rare/Epic/Legendary) | **ตกยุค** — คลาสใหม่คือ SS/S/A/B/C | เลิกใช้พร้อม `UnitTypes` |
 | `Config.Farm.EGG_SLOTS_PER_PLAYER` = 4 | **ตกยุค** — สวนฟักคือ `Config.Hatchery.MAX_EGGS` = 50 | เลิกใช้เมื่อ EggService ย้ายไปใช้ Hatchery |
-| `Config.Farm.PLOT_SIZE` / `PLOT_SPACING` / `PLOT_ORIGIN` / `MAX_PLOTS` | **ยังใช้ได้** แต่ควรเปลี่ยนชื่อเป็น Pen | เปลี่ยนชื่อพร้อม PenService |
-| `Config.DEFAULT_EGG_ID` | **ยังใช้ได้** แต่ความหมายเปลี่ยน — เดิมคือ "ไข่ที่ปุ่มทดสอบใช้" | ใช้เป็นไข่เริ่มต้นของผู้เล่นใหม่แทน · ตอนนี้ชี้ที่ `egg_stage1` แล้ว |
-| `egg.hatchTable` (ตารางสุ่ม "ทหาร") | ตายทั้งหมด — ระบบจริงใช้ `Config.rollCharacter()` + น้ำหนักที่ติดมากับไข่ | ไข่ `egg_stage1..9` ยังมี `hatchTable` ค้างไว้ 1 บรรทัดเพื่อให้โค้ด Phase 1 ยังรันได้ ลบทิ้งพร้อม `UnitTypes` ตอนรื้อ |
-| `egg_common` / `egg_rare` | `enabled = false` แล้ว ห้ามแจกให้ผู้เล่นอีก | ยัง `getEgg()` ได้ตามกฎ eggId (ห้ามลบ ห้าม reuse) |
-| `EggType.price` | **ลบไปแล้วในรอบนี้** | ✅ เสร็จแล้ว |
+| `Config.Farm.MAX_PLOTS` = **6** | ⚠️ **ไม่ตรงกับดีไซน์** — ดีไซน์บอก 7 คนต่อเซิร์ฟเวอร์ (`BalanceCheck.PLAYERS_PER_SERVER` = 7) | แก้เป็น 7 ตอนเปลี่ยนชื่อเป็น Pen · ถ้าตั้งใจให้ 6 ต้องแก้ `PLAYERS_PER_SERVER` ให้ตรงกันแทน |
+| `Config.Farm.PLOT_SIZE` / `PLOT_SPACING` / `PLOT_ORIGIN` | **ยังใช้ได้** แต่ควรเปลี่ยนชื่อเป็น Pen | เปลี่ยนชื่อพร้อม PenService |
+| `Config.DEFAULT_EGG_ID` | **ยังใช้ได้** ความหมายเปลี่ยน — เดิมคือ "ไข่ที่ปุ่มทดสอบใช้" | ตอนนี้ชี้ที่ `egg_stage1` แล้ว ใช้เป็นไข่เริ่มต้นของผู้เล่นใหม่ |
+| `Config.NewPlayer.startingEggs` | **ยังใช้ได้** แต่เป็นแค่ "คำสั่งแจก" | ตอนแจกจริงต้องวน `makeEgg()` ทีละฟองเพื่อสุ่มน้ำหนัก **ห้ามเก็บลง `heldEggs` เป็นตัวนับ** |
+| `egg_common` / `egg_rare` | `enabled = false` แล้ว ห้ามแจกให้ผู้เล่นอีก | ยัง `getEgg()` ได้ตามกฎ eggId (ห้ามลบ ห้าม reuse) · `validate()` กันไม่ให้หลุดเข้า `startingEggs` อยู่แล้ว |
+| `EggType.price` | **ลบไปแล้ว** | ✅ เสร็จแล้ว |
 
 > **ทั้งหมดนี้ใช้วิธี `enabled = false` ไม่ใช่ลบทิ้ง** เพราะ id พวกนี้อาจอยู่ในข้อมูลผู้เล่นที่เซฟไปแล้ว (ตอนนี้ยังไม่มี DataStore จึงยังปลอดภัย แต่ทำให้ชินไว้ก่อน)
 
@@ -116,20 +164,26 @@ UI จริง (สองแถบแม่/ลูก + กล่องยื�
 ขั้น 2  เปลี่ยน os.clock() → os.time() ใน EggService
         → แก้จุดเดียว ไม่กระทบ API ทดสอบได้ทันทีว่าไข่ยังฟักตรงเวลา
 
-ขั้น 3  เปลี่ยนผลการฟัก: rollUnit → rollMother
+ขั้น 3  ทำ "ไข่มีน้ำหนัก" ก่อนแตะการฟัก
+        → เพิ่ม makeEgg() + state.heldEggs + ฟิลด์ weight ใน EggSlot
+        → เปลี่ยน placeEgg ให้รับ heldIndex
+        → ตอนนี้ไข่มีน้ำหนักครบทุกฟองแล้ว แต่ฟักออกมายังเป็น "ทหาร" เหมือนเดิม
+        ⚠️ ขั้นนี้ต้องมาก่อนขั้น 4 เสมอ เพราะขั้น 4 อ่านน้ำหนักจากไข่
+
+ขั้น 4  เปลี่ยนผลการฟัก: rollUnit → rollCharacter + อ่าน weight จากไข่
         → EggHatched payload เปลี่ยน แก้ client ให้รับของใหม่พร้อมกัน
         → ตรงนี้ทำให้ "ฟักแล้วได้ตัวแม่" ใช้งานได้จริงเป็นครั้งแรก
 
-ขั้น 4  แยก state.units → mothersInPen + mothersInBag + uid global
+ขั้น 5  แยก state.units → mothersInPen + mothersInBag + uid global
         → เปลี่ยนโครงข้อมูลใน memory ยังไม่แตะ DataStore
-
-ขั้น 5  PlotService → PenService: ความจุตามเลเวล + แสดงโมเดลแม่
-        → งานใหญ่สุดของฝั่งโลก ทำทีหลังสุดเพราะต้องรู้ว่าแม่หน้าตายังไงก่อน
 
 ขั้น 6  ย้าย 4 ช่องวางไข่ → สวนฟัก 50 ช่อง
         → FarmStateSync payload เปลี่ยน แก้ client พร้อมกัน
 
-ขั้น 7  ตั้ง enabled = false ให้ UnitTypes / Rarities / hatchTable
+ขั้น 7  PlotService → PenService: ความจุตามเลเวล + แสดงโมเดลแม่
+        → งานใหญ่สุดของฝั่งโลก ทำทีหลังสุดเพราะต้องรู้ว่าแม่หน้าตายังไงก่อน
+
+ขั้น 8  ตั้ง enabled = false ให้ UnitTypes / Rarities แล้วลบ hatchTable
         → ทำท้ายสุด เพราะก่อนหน้านี้โค้ดยังอ้างอยู่
 ```
 
@@ -140,13 +194,23 @@ UI จริง (สองแถบแม่/ลูก + กล่องยื�
 ## 7. สิ่งที่ Phase 1.5 **ไม่** ทำ
 
 - ❌ DataStore / การเซฟ (Phase 2)
-- ❌ ระบบผลิตลูก (Phase 2)
+- ❌ ระบบผลิตลูก · คลังลูก · cap 500 (Phase 2)
 - ❌ ผลิตเงิน · ขายแม่ · อัปเกรดคอก (Phase 2)
-- ❌ กำแพง · กองทัพ · การรบ (Phase 3)
-- ❌ บอส · แย่งไข่ (Phase 5) — Phase 1.5 ยังต้องมีวิธีได้ไข่มาแบบชั่วคราวเพื่อทดสอบ
-  **เสนอ:** คำสั่งฝั่ง server ใน command bar เท่านั้น ไม่ทำเป็นปุ่มใน UI
-  จะได้ไม่ต้องเขียนแล้วลบทิ้งตอน Phase 5
+- ❌ กำแพง · ปล่อยทหาร · `stageProgress` · turret (Phase 3)
+- ❌ เงินจากการฆ่าทหาร/บอส (Phase 3 และ 5)
+- ❌ บอส · รังไข่ · แย่งไข่ · ขนาดโมเดลไข่ตามน้ำหนัก (Phase 5)
 - ❌ Robux / Developer Product (Phase 6)
+
+### วิธีได้ไข่มาทดสอบระหว่างที่ยังไม่มีบอส
+
+**เสนอ:** คำสั่งฝั่ง server ใน command bar เท่านั้น ไม่ทำเป็นปุ่มใน UI
+จะได้ไม่ต้องเขียนแล้วลบทิ้งตอน Phase 5
+
+```
+EggService.debugGrantEgg(player, eggId)   -- ต้องเรียก makeEgg() ข้างในเพื่อสุ่มน้ำหนัก
+```
+
+⚠️ **ห้ามให้ client เรียกถึงได้** และห้ามส่งน้ำหนักมาจาก client — ถึงจะเป็นของเทสต์ก็ต้อง server-authoritative ตั้งแต่แรก ไม่งั้นพอถึง Phase 5 จะเผลอปล่อยช่องโหว่ติดไป
 
 ---
 
@@ -154,8 +218,13 @@ UI จริง (สองแถบแม่/ลูก + กล่องยื�
 
 - [ ] `rojo build` ผ่าน และ tree ออกมาถูก (`ServerScriptService` ยังเป็น service ไม่ใช่ Script)
 - [ ] `luau-lsp analyze` สะอาด
-- [ ] เปิดใน Studio แล้วฟักไข่ได้ตัวแม่จริง เห็นชื่อตัวละคร + น้ำหนักในคอก
-- [ ] น้ำหนักที่ออกกระจายตามตาราง tier (ลองฟักหลาย ๆ ฟองแล้วดู Output)
+- [ ] `Config.validate()` ยังผ่านตอนเซิร์ฟบูต
+- [ ] เปิดใน Studio แล้วฟักไข่ได้ตัวแม่จริง เห็นชื่อตัวละคร + คลาส + น้ำหนักในคอก
+- [ ] **น้ำหนักที่เห็นตอนเป็นไข่ = น้ำหนักของแม่ที่ฟักออกมา เป๊ะทุกฟอง** (กฎข้อ §0)
+- [ ] น้ำหนักที่ออกกระจายตามตาราง tier (ฟักหลาย ๆ ฟองแล้วดู Output — tier 1 ควรออกราว 90%)
+- [ ] ตัวละครที่ออกตรงกับตารางคลาสของไข่ด่านนั้น (ไข่ด่าน 1 ต้องไม่ออก A/S เลย)
 - [ ] ย้ายแม่คอก↔กระเป๋าได้ และกระเป๋าเต็ม 100 แล้วเพิ่มไม่ได้
+- [ ] สวนฟักเต็ม 50 แล้ววางเพิ่มไม่ได้
+- [ ] ส่ง `heldIndex` ที่ผิด (0, 51, ทศนิยม, ช่องว่าง, string) แล้ว server ปฏิเสธทุกกรณีโดยไม่ error
 - [ ] ผู้เล่นออกแล้วเข้าใหม่ = ข้อมูลหาย (ถูกต้องสำหรับเฟสนี้ เพราะยังไม่มี DataStore)
 - [ ] ไม่มีทางได้ไข่จาก UI ฝั่ง client อีกแล้ว

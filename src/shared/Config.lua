@@ -331,7 +331,15 @@ Config.Production = {
 	-- (ที่โต ×10^8) ทำให้ตั้งแต่ด่าน 5 ขึ้นไปสะสมกองทัพเสร็จทันที กำแพงหมดความหมาย
 	-- ที่ ×3 กองทัพยังต้องใช้เวลาสะสมจริงทุกด่าน (ไม่กี่ชั่วโมงถึงหนึ่งวัน)
 	-- การที่จ่ายแพงขึ้นแต่ได้ผลน้อยกว่ายังทำให้ผู้เล่นต้องเลือกว่าจะอัปอะไรก่อน
-	UPGRADE_MAX_LEVEL = 10,
+	-- ⚠️ ตัดจาก 10 เหลือ 5 ขั้น (ตัดสินแล้ว — ทางเลือก ก)
+	--
+	-- ตั้งแต่ด่าน 3 คอขวดเป็น "การปล่อย" ถาวร → upgrade นี้หยุดเพิ่ม damage
+	-- เหลือประโยชน์แค่ "เติมคลังเร็วขึ้น" ซึ่งไม่คุ้มราคาที่ไต่ถึง 1e12
+	--
+	-- ที่ 5 ขั้น ผู้เล่นอ้างอิงยังผลิตเกินอัตราปล่อย 7.9-15.1 เท่าที่ด่าน 6-9
+	-- (เดิมเกิน 3,327 เท่า ซึ่งไร้สาระ) และ **เวลาตีทุกด่านไม่เปลี่ยนเลย**
+	-- เพราะคอขวดยังเป็นการปล่อยอยู่ดี — ตรวจแล้วทั้ง 9 ด่าน
+	UPGRADE_MAX_LEVEL = 5,
 	UPGRADE_BASE_COST = 1000,
 	UPGRADE_COST_MULTIPLIER = 10,
 	UPGRADE_RATE_MULTIPLIER = 3,
@@ -716,9 +724,21 @@ Config.Economy = {
 	--   ใช้ ×10 ไม่ใช่ ×2 เพราะบอสฆ่าซ้ำได้เรื่อย ๆ (รีเกิดทุก 5 นาที)
 	--   ต้องตามราคาของที่โต ×10 ให้ทัน ไม่งั้นบอสกลายเป็นเศษเงินตั้งแต่กลางเกม
 	--
-	-- ⚠️ บอสช่วยกันฆ่าได้ 7 คน — วิธีแบ่งเงินยังไม่ตัดสิน (ดู docs/data-schema.md §13)
 	KILL_BOSS_BASE = 10000,
 	KILL_BOSS_MULTIPLIER = 10,
+
+	-- ⚠️ บอสช่วยกันฆ่าได้ทั้งเซิร์ฟ — **แบ่งเท่ากันทุกคนที่ร่วมตี** (ตัดสินแล้ว)
+	--
+	-- ไม่แบ่งตามสัดส่วน damage เพราะการตีบอสใช้เวลาไม่นาน และการตีบอสเป็นแค่กิมมิค
+	-- กลไกจริงของเกมคือการแย่งไข่ ไม่ต้องซีเรียสกับความยุติธรรมของส่วนแบ่งขนาดนั้น
+	--
+	-- ผลข้างเคียงที่รับได้: คนที่ตีครั้งเดียวตอนบอสใกล้ตายก็ได้ส่วนแบ่งเต็ม
+	-- แลกกับที่ผู้เล่นใหม่ (อาวุธอ่อน) ยังได้เงินจากบอสด่านสูงที่คนอื่นตี
+	BOSS_REWARD_SPLIT_EQUALLY = true,
+
+	-- ต้องทำ damage ให้บอสอย่างน้อยเท่านี้ถึงนับว่า "ร่วมตี"
+	-- กันคนที่ยืนเฉย ๆ ในพื้นที่บอสแล้วได้เงินฟรี
+	BOSS_REWARD_MIN_DAMAGE = 1,
 }
 
 --------------------------------------------------------------------------------
@@ -730,7 +750,13 @@ Config.Economy = {
 Config.Pen = {
 	BASE_CAPACITY = 5,
 	CAPACITY_PER_LEVEL = 1,
-	MAX_LEVEL = 15,
+
+	-- ⚠️ ตัดจาก 15 เหลือ 10 ขั้น (ตัดสินแล้ว — ทางเลือก ก)
+	-- เลเวล 11-15 เป็น "ของตายในตาราง": ราคาไต่ถึง 1e17 ขณะที่รายได้ทั้งด่าน 9
+	-- มีแค่ 1.28e14 → ไม่มีผู้เล่นคนไหนไปถึงได้เลย เป็นแค่ตัวเลขหลอกตา
+	-- ตัดทิ้งแล้วราคารวมทั้งสายลดจาก 1e17 เหลือ 1.1e12 (ถูกลง ~90,000 เท่า)
+	-- ความจุที่ผู้เล่นอ้างอิงใช้จริงคือ 5-13 ตัว (ด่าน 1-9) ซึ่งยังอยู่ในเพดานใหม่สบาย ๆ
+	MAX_LEVEL = 10,
 	UPGRADE_BASE_COST = 1000,
 	UPGRADE_COST_MULTIPLIER = 10,
 }
@@ -1911,6 +1937,14 @@ function Config.getBossKillReward(stage: number): number
 	return Config.Economy.KILL_BOSS_BASE * Config.Economy.KILL_BOSS_MULTIPLIER ^ (clamped - 1)
 end
 
+-- ส่วนแบ่งของผู้เล่น 1 คน เมื่อมี participantCount คนร่วมตีบอสตัวนั้น
+-- ⚠️ แบ่งเท่ากันทุกคน ไม่ดูสัดส่วน damage (ดูเหตุผลใน Config.Economy)
+-- server เป็นคนนับว่าใครร่วมตีบ้าง (ทำ damage ≥ BOSS_REWARD_MIN_DAMAGE) ห้าม client แจ้ง
+function Config.getBossKillShare(stage: number, participantCount: number): number
+	local participants = math.max(1, math.floor(participantCount))
+	return Config.getBossKillReward(stage) / participants
+end
+
 function Config.formatWeight(kg: number): string
 	local abs = math.abs(kg)
 
@@ -2577,6 +2611,27 @@ function Config.validate()
 		end
 	end
 
+	-- ⚠️ ตัดขั้นบนของคอก/upgrade ผลิตแล้ว ต้องไม่ตัดจนผู้เล่นอ้างอิงใช้ไม่พอ
+	assert(
+		Config.Pen.MAX_LEVEL >= Config.Stage.COUNT,
+		`Config: เพดานคอก ({Config.Pen.MAX_LEVEL}) ต่ำกว่าจำนวนด่าน ({Config.Stage.COUNT}) `
+			.. `— ผู้เล่นอ้างอิงที่ด่าน N ใช้คอกเลเวล N จะขยายไม่พอ`
+	)
+	-- upgrade อัตราผลิตตัดได้ลึกกว่า เพราะตั้งแต่ด่าน 3 คอขวดเป็นการปล่อยอยู่แล้ว
+	-- แต่ต้องยังผลิตได้ "ไม่ต่ำกว่าอัตราปล่อย" ทุกด่านที่คอขวดเป็นการปล่อย
+	-- ไม่งั้นการตัดขั้นจะไปเปลี่ยนเวลาตีโดยไม่ตั้งใจ
+	for capStage = 1, Config.Stage.COUNT do
+		local produced = Config.getPenCapacity(capStage)
+			* Config.getProductionPerMinute(Config.BalanceCheck.REFERENCE_WEIGHT[capStage], nil, capStage - 1, true)
+			/ 60
+		local release = Config.getReleaseRate(capStage)
+		assert(
+			produced >= release or capStage <= 2,
+			`Config: ด่าน {capStage} ผลิตได้ {string.format("%.2f", produced)} ตัว/วิ แต่ปล่อยได้ {release} `
+				.. `— ตัดขั้น upgrade อัตราผลิตลึกเกินไป คอขวดย้อนกลับไปเป็นการผลิต`
+		)
+	end
+
 	----------------------------------------------------------------------------
 	-- upgrade อัตราผลิต
 	----------------------------------------------------------------------------
@@ -2749,6 +2804,23 @@ function Config.validate()
 
 	assert(economy.KILL_DEFENDER_BASE > 0, "Config: KILL_DEFENDER_BASE ต้องมากกว่า 0")
 	assert(economy.KILL_BOSS_BASE > 0, "Config: KILL_BOSS_BASE ต้องมากกว่า 0")
+	assert(
+		economy.BOSS_REWARD_MIN_DAMAGE > 0,
+		"Config: BOSS_REWARD_MIN_DAMAGE ต้องมากกว่า 0 — ไม่งั้นคนยืนเฉย ๆ ก็ได้ส่วนแบ่ง"
+	)
+	-- แบ่งเท่ากันแล้วต้องได้ครบพอดี ไม่มีเศษหายหรือเงินงอก
+	assert(
+		Config.getBossKillShare(5, 1) == Config.getBossKillReward(5),
+		"Config: คนเดียวร่วมตีต้องได้เต็มจำนวน"
+	)
+	assert(
+		math.abs(
+			Config.getBossKillShare(5, Config.BalanceCheck.PLAYERS_PER_SERVER)
+				* Config.BalanceCheck.PLAYERS_PER_SERVER
+				- Config.getBossKillReward(5)
+		) < 1e-6,
+		"Config: ส่วนแบ่งรวมของทุกคนต้องเท่ากับรางวัลเต็มพอดี"
+	)
 	assert(
 		economy.KILL_BOSS_MULTIPLIER >= priceGrowth,
 		`Config: เงินจากบอสโต ×{economy.KILL_BOSS_MULTIPLIER} ต่อด่าน แต่ราคาของโต ×{priceGrowth} `

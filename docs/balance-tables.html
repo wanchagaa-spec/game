@@ -1,0 +1,325 @@
+<!doctype html><html lang="th"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ตารางสมดุล — เกมไข่ทหาร</title>
+<style>
+:root{color-scheme:light dark;--bg:#faf9f7;--card:#fff;--ink:#1c1b19;--dim:#6b6862;--line:#e5e2dc;
+--head:#f2efe9;--accent:#b8860b;--warn:#a8451f;--ok:#2d6a3f;--hi:#fff8e6;--bad:#fdeae4;--good:#e9f4ec}
+@media(prefers-color-scheme:dark){:root{--bg:#161513;--card:#1e1d1a;--ink:#eceae5;--dim:#9a968e;
+--line:#33312c;--head:#26241f;--accent:#d4a53a;--warn:#e08b62;--ok:#7bbd8f;--hi:#2b2517;
+--bad:#3a221a;--good:#1c2b21}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+font:15px/1.6 "Noto Sans Thai","Sarabun",-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:1060px;margin:0 auto;padding-block:40px;padding-left:20px;padding-right:20px}
+header{border-bottom:2px solid var(--accent);padding-bottom:16px}
+h1{margin:0 0 6px;font-size:26px;letter-spacing:-.01em}
+.meta{color:var(--dim);font-size:13px}
+h2{margin:40px 0 4px;font-size:19px;border-left:4px solid var(--accent);padding-left:10px}
+h2 .num{color:var(--dim);font-weight:400;margin-right:6px}
+h3{margin:26px 0 2px;font-size:15.5px;color:var(--dim)}
+.formula{background:var(--head);border:1px solid var(--line);border-radius:6px;padding:10px 14px;
+margin:12px 0;font-family:ui-monospace,Menlo,monospace;font-size:13.5px;overflow-x:auto}
+.note{color:var(--dim);font-size:13.5px;margin:10px 0}
+.key{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--ok);
+border-radius:6px;padding:12px 16px;margin:14px 0}
+.key.warn{border-left-color:var(--warn)}
+.key.red{border-left-color:#c0392b;background:var(--bad)}
+.scroll{overflow-x:auto;margin:14px 0}
+table{border-collapse:collapse;width:100%;font-size:13px;background:var(--card);
+border:1px solid var(--line);border-radius:6px;overflow:hidden}
+th,td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th{background:var(--head);font-weight:600;font-size:12px;color:var(--dim)}
+th:first-child,td:first-child{text-align:left;font-weight:600}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:nth-child(even){background:color-mix(in srgb,var(--head) 45%,transparent)}
+tr.hi td{background:var(--hi)}
+td.bad{background:var(--bad);font-weight:600}
+td.good{background:var(--good);font-weight:600}
+td.dim{color:var(--dim)}
+.toc{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px 18px;margin:18px 0;
+font-size:13.5px;line-height:2}
+.toc a{color:var(--ink);text-decoration:none;border-bottom:1px dotted var(--dim)}
+footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--line);color:var(--dim);font-size:12.5px}
+code{background:var(--head);padding:1px 5px;border-radius:3px;font-size:12.5px}
+@media print{body{background:#fff}h2{page-break-after:avoid}.scroll{page-break-inside:avoid}}
+</style></head><body><div class="wrap">
+
+<header>
+<h1>ตารางสมดุล — เกมไข่ทหาร</h1>
+<div class="meta">ระบบรบใหม่: ปล่อยทหารต่อเนื่องแบบ Age of War ·
+ตัวเลขทุกตัวดึงจาก <code>src/shared/Config.lua</code> โดยตรง <b>ทั้งในตารางและในคำอธิบาย</b> ไม่ได้พิมพ์มือ ·
+สร้างเมื่อ 2026-09-14 · ตรวจด้วย <code>luau tests/run.luau</code></div>
+</header>
+
+<div class="toc">
+<a href="#s1">1 · สมการเดียวที่ต้องจำ</a> &nbsp;·&nbsp;
+<a href="#s2">2 · เส้นทางผู้เล่นจริง vs ผู้เล่นในฝัน 🔴</a> &nbsp;·&nbsp;
+<a href="#s3">3 · เวลาพังแต่ละด่าน แยกตามน้ำหนักแม่</a> &nbsp;·&nbsp;
+<a href="#s4">4 · throughput — คอขวดอยู่ไหน</a> &nbsp;·&nbsp;
+<a href="#s5">5 · รายได้ vs ราคาของ</a> &nbsp;·&nbsp;
+<a href="#s6">6 · ตัวคูณ damage ที่ซื้อด้วยเงิน ⭐</a> &nbsp;·&nbsp;
+<a href="#s7">7 · turret</a> &nbsp;·&nbsp;
+<a href="#s8">8 · อัตราผลิตตามน้ำหนัก</a> &nbsp;·&nbsp;
+<a href="#s9">9 · damage = HP</a> &nbsp;·&nbsp;
+<a href="#s10">10 · เงิน</a> &nbsp;·&nbsp;
+<a href="#s11">11 · คลาส · น้ำหนัก · ไข่</a> &nbsp;·&nbsp;
+<a href="#s12">12 · ด่าน · บอส · อาวุธ · คอก</a>
+</div>
+
+<h2 id="s1"><span class="num">1</span>สมการเดียวที่ต้องจำ</h2>
+<div class="formula">damage/วินาที = <b>min(อัตราผลิต, อัตราปล่อย)</b> × damage ต่อตัว × 1.1<sup>damageLevel</sup></div>
+<div class="key warn"><b>ความหมายที่เปลี่ยนเกมทั้งเกม</b> — พอชนเพดาน "อัตราปล่อย" แล้ว
+<b>upgrade อัตราผลิตหลุดออกจากสมการ damage ทันที</b><br>
+(ยังมีประโยชน์อยู่ เพราะเติมคลังเร็วขึ้นและสะสมกองใหญ่ได้เร็วขึ้น แต่ไม่ใช่ตัวคูณ damage อีกต่อไป)<br>
+ระบบเดิม "กดส่งทีเดียวแล้วรอผล" ยกเลิกทั้งหมดแล้ว<br>
+และตัวคูณ damage ก็ไม่ได้มาฟรีตามด่านอีกแล้ว — <b>ต้องซื้อด้วยเงิน</b> (หัวข้อ 6)</div>
+<div class="scroll"><table class=""><thead><tr><th>ด่าน</th><th>แม่อ้างอิง (kg)</th><th>คลาส</th><th>คอก</th><th>ผลิต/นาที ต่อแม่</th><th>ผลิตได้/นาที รวม</th><th>ปล่อยได้/นาที</th><th>คอขวด</th><th>damage ต่อตัว</th><th>damage/วิ</th><th>HP ด่าน</th><th>เวลาพัง</th></tr></thead><tbody><tr><td>ด่าน 1</td><td>500</td><td>C</td><td>5</td><td>1.50</td><td>7.48</td><td>60</td><td class="bad"><b>ผลิต</b></td><td>4.79</td><td>0.597</td><td>—</td><td>—</td></tr><tr><td>ด่าน 2</td><td>500</td><td>C</td><td>6</td><td>4.49</td><td>26.9</td><td>60</td><td class="bad"><b>ผลิต</b></td><td>10.3</td><td>4.61</td><td>15K</td><td><b>54 น.</b></td></tr><tr class="hi"><td>ด่าน 3</td><td>500</td><td>C</td><td>7</td><td>13.5</td><td>94.2</td><td>60</td><td>ปล่อย</td><td>22.0</td><td>22.0</td><td>150K</td><td><b>1.9 ชม.</b></td></tr><tr><td>ด่าน 4</td><td>500</td><td>B</td><td>8</td><td>40.4</td><td>323</td><td>120</td><td>ปล่อย</td><td>283</td><td>567</td><td>1.5M</td><td><b>44 น.</b></td></tr><tr><td>ด่าน 5</td><td>500</td><td>B</td><td>9</td><td>121</td><td>1.1K</td><td>180</td><td>ปล่อย</td><td>607</td><td>1.8K</td><td>15M</td><td><b>2.3 ชม.</b></td></tr><tr><td>ด่าน 6</td><td>500</td><td>B</td><td>10</td><td>363</td><td>3.6K</td><td>240</td><td>ปล่อย</td><td>1.3K</td><td>5.2K</td><td>150M</td><td><b>8.0 ชม.</b></td></tr><tr><td>ด่าน 7</td><td>500</td><td>A</td><td>11</td><td>363</td><td>4K</td><td>360</td><td>ปล่อย</td><td>16.7K</td><td>100.4K</td><td>1.5B</td><td><b>4.1 ชม.</b></td></tr><tr><td>ด่าน 8</td><td>500</td><td>A</td><td>12</td><td>363</td><td>4.4K</td><td>480</td><td>ปล่อย</td><td>35.9K</td><td>287.1K</td><td>15B</td><td><b>14.5 ชม.</b></td></tr><tr><td>ด่าน 9</td><td>500</td><td>A</td><td>13</td><td>363</td><td>4.7K</td><td>600</td><td>ปล่อย</td><td>76.9K</td><td>769.2K</td><td>150B</td><td><b>2 วัน</b></td></tr></tbody></table></div>
+<div class="note">"แม่อ้างอิง" = ผู้เล่นชั้นกลางที่ด่านนั้น (คอกเลเวล N · upgrade อัตราผลิตขั้น N−1) ตาม <code>Config.BalanceCheck</code>
+— ค่าชุดเดียวกับที่ <code>assertProgressionIsSane()</code> ใช้กันไม่ให้เซิร์ฟบูตตอนสมดุลพัง</div>
+<div class="key"><b>ด่าน 1 ไม่มีกำแพงและไม่มีทหารฝ่ายรับ</b> — ผู้เล่นใหม่เดินไปสู้บอสตัวเล็กเอาไข่ได้เลย
+แก้ปัญหาไก่กับไข่ (ต้องมีแม่ถึงจะมีกองทัพ ต้องมีไข่ถึงจะมีแม่) · <code>validate()</code> บังคับข้อนี้ไว้</div>
+<h2 id="s2"><span class="num">2</span>🔴 ยามเคยวัดผู้เล่นที่ไม่มีอยู่จริง</h2>
+<div class="note">ยามเดิมสมมติว่าผู้เล่นได้แม่หนักขึ้น ×4 ทุกด่าน
+(2,000 kg → 30,000,000 kg)
+แต่ตารางสุ่มน้ำหนักเหมือนกันทุกด่าน — แม่ 30M kg คือ <b>1 ใน 111,111 ฟอง</b><br>
+ที่อัตราไข่จริง 8.57 ฟอง/ชม./คน
+(5 ฟอง ทุก 5 นาที ÷ 7 คน)
+นั่นคือเวลาฟาร์มระดับ <b>86.6 ปี</b></div>
+<div class="scroll"><table class=""><thead><tr><th>ด่าน</th><th>แม่ที่ยามเดิมสมมติ</th><th>เวลาตี</th><th><b>เวลาฟาร์ม</b></th><th>ฟาร์ม÷ตี</th><th>แม่ที่ผู้เล่นมีจริง</th><th>เวลาตี</th><th>เวลาฟาร์ม</th><th>ฟาร์ม÷ตี</th></tr></thead><tbody><tr><td>ด่าน 2</td><td class="dim">2,000 kg · C</td><td class="dim">19 น.</td><td class="bad">7.0 ชม.</td><td class="bad">22×</td><td>500 kg · C</td><td><b>54 น.</b></td><td>42 น.</td><td class="good">0.77×</td></tr><tr><td>ด่าน 3</td><td class="dim">8,000 kg · B</td><td class="dim">5 น.</td><td class="bad">27.2 ชม.</td><td class="bad">345×</td><td>500 kg · C</td><td><b>1.9 ชม.</b></td><td>49 น.</td><td class="good">0.43×</td></tr><tr><td>ด่าน 4</td><td class="dim">30,000 kg · B</td><td class="dim">6 น.</td><td class="bad">10 วัน</td><td class="bad">2,458×</td><td>500 kg · B</td><td><b>44 น.</b></td><td>2.3 ชม.</td><td class="good">3.17×</td></tr><tr><td>ด่าน 5</td><td class="dim">120,000 kg · A</td><td class="dim">1 น.</td><td class="bad">2.4 ปี</td><td class="bad">853,399×</td><td>500 kg · B</td><td><b>2.3 ชม.</b></td><td>2.1 ชม.</td><td class="good">0.92×</td></tr><tr><td>ด่าน 6</td><td class="dim">500,000 kg · A</td><td class="dim">3 น.</td><td class="bad">1.3 ปี</td><td class="bad">276,601×</td><td>500 kg · B</td><td><b>8.0 ชม.</b></td><td>1.9 ชม.</td><td class="good">0.24×</td></tr><tr><td>ด่าน 7</td><td class="dim">2,000,000 kg · S</td><td class="dim">&lt;1 น.</td><td class="bad">146.5 ปี</td><td class="bad">117,398,104×</td><td>500 kg · A</td><td><b>4.1 ชม.</b></td><td>5.1 ชม.</td><td class="good">1.24×</td></tr><tr><td>ด่าน 8</td><td class="dim">8,000,000 kg · S</td><td class="dim">1 น.</td><td class="bad">16.0 ปี</td><td class="bad">7,320,822×</td><td>500 kg · A</td><td><b>14.5 ชม.</b></td><td>2.8 ชม.</td><td class="good">0.19×</td></tr><tr><td>ด่าน 9</td><td class="dim">30,000,000 kg · S</td><td class="dim">2 น.</td><td class="bad">86.6 ปี</td><td class="bad">20,575,912×</td><td>500 kg · A</td><td><b>2 วัน</b></td><td>2.2 ชม.</td><td class="good">0.04×</td></tr></tbody></table></div>
+<div class="key red"><b>ยามผ่านทุกด่าน ทั้งที่เกมเล่นไม่ไหว</b> —
+เพราะยามวัดแค่ "เวลาตี" ไม่เคยถามว่า "กว่าจะหาของมาตีได้ใช้เวลาเท่าไหร่"<br>
+กรณีที่แย่ที่สุดคือด่าน 7: ยามเดิมบอกว่าใช้เวลาตี &lt;1 น. แต่แม่ที่มันสมมติว่าผู้เล่นมี
+(2,000,000 kg คลาส S) ต้องฟาร์ม <b>146.5 ปี</b>
+— มากกว่ากันถึง <b>117,398,104 เท่า</b></div>
+<div class="key"><b>แก้สองชั้น</b><br>
+<b>1.</b> ผู้เล่นอ้างอิงใช้แม่ <b>น้ำหนักคงที่</b> (500 kg — ซึ่ง 90% ของไข่ให้)
+แล้วให้ <b>คลาส</b> เป็นตัวไต่ตามด่านแทน (C → A) = เส้นทางที่ผู้เล่นจริงเดิน<br>
+<b>2.</b> ยามตัวใหม่: <code>เวลาฟาร์ม ≤ 5 × เวลาตี</code> ทุกด่าน
+— ทดสอบแล้วว่าจับได้จริง (ดู <code>tests/config.spec.luau</code> หัวข้อ "ยามเวลาฟาร์ม")<br>
+ตอนนี้อัตราส่วนสูงสุดคือ <b>3.17×</b> ที่ด่าน 4 — ปัญหาหายแล้ว</div>
+<h2 id="s3"><span class="num">3</span>เวลาพังแต่ละด่าน แยกตามน้ำหนักแม่</h2>
+<div class="note">ล็อกคลาสไว้ที่ C (×1) เพื่อให้เห็นผลของ <b>น้ำหนักล้วน ๆ</b> ·
+คอกและ upgrade ยังไต่ไปตามด่านเหมือนเดิม</div>
+<div class="scroll"><table class=""><thead><tr><th>น้ำหนักแม่</th><th>ด่าน 1</th><th>ด่าน 2</th><th>ด่าน 3</th><th>ด่าน 4</th><th>ด่าน 5</th><th>ด่าน 6</th><th>ด่าน 7</th><th>ด่าน 8</th><th>ด่าน 9</th></tr></thead><tbody><tr><td>100 kg</td><td class="dim">ไม่มีกำแพง</td><td>11.5 ชม.</td><td>31.3 ชม.</td><td class="bad">6 วัน</td><td class="bad">36 วัน</td><td class="bad">245 วัน</td><td class="bad">4.1 ปี</td><td class="bad">27.7 ปี</td><td class="bad">201.7 ปี</td></tr><tr><td>1,000 kg</td><td class="dim">ไม่มีกำแพง</td><td>2.0 ชม.</td><td>9.9 ชม.</td><td>45.0 ชม.</td><td class="bad">11 วัน</td><td class="bad">77 วัน</td><td class="bad">1.3 ปี</td><td class="bad">8.8 ปี</td><td class="bad">63.8 ปี</td></tr><tr><td>10,000 kg</td><td class="dim">ไม่มีกำแพง</td><td class="good">22 น.</td><td>3.1 ชม.</td><td>14.2 ชม.</td><td class="bad">4 วัน</td><td class="bad">24 วัน</td><td class="bad">148 วัน</td><td class="bad">2.8 ปี</td><td class="bad">20.2 ปี</td></tr><tr><td>100,000 kg</td><td class="dim">ไม่มีกำแพง</td><td class="good">7 น.</td><td>59 น.</td><td>4.5 ชม.</td><td>27.3 ชม.</td><td class="bad">8 วัน</td><td class="bad">47 วัน</td><td class="bad">320 วัน</td><td class="bad">6.4 ปี</td></tr><tr><td>1,000,000 kg</td><td class="dim">ไม่มีกำแพง</td><td class="good">2 น.</td><td class="good">19 น.</td><td>1.4 ชม.</td><td>8.6 ชม.</td><td>2 วัน</td><td class="bad">15 วัน</td><td class="bad">101 วัน</td><td class="bad">2.0 ปี</td></tr><tr><td>10,000,000 kg</td><td class="dim">ไม่มีกำแพง</td><td class="good">&lt;1 น.</td><td class="good">6 น.</td><td class="good">27 น.</td><td>2.7 ชม.</td><td>18.6 ชม.</td><td class="bad">5 วัน</td><td class="bad">32 วัน</td><td class="bad">233 วัน</td></tr><tr><td>100,000,000 kg</td><td class="dim">ไม่มีกำแพง</td><td class="good">&lt;1 น.</td><td class="good">2 น.</td><td class="good">9 น.</td><td>52 น.</td><td>5.9 ชม.</td><td>35.6 ชม.</td><td class="bad">10 วัน</td><td class="bad">74 วัน</td></tr></tbody></table></div>
+<div class="key warn"><b>น้ำหนักแม่คือตัวแปรที่แรงที่สุดในเกม</b> —
+ห่างกัน 1M เท่า (100 kg → 100M kg)
+ทำให้เวลาพังด่าน 9 ห่างกัน <b>1,000 เท่า</b>
+(201.7 ปี → 74 วัน)<br>
+มาสองทางพร้อมกัน: damage ต่อตัว (√ = ×1K)
+และอัตราผลิต (^0.25 = ×31.6)
+— แต่ตั้งแต่ด่าน 3 ขึ้นไปอัตราผลิตชนเพดานปล่อย เหลือแค่ damage ต่อตัวที่ยังทำงาน<br>
+<span style="color:var(--warn)"><b>สีแดง</b> = เกินเพดาน 72 ชม.</span> ·
+<span style="color:var(--ok)"><b>สีเขียว</b> = ต่ำกว่าขั้นต่ำ 0.5 ชม.</span>
+— ยามเช็คเฉพาะผู้เล่นชั้นกลาง ไม่ได้เช็คทุกช่องในตารางนี้</div>
+<div class="key"><b>ช่องแดงที่ด่านท้ายไม่ใช่บั๊ก</b> — ตารางนี้ล็อกคลาสไว้ที่ C
+แปลว่า "ถ้าผู้เล่นไม่เคยได้คลาสดีขึ้นเลยตลอดเกม"<br>
+แม่ 100 kg คลาส C ใช้เวลา 201.7 ปี ที่ด่าน 9
+ซึ่งเกินเพดาน 72 ชม. ไปไกล — <b>นั่นคือประเด็นของรอบนี้พอดี</b>
+ด่านท้ายไม่ได้ออกแบบให้ผ่านด้วยคลาส C แต่ให้ผ่านด้วยคลาส A
+ที่ฟาร์มได้จากบอสด่านนั้น (50% ของไข่ด่าน 9)<br>
+เทียบกัน: แม่ 100 kg <b>คลาส A</b> ที่ด่าน 9 ใช้ 5.6 ปี ·
+แม่ 500 kg คลาส A (ผู้เล่นอ้างอิง) ใช้ 2.5 ปี
+— คลาสเดียวชดเชยได้ ×36
+ซึ่งมากกว่าที่น้ำหนักทั้งตารางให้ได้ในช่วง tier เดียวกัน</div>
+<h2 id="s4"><span class="num">4</span>throughput — คอขวดอยู่ที่ไหนในแต่ละช่วงเกม</h2>
+<div class="scroll"><table class=""><thead><tr><th>ด่าน</th><th>คอก</th><th>ผลิต/นาที ต่อแม่</th><th>ผลิตได้/นาที รวม</th><th>ปล่อยได้/นาที</th><th>ผลิต ÷ ปล่อย</th><th>คอขวด</th><th>อาการ</th></tr></thead><tbody><tr><td>ด่าน 1</td><td>5</td><td>1.50</td><td class="good">7.48</td><td>60</td><td>0.12×</td><td><b>การผลิต</b></td><td class="dim">ผลิตไม่ทัน ปล่อยว่าง</td></tr><tr><td>ด่าน 2</td><td>6</td><td>4.49</td><td class="good">26.9</td><td>60</td><td>0.45×</td><td><b>การผลิต</b></td><td class="dim">ผลิตไม่ทัน ปล่อยว่าง</td></tr><tr class="hi"><td>ด่าน 3</td><td>7</td><td>13.5</td><td>94.2</td><td class="good">60</td><td>1.57×</td><td>การปล่อย</td><td class="dim">คลังล้น ปล่อยไม่ทัน</td></tr><tr><td>ด่าน 4</td><td>8</td><td>40.4</td><td>323</td><td class="good">120</td><td>2.69×</td><td>การปล่อย</td><td class="dim">คลังล้น ปล่อยไม่ทัน</td></tr><tr><td>ด่าน 5</td><td>9</td><td>121</td><td>1.1K</td><td class="good">180</td><td>6.06×</td><td>การปล่อย</td><td class="dim">คลังล้น ปล่อยไม่ทัน</td></tr><tr><td>ด่าน 6</td><td>10</td><td>363</td><td>3.6K</td><td class="good">240</td><td>15.14×</td><td>การปล่อย</td><td class="dim">คลังล้น ปล่อยไม่ทัน</td></tr><tr><td>ด่าน 7</td><td>11</td><td>363</td><td>4K</td><td class="good">360</td><td>11.10×</td><td>การปล่อย</td><td class="dim">คลังล้น ปล่อยไม่ทัน</td></tr><tr><td>ด่าน 8</td><td>12</td><td>363</td><td>4.4K</td><td class="good">480</td><td>9.08×</td><td>การปล่อย</td><td class="dim">คลังล้น ปล่อยไม่ทัน</td></tr><tr><td>ด่าน 9</td><td>13</td><td>363</td><td>4.7K</td><td class="good">600</td><td>7.87×</td><td>การปล่อย</td><td class="dim">คลังล้น ปล่อยไม่ทัน</td></tr></tbody></table></div>
+<div class="key"><b>คอขวดพลิกที่ด่าน 3 แล้วเป็นแบบนั้นถาวร</b><br>
+<b>ด่าน 1–2 (ช่วงต้นเกม)</b> — คอขวดคือ <b>การผลิต</b>
+ผลิตได้ 7.48 และ 26.9 ตัว/นาที แต่ปล่อยได้ 60.0
+ผู้เล่นนั่งรอแม่ผลิต ปุ่มอัญเชิญเปิดค้างไว้ได้เลย · <b>ของที่ควรซื้อ: คอก + upgrade อัตราผลิต</b><br>
+<b>ด่าน 3–9 (กลางถึงปลายเกม)</b> — คอขวดคือ <b>การปล่อย</b>
+ผลิตได้ 94.2 → 4.7K ตัว/นาที
+แต่ปล่อยได้แค่ 60.0 → 600
+คลังเต็มตลอด · <b>upgrade อัตราผลิตหยุดเพิ่ม damage ตั้งแต่จุดนี้</b>
+เหลือแค่ "น้ำหนักแม่" กับ "ด่านที่ปลดล็อกแล้ว" ที่ยังดัน damage ได้</div>
+<div class="key warn"><b>นี่คือเหตุผลที่ด่าน 3 ยังปล่อย
+1.00 ตัว/วิ เท่าด่าน 2</b> —
+ถ้าเร่งขึ้นตรงรอยต่อที่คอขวดพลิกพอดี เส้นเวลาจะแอ่นลง
+(ตอนนี้ด่าน 3 ใช้ 1.9 ชม. · ด่าน 2 ใช้ 54 น.
+— เร่งแล้วด่านหลังจะง่ายกว่าด่านหน้า) ยามจับได้และไม่ยอมให้เซิร์ฟบูต</div>
+<h2 id="s5"><span class="num">5</span>รายได้ต่อด่าน แยกตามบ่อ vs ราคาของที่ต้องซื้อ</h2>
+<div class="note">เดิมเงินมาจาก "แม่ในคอก" ทางเดียว ตอนนี้เพิ่ม <b>ฆ่าทหารฝ่ายรับ</b> และ <b>ฆ่าบอส</b><br>
+ทหาร: <code>100 × 2^(ด่าน−1)</code> ต่อตัว
+(จำนวนทหาร ×10 ต่อด่านอยู่แล้ว → เงินรวม
+<b>×20 ต่อด่าน</b>) ·
+บอส: <code>10,000 × 10^(ด่าน−1)</code> ต่อครั้ง</div>
+<div class="scroll"><table class=""><thead><tr><th>ด่าน</th><th>เวลาตี</th><th>จากแม่/ชม.</th><th>ฆ่าทหาร/ชม.</th><th>ฆ่าบอส/ชม.</th><th>รายได้ทั้งด่าน</th><th>ราคา upgrade damage</th><th>% รายได้</th><th>ราคารวมทุกอย่าง</th><th>เหลือ</th></tr></thead><tbody><tr><td>ด่าน 2</td><td class="dim">54 น.</td><td>8K</td><td>22.1K</td><td>171.4K</td><td><b>182.2K</b></td><td class="good">74K</td><td class="dim">41%</td><td>104K</td><td class="good">1.75×</td></tr><tr><td>ด่าน 3</td><td class="dim">1.9 ชม.</td><td>93.9K</td><td>211.4K</td><td>1.7M</td><td><b>3.8M</b></td><td class="good">1.5M</td><td class="dim">40%</td><td>1.8M</td><td class="good">2.09×</td></tr><tr><td>ด่าน 4</td><td class="dim">44 น.</td><td>1.1M</td><td>10.9M</td><td>17.1M</td><td><b>21.4M</b></td><td class="good">10M</td><td class="dim">47%</td><td>13M</td><td class="good">1.64×</td></tr><tr><td>ด่าน 5</td><td class="dim">2.3 ชม.</td><td>12.1M</td><td>70M</td><td>171.4M</td><td><b>579.7M</b></td><td class="good">231.4M</td><td class="dim">40%</td><td>261.4M</td><td class="good">2.22×</td></tr><tr><td>ด่าน 6</td><td class="dim">8.0 ชม.</td><td>134.2M</td><td>399.9M</td><td>1.7B</td><td><b>18B</b></td><td class="good">7.2B</td><td class="dim">40%</td><td>7.4B</td><td class="good">2.45×</td></tr><tr><td>ด่าน 7</td><td class="dim">4.1 ชม.</td><td>1.5B</td><td>15.4B</td><td>17.1B</td><td><b>141.2B</b></td><td class="good">57.3B</td><td class="dim">41%</td><td>59.3B</td><td class="good">2.38×</td></tr><tr><td>ด่าน 8</td><td class="dim">14.5 ชม.</td><td>16.1B</td><td>88.2B</td><td>171.4B</td><td><b>4T</b></td><td class="good">1.6T</td><td class="dim">40%</td><td>1.6T</td><td class="good">2.47×</td></tr><tr><td>ด่าน 9</td><td class="dim">2 วัน</td><td>174.4B</td><td>472.6B</td><td>1.7T</td><td><b>127.9T</b></td><td class="good">50.1T</td><td class="dim">39%</td><td>50.3T</td><td class="good">2.54×</td></tr></tbody></table></div>
+<div class="key"><b>บ่อเงินใหม่ไม่ตกยุค</b> —
+เงินจากการกวาดทหารโต ×20 ต่อด่าน และเงินบอสโต ×10
+ทั้งคู่ไม่ช้ากว่าราคาของที่โต ×10 ·
+<code>validate()</code> บังคับข้อนี้ไว้แล้ว<br>
+⚠️ ทหารตายแล้วไม่เกิดใหม่ + <code>stageProgress</code> เซฟถาวร →
+<b>ทหาร 1 ตัวจ่ายเงินได้ครั้งเดียวตลอดกาล</b> ห้ามจ่ายซ้ำตอนโหลดข้อมูลกลับมา</div>
+<div class="key"><b>✅ upgrade damage ดูดเงินส่วนเกินไปได้จริง</b><br>
+ถ้าไม่มี upgrade damage ให้ซื้อ: เงินเหลือ
+<b>6.1× (ด่าน 2) ถึง 640× (ด่าน 9)</b> — ล้นจนไม่มีอะไรให้ใช้<br>
+มีแล้ว: เหลือ <b>1.64× ถึง 2.54×</b><br>
+ราคา upgrade กินรายได้ 39–47% ทุกด่าน —
+<code>validate()</code> บังคับให้อยู่ในช่วง
+30–70%</div>
+<div class="key"><b>✅ ตัดขั้นบนที่ไม่มีใครไปถึงออกแล้ว</b><br>
+คอกเหลือ <b>10 ขั้น</b> · upgrade อัตราผลิตเหลือ <b>5 ขั้น</b><br>
+<b>เวลาตีทุกด่านไม่เปลี่ยนเลย</b> เพราะคอขวดยังเป็นการปล่อยอยู่ดี —
+ตอนนี้ด่านที่ติดเพดานปล่อยยังผลิตเกินที่ปล่อยได้ <b>1.6–15.1 เท่า</b>
+ซึ่งเป็นระยะเผื่อที่สมเหตุสมผล<br>
+<code>validate()</code> บังคับว่าตัดลึกกว่านี้ไม่ได้ — ด่าน 3–9 ต้องยังผลิตได้ ≥ ปล่อยได้</div>
+<h2 id="s6"><span class="num">6</span>⭐ ตัวคูณ damage ที่ซื้อด้วยเงิน</h2>
+<div class="note">⚠️ ระบบเดิม "ตัวคูณตามด่าน" (<code>STAGE_DAMAGE_BASE ^ (ด่าน−1)</code>) <b>ยกเลิกทั้งหมดแล้ว</b> —
+ตัวคูณ damage ไม่ได้มาฟรีตามด่านอีกต่อไป ต้องซื้อทีละขั้นด้วยเงิน</div>
+<div class="formula">ตัวคูณ = 1.1 <sup>damageLevel</sup>
+&nbsp;·&nbsp; เพดานที่ซื้อได้ = wallProgress × 8
+&nbsp;·&nbsp; ราคาขั้นที่ k ของด่าน N = STAGE_COST_BASE[N] × 1.3<sup>(k−1)</sup></div>
+<div class="scroll"><table class=""><thead><tr><th>ด่าน</th><th>เพดานสะสม</th><th>ตัวคูณถ้าซื้อครบ</th><th>ราคาขั้นแรก</th><th>ราคาขั้นสุดท้าย</th><th>ราคารวม 8 ขั้น</th><th>% ของรายได้ด่านนั้น</th></tr></thead><tbody><tr class="hi"><td>ด่าน 1</td><td>8 ขั้น</td><td><b>×2.14</b></td><td>300</td><td>1.9K</td><td>7.2K</td><td class="good">40%</td></tr><tr><td>ด่าน 2</td><td>16 ขั้น</td><td><b>×4.59</b></td><td>3.1K</td><td>19.5K</td><td>74K</td><td class="good">41%</td></tr><tr><td>ด่าน 3</td><td>24 ขั้น</td><td><b>×9.85</b></td><td>64K</td><td>401.6K</td><td>1.5M</td><td class="good">40%</td></tr><tr><td>ด่าน 4</td><td>32 ขั้น</td><td><b>×21.1</b></td><td>420K</td><td>2.6M</td><td>10M</td><td class="good">47%</td></tr><tr><td>ด่าน 5</td><td>40 ขั้น</td><td><b>×45.3</b></td><td>9.7M</td><td>60.9M</td><td>231.4M</td><td class="good">40%</td></tr><tr><td>ด่าน 6</td><td>48 ขั้น</td><td><b>×97.0</b></td><td>300M</td><td>1.9B</td><td>7.2B</td><td class="good">40%</td></tr><tr><td>ด่าน 7</td><td>56 ขั้น</td><td><b>×208</b></td><td>2.4B</td><td>15.1B</td><td>57.3B</td><td class="good">41%</td></tr><tr><td>ด่าน 8</td><td>64 ขั้น</td><td><b>×446</b></td><td>67B</td><td>420.4B</td><td>1.6T</td><td class="good">40%</td></tr><tr><td>ด่าน 9</td><td>72 ขั้น</td><td><b>×956</b></td><td>2.1T</td><td>13.2T</td><td>50.1T</td><td class="good">39%</td></tr></tbody></table></div>
+<div class="key warn"><b>⚠️ off-by-one ที่พลาดง่ายที่สุด</b> — ตอนอยู่ด่าน N ผู้เล่นพังกำแพงมาแล้ว N−1 ด่าน<br>
+เพดาน = <code>(N−1 + 1) × 8</code> = <code>wallProgress × 8</code> →
+<b>ด่าน 1 ต้องซื้อได้ถึงขั้น 8 ไม่ใช่ 0</b><br>
+ถ้าเผลอเขียน <code>(wallProgress − 1) × 8</code> ผู้เล่นใหม่จะซื้ออะไรไม่ได้เลยและตันตั้งแต่ด่านแรก
+— <code>validate()</code> assert ตรง ๆ พร้อมเทสต์แยกอีกชั้นใน <code>tests/config.spec.luau</code><br>
+ขั้นแรกของเกมราคา 300 ซึ่งผู้เล่นใหม่ (มี 500 coins)
+ซื้อได้ทันที</div>
+<div class="key red"><b>ทำไม 8 ขั้น/ด่าน</b><br>
+ค่าที่สั่งมาตอนแรกคือ "×1.1 ต่อขั้น · <b>9 ขั้นต่อด่าน</b> · รวม <b>72 ขั้น</b>"
+ซึ่ง <b>ขัดกันเอง</b> — 9 ขั้น × 9 ด่าน = 81 ไม่ใช่ 72<br><br>
+เทียบสามทางเลือก (ด่านที่เร็วที่สุดกับช้าที่สุดในแต่ละแบบ):<br>
+<table style="margin:10px 0"><thead><tr><th>ขั้น/ด่าน</th><th>ขั้นรวม</th>
+<th>ด่าน 4 (เร็วสุด)</th><th>ด่าน 9 (ช้าสุด)</th><th>ผ่านยาม</th></tr></thead>
+<tbody><tr><td>7</td><td>63</td><td>1.1 ชม.</td><td>5 วัน</td><td>❌ เกินเพดาน 72.0 ชม.</td></tr><tr class="hi"><td><b>8</b></td><td><b>72</b></td><td><b>44 น.</b></td><td><b>2 วัน</b></td><td><b>✅ มีระยะเผื่อ 47% / 25%</b></td></tr><tr><td>9</td><td>81</td><td>30 น.</td><td>23.0 ชม.</td><td>✅ มีระยะเผื่อ 0% / 68%</td></tr></tbody></table>
+เลือก <b>8 ขั้น/ด่าน</b> → ตรงกับ "รวม 72 ขั้น" ที่สั่งมาพอดี และมีระยะเผื่อทั้งสองด้าน</div>
+<div class="key"><b>วิธีคำนวณราคา — แก้สมการ ไม่ได้เดา</b><br>
+<code>ราคารวมด่าน N = B_N × (1.3^8 − 1) ÷ (1.3 − 1) = B_N × 23.86</code><br>
+ต้องการ <code>ราคารวม = 0.41 × รายได้ทั้งด่าน N</code> →
+<code>B_N = 0.41 × รายได้ด่าน N ÷ 23.86</code><br>
+ทำไมราว 41%: ส่วนเกิน ≈ 1 ÷ 0.41 = <b>2.4 เท่า</b> ซึ่งอยู่ในช่วงเป้าหมาย<br>
+ด่าน 1 ไม่มีกำแพงจึงไม่มี "เวลาตี" ใช้รายได้ 1 ชั่วโมงแรกเป็นฐานแทน ·
+ราคาขั้นแรกของแต่ละด่านไล่ขึ้นตลอด ไม่มีช่วงถูกลง
+ตลอด 72 ขั้น</div>
+<h3>ระบบนี้บังคับซื้อแค่ไหน</h3>
+<div class="scroll"><table class=""><thead><tr><th>ด่าน</th><th>ก่อนแก้ (ตัวคูณอัตโนมัติ)</th><th>หลังแก้ (ซื้อครบเพดาน)</th><th>ไม่ซื้อเลย</th><th>ซื้อครบช่วยได้</th></tr></thead><tbody><tr><td>ด่าน 2</td><td class="dim">1.7 ชม.</td><td><b>54 น.</b></td><td>4.2 ชม.</td><td class="dim">5×</td></tr><tr><td>ด่าน 3</td><td class="dim">3.0 ชม.</td><td><b>1.9 ชม.</b></td><td>18.6 ชม.</td><td class="dim">10×</td></tr><tr><td>ด่าน 4</td><td class="dim">60 น.</td><td><b>44 น.</b></td><td>15.5 ชม.</td><td class="dim">21×</td></tr><tr><td>ด่าน 5</td><td class="dim">2.7 ชม.</td><td><b>2.3 ชม.</b></td><td class="bad">4 วัน</td><td class="dim">45×</td></tr><tr><td>ด่าน 6</td><td class="dim">8.0 ชม.</td><td><b>8.0 ชม.</b></td><td class="bad">32 วัน</td><td class="dim">97×</td></tr><tr><td>ด่าน 7</td><td class="dim">3.5 ชม.</td><td><b>4.1 ชม.</b></td><td class="bad">36 วัน</td><td class="dim">208×</td></tr><tr><td>ด่าน 8</td><td class="dim">10.6 ชม.</td><td><b>14.5 ชม.</b></td><td class="bad">270 วัน</td><td class="dim">446×</td></tr><tr><td>ด่าน 9</td><td class="dim">33.9 ชม.</td><td><b>2 วัน</b></td><td class="bad">5.9 ปี</td><td class="dim">956×</td></tr></tbody></table></div>
+<div class="key warn"><b>ผู้เล่นที่ไม่ซื้อ upgrade เลย ตันที่ด่าน 5</b>
+(4 วัน เกินเพดาน 72.0 ชม.)
+และด่าน 9 กลายเป็น 5.9 ปี<br>
+แต่ <b>ด่าน 2–4 ยังลุยได้โดยไม่ซื้อ</b>
+(4.2 ชม. / 18.6 ชม. / 15.5 ชม.) ซึ่งดี —
+ผู้เล่นได้ลองเล่นก่อนที่ระบบจะเริ่มบังคับ<br>
+ซื้อครบเพดานช่วยที่ด่าน 9 ได้ <b>956 เท่า</b></div>
+<div class="key red"><b>⚠️ ผลข้างเคียงที่ตัดสินใจรับไว้แล้ว — ห้ามแก้กลับ</b><br>
+<b>เกมเอียงไปทาง idle มากขึ้น</b> — ฟาร์มเงินแล้วอัป มีน้ำหนักมากกว่าการลุ้นไข่<br>
+<b>น้ำหนักแม่และคลาสมีความสำคัญน้อยลง</b> เมื่อเทียบกับการอัป<br>
+ทั้งสองข้อเป็นผลที่ <b>ตั้งใจ</b> ของการย้ายความคืบหน้าจาก "ดวง" มาอยู่ที่ "รายได้ที่คาดเดาได้"
+ไม่ใช่ผลข้างเคียงที่ต้องแก้ในรอบหน้า</div>
+<h2 id="s7"><span class="num">7</span>turret — คำนวณจากสูตร ไม่เก็บเป็นตัวเลข</h2>
+<div class="note">ค่านี้พลาดมาแล้ว <b>สองครั้งในทางตรงข้ามกัน</b> แล้วต้องคำนวณใหม่ด้วยมืออีก <b>สามครั้ง</b><br>
+รากของปัญหา: <code>turretDps</code> ไม่เคยเป็นค่าที่ตั้งอิสระได้เลย มันเป็น <i>ผลลัพธ์</i> ของ
+<code>TOLL × damage/วินาที</code> แต่ถูกเก็บเป็นตัวเลขดิบ 9 ค่า</div>
+<div class="note" style="margin-top:10px">⚠️ ตารางข้างล่างเป็น <b>บันทึกอดีต</b> —
+ตัวเลขในนั้นคือค่า ณ ตอนนั้น ไม่ได้ดึงจาก Config ปัจจุบัน (ค่าปัจจุบันอยู่ในตารางหลักด้านล่าง)</div>
+<div class="scroll"><table><thead><tr><th>รอบ</th><th>สาเหตุ</th><th>ค่าที่ด่านสุดท้าย ณ ตอนนั้น</th></tr></thead><tbody>
+<tr><td>1</td><td>ตั้งจาก damage ทหารฝ่ายรับทั้งด่าน</td><td>1,000,000,000 → turret ไร้ผล (0.35%)</td></tr>
+<tr><td>2</td><td>ระบบรบเปลี่ยนเป็นปล่อยต่อเนื่อง ค่าเดิมไม่ได้แก้</td><td>1,000,000,000 → <b>ฆ่ายกกอง</b> (238× ของเรา)</td></tr>
+<tr><td>3</td><td>ตั้งใหม่เป็นสัดส่วนของ damage/วินาที</td><td>840,000</td></tr>
+<tr><td>4</td><td>เปลี่ยนตัวคูณคลาส → คำนวณใหม่</td><td>250,000</td></tr>
+<tr><td>5</td><td>ย้ายตัวคูณ damage มาเป็นระบบซื้อ → คำนวณใหม่อีก</td><td>150,000</td></tr>
+<tr class="hi"><td><b>✅</b></td><td><b>เก็บเป็นสัดส่วน ให้โค้ดคำนวณเอง</b></td><td><b>ไม่ต้องแก้มืออีกแล้ว</b></td></tr>
+</tbody></table></div>
+<div class="formula">Config.Combat.TURRET_TOLL = {{ {', '.join(f'{float(r[3]):.2f}' for r in TUR)} }}<br>
+turretDps(N) = TURRET_TOLL[N] × getReferenceDps(N)</div>
+<div class="scroll"><table class=""><thead><tr><th>ด่าน</th><th>damage/วิ ของเรา</th><th>turretDps ที่คำนวณได้</th><th>กินกำลังพล</th><th>ทหารบนสนาม</th><th>เวลารบทั้งด่าน</th><th>turret ล้างสนามใน</th></tr></thead><tbody><tr><td>ด่าน 2</td><td>4.61</td><td><b>0.461</b></td><td class="good">10.0%</td><td>30 ตัว</td><td>54 น.</td><td class="dim">669 วิ</td></tr><tr><td>ด่าน 3</td><td>22.0</td><td><b>2.42</b></td><td class="good">11.0%</td><td>30 ตัว</td><td>1.9 ชม.</td><td class="dim">273 วิ</td></tr><tr><td>ด่าน 4</td><td>567</td><td><b>73.7</b></td><td class="good">13.0%</td><td>60 ตัว</td><td>44 น.</td><td class="dim">231 วิ</td></tr><tr><td>ด่าน 5</td><td>1.8K</td><td><b>255</b></td><td class="good">14.0%</td><td>90 ตัว</td><td>2.3 ชม.</td><td class="dim">214 วิ</td></tr><tr><td>ด่าน 6</td><td>5.2K</td><td><b>833</b></td><td class="good">16.0%</td><td>120 ตัว</td><td>8.0 ชม.</td><td class="dim">187 วิ</td></tr><tr><td>ด่าน 7</td><td>100.4K</td><td><b>17.1K</b></td><td class="good">17.0%</td><td>180 ตัว</td><td>4.1 ชม.</td><td class="dim">176 วิ</td></tr><tr><td>ด่าน 8</td><td>287.1K</td><td><b>54.5K</b></td><td class="good">19.0%</td><td>240 ตัว</td><td>14.5 ชม.</td><td class="dim">158 วิ</td></tr><tr><td>ด่าน 9</td><td>769.2K</td><td><b>153.8K</b></td><td class="good">20.0%</td><td>300 ตัว</td><td>2 วัน</td><td class="dim">150 วิ</td></tr></tbody></table></div>
+<div class="key"><b>ตาราง <code>Stages</code> ไม่มีฟิลด์ <code>turretDps</code> แล้ว</b> —
+ปรับตัวคูณคลาส / ตัวคูณ damage / อัตราปล่อย / อัตราผลิต / ความจุคอก อะไรก็ตาม
+<b>turret ขยับตามเองทันที ไม่ต้องแตะอะไรเลย</b><br>
+สัดส่วนตรงเป๊ะทุกด่านแล้ว (เดิมเพี้ยนเพราะปัดเลขตอนคำนวณมือ)<br>
+อยากให้ด่านไหนโหดขึ้นเป็นพิเศษ ก็ดัน <code>TURRET_TOLL</code> ของด่านนั้นตัวเดียว</div>
+<div class="key warn"><b>สิ่งที่ยามเช็คตอนนี้</b> — ครบ 9 ด่าน · ด่าน 1 ต้องเป็น 0 ·
+ทุกค่า ≤ 35% · <b>ไล่ขึ้นไม่ถอยหลัง</b> (กำแพงด่านสูงต้องเขี้ยวขึ้น) ·
+และ <code>turretDps ÷ dps</code> ต้องเท่ากับ TOLL เป๊ะ (ดักกรณีมีคนเผลอกลับไปเขียนตัวเลขดิบอีก)<br>
+ทดสอบแล้ว (<code>tests/config.spec.luau</code>): ลดตัวคูณ damage ต่อขั้นลง →
+<code>turretDps</code> ลดตามเองทันที สัดส่วนยังเท่าเดิม ·
+ตั้ง TOLL เกินเพดาน หรือให้ด่าน 9 อ่อนกว่าด่าน 8 → <code>validate()</code> ล้มทั้งสองกรณี</div>
+<div class="key red"><b>⚠️ ผลข้างเคียงที่ตั้งใจ: ไม่ซื้อ upgrade = เจอ turret เขี้ยวกว่า</b><br>
+<code>getReferenceDps()</code> สมมติว่าผู้เล่นซื้อ upgrade ครบเพดานของด่านนั้น
+ดังนั้นสัดส่วน 10–20%
+ในตารางคือของ <i>ผู้เล่นที่ซื้อครบ</i><br>
+คนที่ซื้อไปครึ่งเดียวจะเสียกำลังพลราวสองเท่าของสัดส่วนนี้ —
+<b>ถูกต้องแล้ว</b> ไม่ซื้อของก็ควรเจอกำแพงที่เขี้ยวกว่า และเสริมกับระบบ upgrade ที่ซื้อด้วยเงินพอดี</div>
+<div class="note"><b>ข้อดีที่ติดมาฟรี:</b> สัดส่วนที่เสียยังแปรผกผันกับน้ำหนักแม่
+— แม่หนักกว่า = damage ต่อตัวสูงกว่า = เสียสัดส่วนน้อยกว่า</div>
+<h2 id="s8"><span class="num">8</span>อัตราผลิตแปรตามน้ำหนักแม่</h2>
+<div class="formula">ผลิต/นาที = 1 × (น้ำหนัก ÷ 100)<sup>0.25</sup> × 3<sup>upgrade</sup> × บัฟสถานะ &nbsp;·&nbsp; ออฟไลน์ = × 0.1</div>
+<div class="scroll"><table class=""><thead><tr><th>น้ำหนักแม่</th><th>ผลิต/นาที</th><th>เทียบแม่ 100 kg</th><th>ออฟไลน์/นาที</th><th>+upgrade ขั้น 3</th></tr></thead><tbody><tr><td>100 kg</td><td>1.00</td><td>×1.0</td><td>0.1</td><td>27.0</td></tr><tr><td>1,000 kg</td><td>1.78</td><td>×1.8</td><td>0.178</td><td>48.0</td></tr><tr><td>10,000 kg</td><td>3.16</td><td>×3.2</td><td>0.316</td><td>85.4</td></tr><tr><td>100,000 kg</td><td>5.62</td><td>×5.6</td><td>0.562</td><td>152</td></tr><tr><td>1,000,000 kg</td><td>10.0</td><td>×10.0</td><td>1.00</td><td>270</td></tr><tr><td>10,000,000 kg</td><td>17.8</td><td>×17.8</td><td>1.78</td><td>480</td></tr><tr><td>100,000,000 kg</td><td>31.6</td><td>×31.6</td><td>3.16</td><td>854</td></tr></tbody></table></div>
+<div class="key"><b>ทำไมใช้ 0.25 ไม่ใช่ 0.5</b> — น้ำหนักมีผลอยู่แล้ว 2 ทาง (เงิน √ · damage ต่อตัว √)
+ถ้าอัตราผลิตใช้ √ ด้วย damage รวม/วันจะแปรผัน <b>ตรง</b> กับน้ำหนัก
+→ ช่องว่างระหว่างแม่ 100 kg กับ 100M kg
+จะเป็น <b>1M เท่า</b><br>
+ใช้ 0.25 ได้ 32 เท่า — กว้างพอให้แม่ตัวใหญ่คุ้มค่า แต่ไม่ถึงกับขาดกัน</div>
+<h2 id="s9"><span class="num">9</span>damage = HP (ตัวแม่ และ ตัวลูก)</h2>
+<div class="formula">damage = HP = 10 × (น้ำหนัก ÷ 100)<sup>0.5</sup> × ตัวคูณคลาส × 1.1<sup>damageLevel</sup></div>
+<div class="scroll"><table class=""><thead><tr><th>น้ำหนักแม่ (kg)</th><th>แม่ C</th><th>แม่ B</th><th>แม่ A</th><th>แม่ S</th><th>แม่ SS</th><th>ลูก C</th><th>ลูก B</th><th>ลูก A</th><th>ลูก S</th><th>ลูก SS</th></tr></thead><tbody><tr><td>100</td><td>10.0</td><td>60.0</td><td>360</td><td>2.2K</td><td>4.3K</td><td class="dim">1.00</td><td class="dim">6.00</td><td class="dim">36.0</td><td class="dim">216</td><td class="dim">432</td></tr><tr><td>1,000</td><td>31.6</td><td>190</td><td>1.1K</td><td>6.8K</td><td>13.7K</td><td class="dim">3.16</td><td class="dim">19.0</td><td class="dim">114</td><td class="dim">683</td><td class="dim">1.4K</td></tr><tr><td>10,000</td><td>100</td><td>600</td><td>3.6K</td><td>21.6K</td><td>43.2K</td><td class="dim">10.0</td><td class="dim">60.0</td><td class="dim">360</td><td class="dim">2.2K</td><td class="dim">4.3K</td></tr><tr><td>100,000</td><td>316</td><td>1.9K</td><td>11.4K</td><td>68.3K</td><td>136.6K</td><td class="dim">31.6</td><td class="dim">190</td><td class="dim">1.1K</td><td class="dim">6.8K</td><td class="dim">13.7K</td></tr><tr><td>1,000,000</td><td>1K</td><td>6K</td><td>36K</td><td>216K</td><td>432K</td><td class="dim">100</td><td class="dim">600</td><td class="dim">3.6K</td><td class="dim">21.6K</td><td class="dim">43.2K</td></tr><tr><td>10,000,000</td><td>3.2K</td><td>19K</td><td>113.8K</td><td>683.1K</td><td>1.4M</td><td class="dim">316</td><td class="dim">1.9K</td><td class="dim">11.4K</td><td class="dim">68.3K</td><td class="dim">136.6K</td></tr><tr><td>100,000,000</td><td>10K</td><td>60K</td><td>360K</td><td>2.2M</td><td>4.3M</td><td class="dim">1K</td><td class="dim">6K</td><td class="dim">36K</td><td class="dim">216K</td><td class="dim">432K</td></tr></tbody></table></div>
+<div class="key"><b>คลาสกับน้ำหนักตอนนี้สูสีกันแล้ว</b> —
+น้ำหนักให้ ×1K ตลอดเกม คลาสให้ ×216 (ฟรี) หรือ ×432 (Robux)<br>
+แต่น้ำหนักยังชนะอยู่เล็กน้อยและหายากกว่ามาก: แม่ 100 kg คลาส SS (4,320)
+<b>แพ้</b> แม่ 100,000 kg คลาส A (11,384)
+— สองแกนนี้ตัดกันจริง ไม่ใช่แกนใดแกนหนึ่งชนะขาด<br>
+<b>ลูกแรง 10% ของแม่เสมอ</b> ทุกน้ำหนัก ทุกคลาส เพราะ √0.01 = 0.1 พอดี</div>
+<div class="key red"><b>⚠️ SS = ×432 ไม่ใช่ ×1,296 โดยตั้งใจ</b><br>
+C→B→A→S ไล่ ×6
+(1 → 6 → 36 → 216)
+แต่ <b>SS หยุดที่ ×2 เหนือ S</b><br>
+SS ออกจากไข่ Robux เท่านั้น ถ้าไล่ ×6 ต่อไปจนถึง 1,296
+คนจ่ายเงินจะแรงกว่าคนไม่จ่าย 1,296 เท่า = pay-to-win เต็มรูปแบบ<br>
+ที่ ×432 ไข่ตำนานยังคุ้มซื้อ (×2 บวกกับรับประกัน tier ขั้นต่ำ) แต่ไม่ถึงกับซื้อแล้วชนะ
+เพราะ <b>S หาได้ฟรีจากบอสด่าน 7 ขึ้นไป</b><br>
+<code>validate()</code> บังคับ <code>SS ÷ S ≤ 2.5</code> —
+ทดสอบแล้วว่าตั้ง 1,296 เซิร์ฟไม่บูต</div>
+<h2 id="s10"><span class="num">10</span>เงิน</h2>
+<div class="formula">coins/นาที = 1 × (น้ำหนักแม่ ÷ 100)<sup>0.5</sup> × 10<sup>(wallProgress − 1)</sup> &nbsp;·&nbsp; คลาสไม่มีผลต่อเงิน</div>
+<div class="scroll"><table class=""><thead><tr><th>น้ำหนักแม่ (kg)</th><th>ด่าน 1</th><th>ด่าน 2</th><th>ด่าน 3</th><th>ด่าน 4</th><th>ด่าน 5</th><th>ด่าน 6</th><th>ด่าน 7</th><th>ด่าน 8</th><th>ด่าน 9</th><th>ขายทิ้ง (ด่าน 1)</th></tr></thead><tbody><tr><td>100</td><td>1.00</td><td>10.0</td><td>100</td><td>1K</td><td>10K</td><td>100K</td><td>1M</td><td>10M</td><td>100M</td><td class="dim">30.0</td></tr><tr><td>1,000</td><td>3.16</td><td>31.6</td><td>316</td><td>3.2K</td><td>31.6K</td><td>316.2K</td><td>3.2M</td><td>31.6M</td><td>316.2M</td><td class="dim">94.0</td></tr><tr><td>10,000</td><td>10.0</td><td>100</td><td>1K</td><td>10K</td><td>100K</td><td>1M</td><td>10M</td><td>100M</td><td>1B</td><td class="dim">300</td></tr><tr><td>100,000</td><td>31.6</td><td>316</td><td>3.2K</td><td>31.6K</td><td>316.2K</td><td>3.2M</td><td>31.6M</td><td>316.2M</td><td>3.2B</td><td class="dim">948</td></tr><tr><td>1,000,000</td><td>100</td><td>1K</td><td>10K</td><td>100K</td><td>1M</td><td>10M</td><td>100M</td><td>1B</td><td>10B</td><td class="dim">3K</td></tr><tr><td>10,000,000</td><td>316</td><td>3.2K</td><td>31.6K</td><td>316.2K</td><td>3.2M</td><td>31.6M</td><td>316.2M</td><td>3.2B</td><td>31.6B</td><td class="dim">9.5K</td></tr><tr><td>100,000,000</td><td>1K</td><td>10K</td><td>100K</td><td>1M</td><td>10M</td><td>100M</td><td>1B</td><td>10B</td><td>100B</td><td class="dim">30K</td></tr></tbody></table></div>
+<div class="key"><b>ตัวคูณเงิน ×10 ต่อด่าน ตัดออกไม่ได้</b> —
+ราคาทุกอย่างโต ×10 ต่อขั้น
+แต่รายได้จากน้ำหนักโตแค่ ×1K ตลอดเกม (√ บีบไว้)
+ถ้าไม่มีตัวคูณนี้ ผู้เล่นจะซื้อของขั้นกลางขึ้นไปไม่ได้เลย<br>
+<b>ดันค่าเริ่มต้นขึ้นแก้ไม่ได้</b> เพราะปัญหาคืออัตราการโตไม่เท่ากัน ไม่ใช่ตัวเลขเล็กไป<br>
+ราคาขายแม่ = รายได้ 30 นาทีของแม่ตัวนั้น (ผูกกับสูตรเงินอัตโนมัติ ไม่ต้องตั้งตารางแยก)</div>
+<h2 id="s11"><span class="num">11</span>คลาส · ตารางสุ่มน้ำหนัก · ไข่</h2>
+<h3>คลาสตัวละคร 12 ตัว</h3>
+<div class="scroll"><table class=""><thead><tr><th>คลาส</th><th>ตัวคูณ damage/HP</th><th>ตัวละคร</th></tr></thead><tbody><tr><td>C</td><td>×1</td><td>ปลา · ม้า · ลิง · หมู</td></tr><tr><td>B</td><td>×6</td><td>ซัวเจ๋ง · ตือโป๊ยก่าย · ม้าขาวมังกร</td></tr><tr><td>A</td><td>×36</td><td>ซุนหงอคง · พระถังซัมจั๋ง</td></tr><tr><td>S</td><td>×216</td><td>พระแม่กวนอิม · เง็กเซียนฮ่องเต้</td></tr><tr><td>SS</td><td>×432</td><td>องค์ยูไล</td></tr></tbody></table></div>
+<h3>ตารางสุ่มน้ำหนัก (ด่าน 1 · ด่าน 2–9 ถอยมาใช้ตารางนี้จนกว่าจะเติมตัวเลข)</h3>
+<div class="scroll"><table class=""><thead><tr><th>tier</th><th>ช่วงน้ำหนัก</th><th>weight</th><th>โอกาส</th><th>ราว ๆ</th></tr></thead><tbody><tr><td>tier 1</td><td>100 – 999 kg</td><td>900,000</td><td>90%</td><td class="dim">1 ใน 1</td></tr><tr><td>tier 2</td><td>1,000 – 9,999 kg</td><td>90,000</td><td>9%</td><td class="dim">1 ใน 11</td></tr><tr><td>tier 3</td><td>10,000 – 99,999 kg</td><td>9,000</td><td>0.9%</td><td class="dim">1 ใน 111</td></tr><tr><td>tier 4</td><td>100,000 – 999,999 kg</td><td>900</td><td>0.09%</td><td class="dim">1 ใน 1,111</td></tr><tr><td>tier 5</td><td>1,000,000 – 9,999,999 kg</td><td>90</td><td>0.009%</td><td class="dim">1 ใน 11,111</td></tr><tr><td>tier 6</td><td>10,000,000 – 99,999,999 kg</td><td>9</td><td>0.0009%</td><td class="dim">1 ใน 111,111</td></tr><tr><td>tier 7</td><td>100,000,000 – 100,000,000 kg</td><td>1</td><td>0.0001%</td><td class="dim">1 ใน 1,000,000</td></tr></tbody></table></div>
+<div class="key warn"><b>สุ่ม 2 ขั้นเสมอ</b> — เลือก tier ก่อน แล้วค่อยสุ่มน้ำหนักในช่วงของ tier นั้น<br>
+ห้ามสุ่ม uniform ทั้งช่วงรวดเดียว ไม่งั้นตัวเล็กแทบไม่มีวันออก · น้ำหนักแม่เป็น <b>จำนวนเต็มเสมอ</b> เพราะเป็นส่วนหนึ่งของ stack key</div>
+<h3>ไข่ — บอสแต่ละด่านวางไข่คนละชนิด</h3>
+<div class="scroll"><table class=""><thead><tr><th>ไข่</th><th>id</th><th>แหล่งที่มา</th><th>ผูกด่าน</th><th>เวลาฟัก</th><th>รับประกัน</th><th>C</th><th>B</th><th>A</th><th>S</th><th>SS</th></tr></thead><tbody><tr><td>ไข่ด่าน 1</td><td><code>egg_stage1</code></td><td>บอส</td><td class="dim">ด่าน 1</td><td>30 วิ</td><td class="dim">—</td><td>90%</td><td>10%</td><td>—</td><td>—</td><td>—</td></tr><tr><td>ไข่ด่าน 2</td><td><code>egg_stage2</code></td><td>บอส</td><td class="dim">ด่าน 2</td><td>60 วิ</td><td class="dim">—</td><td>80%</td><td>20%</td><td>—</td><td>—</td><td>—</td></tr><tr><td>ไข่ด่าน 3</td><td><code>egg_stage3</code></td><td>บอส</td><td class="dim">ด่าน 3</td><td>90 วิ</td><td class="dim">—</td><td>70%</td><td>29.9%</td><td>0.1%</td><td>—</td><td>—</td></tr><tr><td>ไข่ด่าน 4</td><td><code>egg_stage4</code></td><td>บอส</td><td class="dim">ด่าน 4</td><td>120 วิ</td><td class="dim">—</td><td>60%</td><td>39%</td><td>1%</td><td>—</td><td>—</td></tr><tr><td>ไข่ด่าน 5</td><td><code>egg_stage5</code></td><td>บอส</td><td class="dim">ด่าน 5</td><td>150 วิ</td><td class="dim">—</td><td>50%</td><td>45%</td><td>5%</td><td>—</td><td>—</td></tr><tr><td>ไข่ด่าน 6</td><td><code>egg_stage6</code></td><td>บอส</td><td class="dim">ด่าน 6</td><td>180 วิ</td><td class="dim">—</td><td>40%</td><td>50%</td><td>10%</td><td>—</td><td>—</td></tr><tr><td>ไข่ด่าน 7</td><td><code>egg_stage7</code></td><td>บอส</td><td class="dim">ด่าน 7</td><td>210 วิ</td><td class="dim">—</td><td>30%</td><td>45%</td><td>24%</td><td>1%</td><td>—</td></tr><tr><td>ไข่ด่าน 8</td><td><code>egg_stage8</code></td><td>บอส</td><td class="dim">ด่าน 8</td><td>240 วิ</td><td class="dim">—</td><td>20%</td><td>30%</td><td>40%</td><td>10%</td><td>—</td></tr><tr><td>ไข่ด่าน 9</td><td><code>egg_stage9</code></td><td>บอส</td><td class="dim">ด่าน 9</td><td>270 วิ</td><td class="dim">—</td><td>10%</td><td>20%</td><td>50%</td><td>20%</td><td>—</td></tr><tr><td>ไข่ตำนาน</td><td><code>egg_legendary</code></td><td>Robux</td><td class="dim">—</td><td>300 วิ</td><td class="dim">tier 3+</td><td>—</td><td>35%</td><td>45%</td><td>18%</td><td>2%</td></tr><tr><td>ไข่ธรรมดา <span style="opacity:.55">(ปิดแล้ว)</span></td><td><code>egg_common</code></td><td>บอส</td><td class="dim">—</td><td>30 วิ</td><td class="dim">—</td><td class="dim">80%</td><td class="dim">18%</td><td class="dim">2%</td><td class="dim">—</td><td class="dim">—</td></tr><tr><td>ไข่หายาก <span style="opacity:.55">(ปิดแล้ว)</span></td><td><code>egg_rare</code></td><td>บอส</td><td class="dim">—</td><td>120 วิ</td><td class="dim">—</td><td class="dim">—</td><td class="dim">70%</td><td class="dim">27%</td><td class="dim">3%</td><td class="dim">—</td></tr></tbody></table></div>
+<div class="key"><b>ด่านสูงคุ้มกว่าที่ "โอกาสได้คลาสดี" ไม่ใช่ "โอกาสได้ตัวหนัก"</b> —
+ตารางสุ่มน้ำหนักใช้ชุดเดียวกันทุกด่าน<br>
+C ไล่ลง 90% → 10% ·
+S เริ่มออกที่ด่าน 7 (1%)
+ขึ้นถึง 20% ที่ด่าน 9<br>
+<code>validate()</code> บังคับว่าทุกด่านต้องมีไข่ของตัวเองที่เปิดใช้อยู่ — ขาดด่านไหน ด่านนั้นตันถาวร</div>
+<div class="key warn"><b>⚠️ น้ำหนักสุ่มตั้งแต่บอสวางไข่ ไม่ใช่ตอนฟัก</b><br>
+บอสเกิด → สุ่มน้ำหนักไข่ทั้ง 5 ฟองทันที → <b>ขนาดโมเดลไข่แปรตามน้ำหนัก</b> (ไข่ใหญ่ = หนัก)<br>
+ผู้เล่นทั้ง 7 คนเห็นพร้อมกันว่าฟองไหนคุ้มค่าแย่ง → <b>การแย่งไข่กลายเป็นเกมจริง</b>
+ไม่ใช่แค่รีบกดสุ่ม · ตอนฟักถึงค่อยสุ่มตัวละคร<br>
+ผลต่อ schema: ไข่ต้องเก็บรายฟองพร้อมน้ำหนัก (<code>heldEggs</code> เป็นอาเรย์ ไม่ใช่ตัวนับ)</div>
+<div class="key"><b>เงินในเกมซื้อไข่ไม่ได้เลย</b> — บอส หรือ Robux เท่านั้น
+(<code>EggType</code> ไม่มีฟิลด์ <code>price</code> โดยตั้งใจ)<br>
+<b>SS ออกจากไข่ตำนานเท่านั้น</b> · ไข่จากบอสออกได้ C ถึง S ·
+ไข่ตำนานรับประกัน tier 3 ขึ้นไป (10,000 kg+)
+แต่ยังลุ้น tier 7 ได้ตามอัตราเดิม<br>
+⚠️ ห้ามเก็บราคา Robux ใน Config — ราคาจริงอยู่ใน Creator Dashboard ที่เดียว</div>
+<h2 id="s12"><span class="num">12</span>ด่าน · บอส · อาวุธ · คอก</h2>
+<div class="scroll"><table class=""><thead><tr><th>ด่าน</th><th>ทหารฝ่ายรับ</th><th>HP ทหารรวม</th><th>HP กำแพง</th><th>HP รวมทั้งด่าน</th><th>turretDps (คำนวณ)</th><th>HP บอส</th><th>damage อาวุธขั้นนั้น</th><th>ตีบอสกี่ครั้ง</th></tr></thead><tbody><tr><td>ด่าน 1</td><td>0</td><td>0</td><td>0</td><td><b>0</b></td><td class="dim">0</td><td>100</td><td>10.0</td><td>10 ครั้ง</td></tr><tr><td>ด่าน 2</td><td>100</td><td>10K</td><td>5K</td><td><b>15K</b></td><td>0.461</td><td>1K</td><td>100</td><td>10 ครั้ง</td></tr><tr><td>ด่าน 3</td><td>1,000</td><td>100K</td><td>50K</td><td><b>150K</b></td><td>2.42</td><td>10K</td><td>1K</td><td>10 ครั้ง</td></tr><tr><td>ด่าน 4</td><td>10,000</td><td>1M</td><td>500K</td><td><b>1.5M</b></td><td>73.7</td><td>100K</td><td>10K</td><td>10 ครั้ง</td></tr><tr><td>ด่าน 5</td><td>100,000</td><td>10M</td><td>5M</td><td><b>15M</b></td><td>255</td><td>1M</td><td>100K</td><td>10 ครั้ง</td></tr><tr><td>ด่าน 6</td><td>1,000,000</td><td>100M</td><td>50M</td><td><b>150M</b></td><td>833</td><td>10M</td><td>1M</td><td>10 ครั้ง</td></tr><tr><td>ด่าน 7</td><td>10,000,000</td><td>1B</td><td>500M</td><td><b>1.5B</b></td><td>17.1K</td><td>100M</td><td>10M</td><td>10 ครั้ง</td></tr><tr><td>ด่าน 8</td><td>100,000,000</td><td>10B</td><td>5B</td><td><b>15B</b></td><td>54.5K</td><td>1B</td><td>100M</td><td>10 ครั้ง</td></tr><tr><td>ด่าน 9</td><td>1,000,000,000</td><td>100B</td><td>50B</td><td><b>150B</b></td><td>153.8K</td><td>10B</td><td>1B</td><td>10 ครั้ง</td></tr></tbody></table></div>
+<div class="key"><b>อาวุธ ×10 ต่อขั้น = HP บอส ×10 ต่อด่าน</b> → อาวุธขั้น N ตีบอสด่าน N ตาย 10 ครั้งพอดีทุกด่าน (ล็อกกันไว้ ห้ามแก้ข้างเดียว)<br>
+HP กำแพง = 50% ของ HP ทหารรวมในด่านนั้น · ทหารฝ่ายรับตายแล้วไม่เกิดใหม่ · ต้องกวาดทหารหมดก่อนถึงจะตีกำแพงได้</div>
+<h3>คอก (ความจุ + ราคาอัปเกรด)</h3>
+<div class="scroll"><table class=""><thead><tr><th>เลเวล</th><th>ความจุ</th><th>ราคาอัปขั้นถัดไป</th></tr></thead><tbody><tr><td>Lv 1</td><td>5 ตัว</td><td>1K</td></tr><tr><td>Lv 2</td><td>6 ตัว</td><td>10K</td></tr><tr><td>Lv 3</td><td>7 ตัว</td><td>100K</td></tr><tr><td>Lv 4</td><td>8 ตัว</td><td>1M</td></tr><tr><td>Lv 5</td><td>9 ตัว</td><td>10M</td></tr><tr><td>Lv 6</td><td>10 ตัว</td><td>100M</td></tr><tr><td>Lv 7</td><td>11 ตัว</td><td>1B</td></tr><tr><td>Lv 8</td><td>12 ตัว</td><td>10B</td></tr><tr><td>Lv 9</td><td>13 ตัว</td><td>100B</td></tr><tr><td>Lv 10</td><td>14 ตัว</td><td>เต็มแล้ว</td></tr></tbody></table></div>
+<h3>upgrade อัตราผลิต</h3>
+<div class="scroll"><table class=""><thead><tr><th>ขั้น</th><th>ตัวคูณอัตราผลิต</th><th>ราคาอัปขั้นถัดไป</th></tr></thead><tbody><tr><td>ขั้น 0</td><td>×1.00</td><td>1K</td></tr><tr><td>ขั้น 1</td><td>×3.00</td><td>10K</td></tr><tr><td>ขั้น 2</td><td>×9.00</td><td>100K</td></tr><tr><td>ขั้น 3</td><td>×27.0</td><td>1M</td></tr><tr><td>ขั้น 4</td><td>×81.0</td><td>10M</td></tr><tr><td>ขั้น 5</td><td>×243</td><td>เต็มแล้ว</td></tr></tbody></table></div>
+<div class="key warn"><b>ผล ×3 ต่อขั้น ทั้งที่ราคาไต่เร็วกว่านั้น</b> —
+ถ้าผลเท่ากับราคา กำแพงจะหมดความหมายกลางเกม<br>
+และในระบบรบใหม่ upgrade นี้ <b>หยุดเพิ่ม damage ตั้งแต่ด่าน 3</b> (ชนเพดานปล่อย) เหลือประโยชน์แค่เติมคลังเร็วขึ้น
+— ตรงนี้เป็นจุดที่อาจต้องคิดใหม่ว่าคุ้มราคาไหม</div>
+<footer>
+สร้างจาก <code>src/shared/Config.lua</code> · ตัวเลขทุกตัวคำนวณจากฟังก์ชันจริงใน Config ไม่ได้พิมพ์มือ<br>
+"ผู้เล่นชั้นกลาง" ใช้ค่าอ้างอิงจาก <code>Config.BalanceCheck</code> ชุดเดียวกับที่ <code>assertProgressionIsSane()</code> ใช้<br>
+รายละเอียดที่มาของทุกค่าอยู่ใน <code>docs/data-schema.md</code>
+</footer>
+</div></body></html>

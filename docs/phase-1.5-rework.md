@@ -1,8 +1,8 @@
 # Phase 1.5 — รายการงานรื้อโค้ด Phase 1 ให้ตรงดีไซน์ใหม่
 
-> **เอกสารนี้เป็นรายการงานเท่านั้น ยังไม่ได้ลงมือรื้อ**
-> โค้ดใน `src/server` และ `src/client` ยังเป็นของเดิมทั้งหมด
-> ทำจริงตอนสั่ง Phase 1.5
+> ✅ **รื้อเสร็จแล้ว** — โค้ดใน `src/server` และ `src/client` ตรงดีไซน์ใหม่ทั้งหมด
+> เอกสารนี้เก็บไว้เป็นบันทึกว่า "รื้ออะไรไปบ้าง และทำไม"
+> เหลือแค่ข้อที่ต้องเปิด Studio ทดสอบเอง (เช็คลิสต์ §8)
 
 ## ทำไมต้องรื้อ
 
@@ -15,7 +15,7 @@ Phase 1 เขียนตามกลไกเก่า ซึ่งต่า�
 | **ไข่มาจากไหน** | ผู้เล่นกดปุ่มวางไข่ได้เลย มี `price` ให้ซื้อด้วยเงินในเกม | ไข่ปกติ **แย่งจากรังบอสเท่านั้น** (คนละชนิดต่อด่าน) · ไข่ตำนาน **Robux เท่านั้น** |
 | **ที่เก็บ** | `plot` มี 4 ช่องวางไข่ · คลังทหารเป็น array เดียว | **คอก** (แม่ที่ผลิต) + **กระเป๋า** (แม่ที่ไม่ผลิต 100 ตัว) + **สวนฟัก** 50 ฟอง |
 
-`Config.lua` อัปเดตให้ตรงดีไซน์ใหม่ครบแล้ว (ผ่านเทสต์ 276 เคส) **โค้ดที่เหลือยังตามไม่ทัน**
+`Config.lua` อัปเดตให้ตรงดีไซน์ใหม่ครบแล้ว (ผ่านเทสต์ 329 เคส) และ **โค้ดที่เหลือตามครบแล้วเช่นกัน**
 
 ---
 
@@ -42,7 +42,7 @@ Phase 1 เขียนตามกลไกเก่า ซึ่งต่า�
 
 ---
 
-## 1. `src/server/EggService.lua` — รื้อหนักสุด
+## 1. `src/server/EggService.lua` — รื้อหนักสุด ✅
 
 ### ต้องแก้
 
@@ -80,7 +80,7 @@ Phase 1 เขียนตามกลไกเก่า ซึ่งต่า�
 
 ---
 
-## 2. `src/server/PlotService.lua` → `PenService.lua`
+## 2. `src/server/PlotService.lua` → `PenService.lua` ✅
 
 ### ต้องแก้
 
@@ -100,7 +100,7 @@ Phase 1 เขียนตามกลไกเก่า ซึ่งต่า�
 
 ---
 
-## 3. `src/client/Main.client.lua` — เขียนใหม่ทั้งแผง
+## 3. `src/client/Main.client.lua` — เขียนใหม่ทั้งแผง ✅
 
 ตอนนี้เป็นแผงเทสต์: ปุ่ม "วางไข่ธรรมดา" + สถานะ 4 ช่อง + ข้อความผลฟัก
 
@@ -117,7 +117,7 @@ UI จริง (สองแถบแม่/ลูก + กล่องยื�
 
 ---
 
-## 4. RemoteEvent ที่ต้องเปลี่ยน signature
+## 4. RemoteEvent ที่ต้องเปลี่ยน signature ✅
 
 ⚠️ ทั้งสามตัวเป็น**โครงหลัก** ตาม CLAUDE.md — เปลี่ยนแล้วต้องแก้ทั้งสองฝั่งพร้อมกัน
 
@@ -125,7 +125,7 @@ UI จริง (สองแถบแม่/ลูก + กล่องยื�
 |---|---|---|
 | `PlaceEggRequest` | `FireServer(eggId, slotIndex?)` | `FireServer(heldIndex, slotIndex?)` — **ส่งตำแหน่งไข่ใน `heldEggs` ไม่ใช่ชนิดไข่** · เปลี่ยนชื่อเป็น `PlaceEggInHatcheryRequest` ให้ตรงความหมาย |
 | `EggHatched` | `{ slotIndex, eggId, unitId, unitName, rarity }` | `{ slotIndex, eggId, charId, charName, class, weight, placedIn }` (`placedIn` = `"pen"` หรือ `"bag"`) · `weight` มาจากตัวไข่ **ไม่ได้สุ่มตอนนี้** |
-| `FarmStateSync` | `{ slots = {...}, unitCount }` | `{ heldEggs = {...}, hatching = {...}, penCount, penCapacity, bagCount, coins }` |
+| `FarmStateSync` | `{ slots = {...}, unitCount }` | `{ heldEggs, heldCount, hatching, hatchingCount, hatcherySize, mothersInPen, mothersInBag, penCapacity, bagCapacity }` — ตัด `coins` ออก (ยังไม่มีเงินจนถึง Phase 2) |
 
 **Remote ที่ต้องเพิ่มใน Phase 1.5:** ย้ายแม่คอก↔กระเป๋า
 **ยังไม่ต้องเพิ่มในรอบนี้:** ขายแม่ · อัปเกรดคอก (Phase 2 — ต้องมีเงินก่อน)
@@ -134,18 +134,18 @@ UI จริง (สองแถบแม่/ลูก + กล่องยื�
 
 ---
 
-## 5. ค่าใน Config ที่ตกยุคแล้ว
+## 5. ค่าใน Config ที่ตกยุคแล้ว ✅
 
 | ค่า | สถานะ | ทำอะไรกับมัน |
 |---|---|---|
-| `Config.UnitTypes` (recruit/spearman/archer/knight/mage/dragon_rider) | **ตกยุค** — แทนที่ด้วย `Config.Characters` | ตั้ง `enabled = false` ทุกตัว **อย่าลบ** (กฎ CLAUDE.md: id ที่เคยเซฟไปแล้วห้ามลบ) |
-| `EggType.hatchTable` | **ตกยุค** — แทนที่ด้วย `Config.EggCharacterPools` | ไข่ `egg_stage1..9` ยังมี `hatchTable` ค้างไว้ 1 บรรทัดเพื่อให้โค้ด Phase 1 ยังคอมไพล์ผ่าน → **ลบพร้อม `UnitTypes` ตอนขั้น 7** และเปลี่ยน type ให้ฟิลด์นี้เป็น optional |
-| `Config.Rarities` (Common/Rare/Epic/Legendary) | **ตกยุค** — คลาสใหม่คือ SS/S/A/B/C | เลิกใช้พร้อม `UnitTypes` |
-| `Config.Farm.EGG_SLOTS_PER_PLAYER` = 4 | **ตกยุค** — สวนฟักคือ `Config.Hatchery.MAX_EGGS` = 50 | เลิกใช้เมื่อ EggService ย้ายไปใช้ Hatchery |
-| `Config.Farm.MAX_PLOTS` = **6** | ⚠️ **ไม่ตรงกับดีไซน์** — ดีไซน์บอก 7 คนต่อเซิร์ฟเวอร์ (`BalanceCheck.PLAYERS_PER_SERVER` = 7) | แก้เป็น 7 ตอนเปลี่ยนชื่อเป็น Pen · ถ้าตั้งใจให้ 6 ต้องแก้ `PLAYERS_PER_SERVER` ให้ตรงกันแทน |
-| `Config.Farm.PLOT_SIZE` / `PLOT_SPACING` / `PLOT_ORIGIN` | **ยังใช้ได้** แต่ควรเปลี่ยนชื่อเป็น Pen | เปลี่ยนชื่อพร้อม PenService |
-| `Config.DEFAULT_EGG_ID` | **ยังใช้ได้** ความหมายเปลี่ยน — เดิมคือ "ไข่ที่ปุ่มทดสอบใช้" | ตอนนี้ชี้ที่ `egg_stage1` แล้ว ใช้เป็นไข่เริ่มต้นของผู้เล่นใหม่ |
-| `Config.NewPlayer.startingEggs` | **ยังใช้ได้** แต่เป็นแค่ "คำสั่งแจก" | ตอนแจกจริงต้องวน `makeEgg()` ทีละฟองเพื่อสุ่มน้ำหนัก **ห้ามเก็บลง `heldEggs` เป็นตัวนับ** |
+| `Config.UnitTypes` (recruit/spearman/archer/knight/mage/dragon_rider) | **ตกยุค** — แทนที่ด้วย `Config.Characters` | ✅ ตั้ง `enabled = false` ครบทุกตัวแล้ว **ไม่ได้ลบ** (กฎ CLAUDE.md: id ที่เคยเซฟไปแล้วห้ามลบ) |
+| `EggType.hatchTable` | **ตกยุค** — แทนที่ด้วย `Config.EggCharacterPools` | ✅ ถอดฟิลด์ `hatchTable` และ type `HatchEntry` ออกจาก Config หมดแล้ว (ไม่มีใครอ่านแล้ว) |
+| `Config.Rarities` (Common/Rare/Epic/Legendary) | **ตกยุค** — คลาสใหม่คือ SS/S/A/B/C | ✅ ทำเครื่องหมาย deprecated ไว้ในไฟล์แล้ว ไม่มีโค้ดไหนอ่าน |
+| `Config.Farm.EGG_SLOTS_PER_PLAYER` = 4 | **ตกยุค** — สวนฟักคือ `Config.Hatchery.MAX_EGGS` = 50 | ✅ ลบทิ้งแล้ว EggService ใช้ `Config.Hatchery.MAX_EGGS` |
+| `Config.Farm.MAX_PLOTS` = **6** | ⚠️ **ไม่ตรงกับดีไซน์** — ดีไซน์บอก 7 คนต่อเซิร์ฟเวอร์ (`BalanceCheck.PLAYERS_PER_SERVER` = 7) | ✅ กลายเป็น `Config.World.MAX_PENS` = 7 และ `validate()` บังคับให้เท่ากับ `PLAYERS_PER_SERVER` ตลอดไป |
+| `Config.Farm.PLOT_SIZE` / `PLOT_SPACING` / `PLOT_ORIGIN` | **ยังใช้ได้** แต่ควรเปลี่ยนชื่อเป็น Pen | ✅ `Config.Farm` → `Config.World` · `PEN_SIZE` / `PEN_SPACING` / `PEN_ORIGIN` |
+| `Config.DEFAULT_EGG_ID` | **ยังใช้ได้** ความหมายเปลี่ยน — เดิมคือ "ไข่ที่ปุ่มทดสอบใช้" | ✅ ชี้ที่ `egg_stage1` ใช้เป็นไข่เริ่มต้นของผู้เล่นใหม่ |
+| `Config.NewPlayer.startingEggs` | **ยังใช้ได้** แต่เป็นแค่ "คำสั่งแจก" | ✅ `onPlayerAdded` วนเรียก `grantEgg()` ทีละฟอง แต่ละฟองจึงสุ่มน้ำหนักของตัวเอง |
 | `egg_common` / `egg_rare` | `enabled = false` แล้ว ห้ามแจกให้ผู้เล่นอีก | ยัง `getEgg()` ได้ตามกฎ eggId (ห้ามลบ ห้าม reuse) · `validate()` กันไม่ให้หลุดเข้า `startingEggs` อยู่แล้ว |
 | `EggType.price` | **ลบไปแล้ว** | ✅ เสร็จแล้ว |
 
@@ -155,35 +155,35 @@ UI จริง (สองแถบแม่/ลูก + กล่องยื�
 
 ## 6. ลำดับการรื้อที่ปลอดภัย
 
-รื้อจาก "ของที่ไม่มีใครพึ่ง" ไปหา "ของที่ทุกอย่างพึ่ง" เพื่อให้ build ผ่านทุกขั้น
+รื้อจาก "ของที่ไม่มีใครพึ่ง" ไปหา "ของที่ทุกอย่างพึ่ง" เพื่อให้ build ผ่านทุกขั้น — **ทำครบทั้ง 8 ขั้นแล้ว**
 
 ```
-ขั้น 1  ตัดปุ่มวางไข่ออกจาก Main.client.lua
+ขั้น 1 ✅  ตัดปุ่มวางไข่ออกจาก Main.client.lua
         → ไม่มีใครยิง PlaceEggRequest อีก เปลี่ยน signature ได้อย่างปลอดภัย
 
-ขั้น 2  เปลี่ยน os.clock() → os.time() ใน EggService
+ขั้น 2 ✅  เปลี่ยน os.clock() → os.time() ใน EggService
         → แก้จุดเดียว ไม่กระทบ API ทดสอบได้ทันทีว่าไข่ยังฟักตรงเวลา
 
-ขั้น 3  ทำ "ไข่มีน้ำหนัก" ก่อนแตะการฟัก
+ขั้น 3 ✅  ทำ "ไข่มีน้ำหนัก" ก่อนแตะการฟัก
         → เพิ่ม makeEgg() + state.heldEggs + ฟิลด์ weight ใน EggSlot
         → เปลี่ยน placeEgg ให้รับ heldIndex
         → ตอนนี้ไข่มีน้ำหนักครบทุกฟองแล้ว แต่ฟักออกมายังเป็น "ทหาร" เหมือนเดิม
         ⚠️ ขั้นนี้ต้องมาก่อนขั้น 4 เสมอ เพราะขั้น 4 อ่านน้ำหนักจากไข่
 
-ขั้น 4  เปลี่ยนผลการฟัก: rollUnit → rollCharacter + อ่าน weight จากไข่
+ขั้น 4 ✅  เปลี่ยนผลการฟัก: rollUnit → rollCharacter + อ่าน weight จากไข่
         → EggHatched payload เปลี่ยน แก้ client ให้รับของใหม่พร้อมกัน
         → ตรงนี้ทำให้ "ฟักแล้วได้ตัวแม่" ใช้งานได้จริงเป็นครั้งแรก
 
-ขั้น 5  แยก state.units → mothersInPen + mothersInBag + uid global
+ขั้น 5 ✅  แยก state.units → mothersInPen + mothersInBag + uid global
         → เปลี่ยนโครงข้อมูลใน memory ยังไม่แตะ DataStore
 
-ขั้น 6  ย้าย 4 ช่องวางไข่ → สวนฟัก 50 ช่อง
+ขั้น 6 ✅  ย้าย 4 ช่องวางไข่ → สวนฟัก 50 ช่อง
         → FarmStateSync payload เปลี่ยน แก้ client พร้อมกัน
 
-ขั้น 7  PlotService → PenService: ความจุตามเลเวล + แสดงโมเดลแม่
+ขั้น 7 ✅  PlotService → PenService: ความจุตามเลเวล + แสดงโมเดลแม่
         → งานใหญ่สุดของฝั่งโลก ทำทีหลังสุดเพราะต้องรู้ว่าแม่หน้าตายังไงก่อน
 
-ขั้น 8  ตั้ง enabled = false ให้ UnitTypes / Rarities แล้วลบ hatchTable
+ขั้น 8 ✅  ตั้ง enabled = false ให้ UnitTypes / Rarities แล้วลบ hatchTable
         → ทำท้ายสุด เพราะก่อนหน้านี้โค้ดยังอ้างอยู่
 ```
 
@@ -203,11 +203,12 @@ UI จริง (สองแถบแม่/ลูก + กล่องยื�
 
 ### วิธีได้ไข่มาทดสอบระหว่างที่ยังไม่มีบอส
 
-**เสนอ:** คำสั่งฝั่ง server ใน command bar เท่านั้น ไม่ทำเป็นปุ่มใน UI
+✅ ทำเป็นคำสั่งฝั่ง server ใน command bar เท่านั้น ไม่มีปุ่มใน UI
 จะได้ไม่ต้องเขียนแล้วลบทิ้งตอน Phase 5
 
 ```
-EggService.debugGrantEgg(player, eggId)   -- ต้องเรียก makeEgg() ข้างในเพื่อสุ่มน้ำหนัก
+-- ชื่อจริงที่ทำออกมา (ใช้ command bar ฝั่ง server ใน Studio)
+require(game.ServerScriptService.EggService).grantEgg(game.Players.<ชื่อ>, "egg_stage1")
 ```
 
 ⚠️ **ห้ามให้ client เรียกถึงได้** และห้ามส่งน้ำหนักมาจาก client — ถึงจะเป็นของเทสต์ก็ต้อง server-authoritative ตั้งแต่แรก ไม่งั้นพอถึง Phase 5 จะเผลอปล่อยช่องโหว่ติดไป
@@ -216,15 +217,17 @@ EggService.debugGrantEgg(player, eggId)   -- ต้องเรียก makeEgg
 
 ## 8. เช็คลิสต์ก่อนปิด Phase 1.5
 
-- [ ] `rojo build` ผ่าน และ tree ออกมาถูก (`ServerScriptService` ยังเป็น service ไม่ใช่ Script)
-- [ ] `luau-lsp analyze` สะอาด
-- [ ] `Config.validate()` ยังผ่านตอนเซิร์ฟบูต
+- [x] `rojo build` ผ่าน และ tree ออกมาถูก (`ServerScriptService` ยังเป็น service ไม่ใช่ Script)
+- [x] `luau-lsp analyze` สะอาด (ไม่มี error ไม่มี warning)
+- [x] `Config.validate()` ผ่าน + เทสต์พฤติกรรม 329 เคสผ่านหมด
 - [ ] เปิดใน Studio แล้วฟักไข่ได้ตัวแม่จริง เห็นชื่อตัวละคร + คลาส + น้ำหนักในคอก
 - [ ] **น้ำหนักที่เห็นตอนเป็นไข่ = น้ำหนักของแม่ที่ฟักออกมา เป๊ะทุกฟอง** (กฎข้อ §0)
 - [ ] น้ำหนักที่ออกกระจายตามตาราง tier (ฟักหลาย ๆ ฟองแล้วดู Output — tier 1 ควรออกราว 90%)
 - [ ] ตัวละครที่ออกตรงกับตารางคลาสของไข่ด่านนั้น (ไข่ด่าน 1 ต้องไม่ออก A/S เลย)
 - [ ] ย้ายแม่คอก↔กระเป๋าได้ และกระเป๋าเต็ม 100 แล้วเพิ่มไม่ได้
 - [ ] สวนฟักเต็ม 50 แล้ววางเพิ่มไม่ได้
-- [ ] ส่ง `heldIndex` ที่ผิด (0, 51, ทศนิยม, ช่องว่าง, string) แล้ว server ปฏิเสธทุกกรณีโดยไม่ error
+- [x] เขียน validate `heldIndex` ครบ 5 กรณี (0, 51, ทศนิยม, ช่องว่าง, ไม่ใช่ number) — ปฏิเสธเงียบ ไม่ error · **ยังต้องกดยิงจริงใน Studio ยืนยันอีกที**
 - [ ] ผู้เล่นออกแล้วเข้าใหม่ = ข้อมูลหาย (ถูกต้องสำหรับเฟสนี้ เพราะยังไม่มี DataStore)
-- [ ] ไม่มีทางได้ไข่จาก UI ฝั่ง client อีกแล้ว
+- [x] ไม่มีทางได้ไข่จาก UI ฝั่ง client อีกแล้ว (ตัดปุ่มวางไข่ออกหมด)
+
+> ข้อที่ยัง `[ ]` ทั้งหมดต้องเปิด Roblox Studio ทดสอบเอง — sandbox นี้รัน Studio ไม่ได้

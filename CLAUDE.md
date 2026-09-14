@@ -239,10 +239,10 @@ rojo build -o game.rbxl   # build ไฟล์ place
 ## โครงสร้างโฟลเดอร์
 ```
 src/
-  server/   → ServerScriptService (logic ฟักไข่, คลังทหาร, combat, DataStore)
+  server/   → ServerScriptService (logic ฟักไข่, คอก/กระเป๋า, combat, DataStore)
     Main.server.lua      → ServerScriptService.Main (entry point, ต่อสายอย่างเดียว)
-    PlotService.lua      → จอง/คืน farm plot + สร้างโลก
-    EggService.lua       → วางไข่ จับเวลา ฟัก สุ่มทหาร คลังทหาร (memory)
+    PenService.lua       → จอง/คืนคอก + สร้างโลก + แสดงแม่ในคอกและไข่ในสวนฟัก
+    EggService.lua       → สร้างไข่ (พร้อมน้ำหนัก) จับเวลา ฟักเป็นตัวแม่ คอก/กระเป๋า (memory)
   client/   → StarterPlayerScripts (UI ทั้งหมด)
     Main.client.lua      → StarterPlayerScripts.Main (entry point)
   shared/   → ReplicatedStorage.Shared (config, constants, type ที่ใช้ร่วมกัน)
@@ -254,7 +254,7 @@ src/
 docs/
   data-schema.md       → ⚠️ โครงหลัก: schema ของ PlayerData + ที่มาของตัวเลขสมดุล
                             + แผน migration + จุดเสี่ยง exploit + ProcessReceipt
-  phase-1.5-rework.md  → รายการงานรื้อโค้ด Phase 1 ให้ตรงดีไซน์ใหม่ + ลำดับที่ปลอดภัย
+  phase-1.5-rework.md  → บันทึกการรื้อโค้ด Phase 1 ให้ตรงดีไซน์ใหม่ (ทำครบแล้ว) + เช็คลิสต์ที่ต้องทดสอบใน Studio
 default.project.json   → mapping ของ Rojo
 ```
 
@@ -269,12 +269,13 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 - **Phase 0** — โครงโปรเจกต์ + Rojo + README + .gitignore ✅
 - **Phase 1** — ฟักไข่ + ฟาร์ม (**กลไกเก่า**) ✅
   ⚠️ โค้ดทำตามกลไกเก่า "ฟัก → ได้ทหาร → เข้าคลัง" **ต้องรื้อใน Phase 1.5**
-- **Phase 1.5** — รื้อ Phase 1 ให้ตรงดีไซน์ใหม่ (**ยังเป็น in-memory ยังไม่แตะ DataStore**)
+- **Phase 1.5** — รื้อ Phase 1 ให้ตรงดีไซน์ใหม่ (**ยังเป็น in-memory ยังไม่แตะ DataStore**) ✅
   **ไข่มีน้ำหนักตั้งแต่ตอนสร้าง** → ฟักแล้วสุ่มแค่ตัวละคร → ได้ตัวแม่
-  · `heldEggs` เก็บไข่รายฟอง (`PlaceEggRequest` ส่ง index ไม่ใช่ชนิดไข่)
+  · `heldEggs` เก็บไข่รายฟอง (`PlaceEggInHatcheryRequest` ส่ง index ไม่ใช่ชนิดไข่)
   · `PlotService` → `PenService` (คอก + กระเป๋า) · ตัดปุ่มวางไข่ฝั่ง client
   · `os.clock()` → `os.time()`
-  📄 รายการงานครบ + ลำดับ 8 ขั้นที่ปลอดภัย อยู่ใน `docs/phase-1.5-rework.md`
+  📄 บันทึกว่ารื้ออะไรไปบ้าง + เช็คลิสต์ที่เหลือ อยู่ใน `docs/phase-1.5-rework.md`
+  ⚠️ **ยังไม่ได้เปิด Studio ทดสอบ** — โค้ดผ่านแค่ `rojo build` + `luau-lsp analyze` + `Config.validate()`
 - **Phase 2** — DataStore + ผลิตลูก + ผลิตเงิน + อัปเกรดคอก + ขายแม่
   📄 ออกแบบเสร็จแล้วใน `docs/data-schema.md` · Config พร้อมแล้ว
 - **Phase 3** — แมพ 9 ด่าน + กำแพง + ทหารฝ่ายรับ (HP รวม) + **ปล่อยทหารต่อเนื่อง (Age of War)**
@@ -340,10 +341,12 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 - commit เป็นก้อนย่อยตามงานที่ทำเสร็จ ข้อความ commit ภาษาอังกฤษสั้น ๆ
 
 ## สถานะปัจจุบัน
-Phase 1 เสร็จแล้วแต่ **เป็นกลไกเก่า ยังไม่ผ่านการทดสอบใน Studio**
-**Phase 1.5–7 ออกแบบเสร็จแล้ว + `Config.lua` พร้อมแล้ว แต่ยังไม่ได้เขียนโค้ดระบบ**
+**Phase 1.5 เขียนโค้ดเสร็จแล้ว** — โค้ดใน `src/` ตรงดีไซน์ใหม่ทั้งหมด
+(ฟักไข่ได้ **ตัวแม่** ไม่ใช่ทหาร · ไข่มีน้ำหนักตั้งแต่ตอนสร้าง · คอก + กระเป๋า + สวนฟัก 50 ช่อง)
+**ยังไม่ได้เปิด Studio ทดสอบ** ผ่านแค่ `rojo build` + `luau-lsp analyze` สะอาด + `Config.validate()`
+**Phase 2–7 ออกแบบเสร็จแล้ว + `Config.lua` พร้อมแล้ว แต่ยังไม่ได้เขียนโค้ดระบบ**
 
-ค่าทั้งหมดใน Config ผ่านการทดสอบพฤติกรรมจริงแล้ว 322 เคส
+ค่าทั้งหมดใน Config ผ่านการทดสอบพฤติกรรมจริงแล้ว 329 เคส
 (สุ่มน้ำหนัก 5 ล้านครั้ง · สุ่มตัวละคร 300,000 ครั้งต่อไข่ · ไข่รายด่าน 60,000 ครั้งต่อด่าน ·
 stack key · uid · บัฟสถานะ · แหล่งที่มาไข่ · Developer Product · ตารางด่าน · อัตราปล่อย ·
 อัตราผลิตตามน้ำหนัก · cap คลัง · ด่าน 1 ไม่มีกำแพง · turret · ตัวคูณคลาส ·
@@ -377,7 +380,9 @@ stack key · uid · บัฟสถานะ · แหล่งที่มา�
 - ✅ ไข่ตำนาน = รับประกัน tier 3 ขึ้นไป · SS ออกจากไข่ตำนานเท่านั้น
 
 ค้างอยู่ตอนนี้:
-- **โค้ด Phase 1 ยังเป็นกลไกเก่าทั้งหมด** → `docs/phase-1.5-rework.md`
+- **ยังไม่ได้ทดสอบใน Studio** → เช็คลิสต์ใน `docs/phase-1.5-rework.md` §8
+- ⚠️ **คอกและกระเป๋าเต็มพร้อมกัน = แม่ที่ฟักได้หายไป** (Phase 2 ต้องค้างไว้ในสวนแทน
+  — `docs/data-schema.md` §13 ข้อ D)
 - ยังไม่มี DataStore — ข้อมูลอยู่ใน memory ผู้เล่นออกเกม = หายหมด
 - ⚠️ **เวลาฟักไข่รายด่าน (30 วิ × เลขด่าน) ยังไม่ได้เทียบกับรอบรีเกิดบอส 5 นาที**
   ด่าน 9 ฟัก 270 วิ กับบอสรีเกิด 300 วิ ใกล้กันมาก

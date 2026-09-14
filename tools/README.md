@@ -17,10 +17,12 @@ luau tools/dump-map.luau
 ```
 
 พิมพ์พิกัดทุกโซน ตารางรายด่าน และเวลาเดินจากจุดหนึ่งไปอีกจุด
-**ปรับ `Config.Map` แล้วรันใหม่เพื่อเทียบได้ทันที ไม่ต้องเปิด Studio**
+**ปรับ `Config.MapDimensions` แล้วรันใหม่เพื่อเทียบได้ทันที ไม่ต้องเปิด Studio**
 
-⚠️ เวลาเดินอิงที่ `Config.Map.WALK_SPEED_REFERENCE` (16 = ค่าเริ่มต้นของ Roblox)
-ถ้าวันไหนเปลี่ยน WalkSpeed ของผู้เล่นจริง ต้องแก้ค่านั้นด้วย ไม่งั้นรายงานผิดโดยไม่มีใครรู้
+⚠️ เวลาเดินอิงที่ `Config.MapDimensions.Player.WalkSpeed` (32 · ค่าเริ่มต้นของ Roblox = 16)
+ค่านี้ถูกตั้งจริงที่ `StarterPlayer.CharacterWalkSpeed` ใน `default.project.json`
+และ `Main.server.lua` **เช็คตอนบูตว่าสองที่ตรงกัน** — ไม่ตรงเมื่อไหร่มี `warn` ใน Output
+(เคยเป็นจุดที่พลาดเงียบได้: แก้ WalkSpeed ที่ Studio แล้วรายงานขนาดแมพผิดทั้งชุด)
 
 ---
 

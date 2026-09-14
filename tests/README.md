@@ -11,7 +11,7 @@ luau tests/run.luau
 
 เท่านี้จบ — ไม่ต้องเปิด Roblox Studio ไม่ต้อง `rojo build` ก่อน ไม่ต้องใช้ Python
 
-ผ่านหมดจะจบด้วย `=== ผ่าน 365 / ตก 0 ===` และ **exit code 0**
+ผ่านหมดจะจบด้วย `=== ผ่าน 395 / ตก 0 ===` และ **exit code 0**
 มีเทสต์ตกจะพิมพ์รายการที่ตกทั้งหมดแล้ว **exit code 1** (เอาไปต่อ CI ได้ตรง ๆ)
 
 ---
@@ -76,7 +76,7 @@ tests/
 
 **ย้ำ:** ข้อแรกสำคัญที่สุด ถ้าข้อนั้นไม่ผ่าน ที่เหลือไม่ต้องดู
 
-เช็คลิสต์เต็มอยู่ใน [`../docs/map-layout.md`](../docs/map-layout.md) §10 และ [`../docs/phase-1.5-rework.md`](../docs/phase-1.5-rework.md) §8
+เช็คลิสต์เต็มอยู่ใน [`../docs/map-layout.md`](../docs/map-layout.md) §11 และ [`../docs/phase-1.5-rework.md`](../docs/phase-1.5-rework.md) §8
 
 ### แจกไข่มาทดสอบระหว่างที่ยังไม่มีบอส
 

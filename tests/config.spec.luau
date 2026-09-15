@@ -1025,4 +1025,111 @@ return function(t, Config)
 	local startTrip = (nest1X - worstPenX) / dim.Player.WalkSpeed
 	print(string.format("   คอกไกลสุด → รังบอสด่าน 1 = %.0f studs = %.1f วิ", nest1X - worstPenX, startTrip))
 	check("วิ่งจากคอกถึงรังบอสด่าน 1 ไม่เกิน 15 วิ", startTrip <= 15, true)
+
+	--------------------------------------------------------------------------
+	-- อัปเกรดความเร็ว (บ่อเงินบ่อที่สอง)
+	--------------------------------------------------------------------------
+	print("── อัปเกรดความเร็ว: ตาราง 5 ขั้น ตัวคูณถดถอย ──")
+	local spd = Config.SpeedUpgrade
+
+	-- ⚠️ 5 ขั้น ไม่ใช่ 10 — เป็นการตัดสินใจถาวร เทสต์นี้กันไม่ให้มีคนมาขยายทีหลัง
+	-- ราคาไล่ ×10 ถ้าทำ 10 ขั้น ขั้นสุดท้ายแพงกว่าขั้นแรกพันล้านเท่าแต่ให้ความเร็วเพิ่ม 3-4%
+	check("ความเร็วมี 5 ขั้น (ห้ามขยายเป็น 10)", spd.MAX_LEVEL, 5)
+	check("ขั้น 0 ไม่มีตัวคูณ", Config.getSpeedMultiplier(0), 1)
+	check("ขั้นสุดท้าย = MAX_MULTIPLIER พอดี",
+		Config.getSpeedMultiplier(spd.MAX_LEVEL), spd.MAX_MULTIPLIER)
+	check("เกินเพดานก็ไม่เกิน MAX_MULTIPLIER", Config.getSpeedMultiplier(99), spd.MAX_MULTIPLIER)
+	check("ขั้นติดลบก็ยังเป็น ×1", Config.getSpeedMultiplier(-5), 1)
+
+	-- ตัวคูณตามสเปกที่ตกลงกันไว้ (สูตร 1 + 3 × (ขั้น÷5)^0.75)
+	t.near("ขั้น 1 = ×1.90", Config.getSpeedMultiplier(1), 1.897, 0.005)
+	t.near("ขั้น 2 = ×2.51", Config.getSpeedMultiplier(2), 2.509, 0.005)
+	t.near("ขั้น 3 = ×3.05", Config.getSpeedMultiplier(3), 3.045, 0.005)
+	t.near("ขั้น 4 = ×3.54", Config.getSpeedMultiplier(4), 3.538, 0.005)
+
+	-- ความเร็วจริง
+	check("ขั้น 0 = ความเร็วฐาน", Config.getWalkSpeed(0), Config.MapDimensions.Player.WalkSpeed)
+	t.near("ขั้น 1 = 61 studs/วิ", Config.getWalkSpeed(1), 60.7, 0.5)
+	t.near("ขั้นสุดท้าย = 128 studs/วิ", Config.getMaxWalkSpeed(), 128, 0.01)
+
+	-- ⚠️ **ตัวคูณต้องถดถอย** ขั้นแรกให้เยอะสุด ขั้นหลังให้น้อยลงเรื่อย ๆ
+	-- ถ้าไล่ขึ้นเท่ากันทุกขั้น ขั้นท้าย ๆ ที่ราคาแพงกว่าพันเท่าจะคุ้มกว่าขั้นแรกแบบไร้เหตุผล
+	local gains, decreasing = {}, true
+	for level = 1, spd.MAX_LEVEL do
+		gains[level] = Config.getSpeedMultiplier(level) - Config.getSpeedMultiplier(level - 1)
+		if level > 1 and gains[level] >= gains[level - 1] then
+			decreasing = false
+		end
+	end
+	check("ส่วนเพิ่มต่อขั้นลดลงเรื่อย ๆ (ถดถอยจริง)", decreasing, true)
+	-- ที่ผู้เล่นรู้สึกจริงคือ "เร็วขึ้นกี่ %" ไม่ใช่ส่วนต่างของตัวคูณ
+	-- ตามสเปก: ขั้น 1 = +90% · ขั้น 5 = +13% (ต่างกันเกือบ 7 เท่า)
+	local firstGain = Config.getSpeedMultiplier(1) / Config.getSpeedMultiplier(0) - 1
+	local lastGain = Config.getSpeedMultiplier(spd.MAX_LEVEL)
+		/ Config.getSpeedMultiplier(spd.MAX_LEVEL - 1) - 1
+	t.near("ขั้น 1 เร็วขึ้น 90%", firstGain * 100, 89.7, 0.5)
+	t.near("ขั้น 5 เร็วขึ้น 13%", lastGain * 100, 13.1, 0.5)
+	check("ขั้นแรกคุ้มกว่าขั้นสุดท้ายหลายเท่า", firstGain / lastGain > 3, true)
+
+	-- ราคา
+	check("ราคาขั้นแรก 10,000", Config.getSpeedUpgradeCost(0), 10000)
+	check("ราคาขั้นสุดท้าย 100M", Config.getSpeedUpgradeCost(spd.MAX_LEVEL - 1), 1e8)
+	check("เต็มเพดานแล้วซื้อต่อไม่ได้", Config.getSpeedUpgradeCost(spd.MAX_LEVEL), nil)
+	check("ราคารวมทุกขั้น 111.11M", Config.getSpeedUpgradeTotalCost(), 111110000)
+	local ascending = true
+	for level = 1, spd.MAX_LEVEL - 1 do
+		if (Config.getSpeedUpgradeCost(level) :: number) <= (Config.getSpeedUpgradeCost(level - 1) :: number) then
+			ascending = false
+		end
+	end
+	check("ราคาเรียงจากน้อยไปมาก", ascending, true)
+
+	check("ผู้เล่นใหม่เริ่มที่ขั้น 0", Config.NewPlayer.speedLevel, 0)
+
+	--------------------------------------------------------------------------
+	-- ความหนากำแพงต้องผูกกับความเร็ว
+	--------------------------------------------------------------------------
+	-- ⚠️ ที่ 128 studs/วิ บน 60fps ตัวละครขยับ 2.13 stud ต่อเฟรม
+	-- กำแพงที่บางกว่านั้นถูก "ข้าม" ทั้งชิ้นระหว่างสองเฟรม โดยไม่มีการชนเกิดขึ้นเลย
+	print("── ความหนากำแพงผูกกับความเร็วสูงสุด ──")
+	t.near("ระยะต่อเฟรมที่ความเร็วเต็มขั้น",
+		Config.getMaxWalkSpeed() / spd.PHYSICS_FPS, 2.133, 0.01)
+	t.near("ความหนาขั้นต่ำ = ระยะต่อเฟรม × 2", Config.getMinWallThickness(), 4.267, 0.01)
+	check("ความเร็วสูงสุดไม่เกินเพดานที่ Roblox รับได้",
+		Config.getMaxWalkSpeed() <= spd.SPEED_CEILING, true)
+
+	local minThick = Config.getMinWallThickness()
+	check("กำแพงกั้นด่านหนาพอ", map.WALL_THICKNESS >= minThick, true)
+	check("กำแพงข้างเลนหนาพอ", map.LANE_WALL_THICKNESS >= minThick, true)
+	check("กำแพงใสขอบแมพหนาพอ", map.BOUNDARY_THICKNESS >= minThick, true)
+	check("รั้วคอกหนาพอ", map.FENCE_THICKNESS >= minThick, true)
+	check("รั้วยื่นเข้าคอกไม่เกินขอบกันชน",
+		map.PEN_EDGE_MARGIN >= map.FENCE_THICKNESS / 2, true)
+
+	-- ══ ยามต้องจับได้จริง ══
+	print("── ยามความเร็ว/ความหนา ต้องจับค่าที่พังได้จริง ──")
+	local savedMaxMult = spd.MAX_MULTIPLIER
+	local savedBoundary = map.BOUNDARY_THICKNESS
+	local savedCurve = spd.CURVE_EXPONENT
+
+	-- ดันความเร็วจนเกินเพดาน Roblox → ต้องล้ม
+	check("ความเร็วสูงสุดเกิน 200 → ล้ม", mapGuardCatches(
+		function() spd.MAX_MULTIPLIER = 10 end,
+		function() spd.MAX_MULTIPLIER = savedMaxMult end), true)
+
+	-- กำแพงบางกว่าระยะต่อเฟรม → ต้องล้ม
+	check("กำแพงใสบางเกินไป → ล้ม", mapGuardCatches(
+		function() map.BOUNDARY_THICKNESS = 1 end,
+		function() map.BOUNDARY_THICKNESS = savedBoundary end), true)
+
+	-- ⚠️ ข้อที่สำคัญที่สุด: **ขึ้นความเร็วแล้วลืมเพิ่มความหนา ต้องไม่บูต**
+	-- ยามนี้คือเหตุผลที่ความหนาผูกกับสูตร ไม่ใช่เลขตายตัว
+	check("ขึ้นความเร็วโดยไม่เพิ่มความหนา → ล้ม", mapGuardCatches(
+		function() spd.MAX_MULTIPLIER = 5.5 end, -- 32 × 5.5 = 176 (ยังไม่เกิน 200) แต่ต้องหนา 5.87
+		function() spd.MAX_MULTIPLIER = savedMaxMult end), true)
+
+	check("เลขชี้กำลังติดลบ → ล้ม", mapGuardCatches(
+		function() spd.CURVE_EXPONENT = -1 end,
+		function() spd.CURVE_EXPONENT = savedCurve end), true)
+	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
 end

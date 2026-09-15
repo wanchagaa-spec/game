@@ -274,3 +274,165 @@ for stage = 2, 9 do
 	local noneH = hp / (eff * basePower * 3600)
 	row("COMPARE", stage, oldH, newH, noneH)
 end
+
+-- ── ตารางอัปเกรดความเร็ว ──
+-- ขั้น · ราคา · ตัวคูณ · ความเร็ว · เร็วขึ้นกี่ % จากขั้นก่อน
+for level = 0, Config.SpeedUpgrade.MAX_LEVEL do
+	local gain = if level > 0
+		then Config.getSpeedMultiplier(level) / Config.getSpeedMultiplier(level - 1) - 1
+		else 0
+	row("SPEED", level, Config.getSpeedUpgradeCost(level - 1) or 0,
+		Config.getSpeedMultiplier(level), Config.getWalkSpeed(level), gain)
+end
+
+row("META", "speedMaxLevel", Config.SpeedUpgrade.MAX_LEVEL)
+row("META", "speedTotalCost", Config.getSpeedUpgradeTotalCost())
+row("META", "speedCurveExponent", Config.SpeedUpgrade.CURVE_EXPONENT)
+row("META", "speedMaxMultiplier", Config.SpeedUpgrade.MAX_MULTIPLIER)
+row("META", "speedCeiling", Config.SpeedUpgrade.SPEED_CEILING)
+row("META", "maxWalkSpeed", Config.getMaxWalkSpeed())
+row("META", "minWallThickness", Config.getMinWallThickness())
+row("META", "physicsFps", Config.SpeedUpgrade.PHYSICS_FPS)
+row("META", "thicknessSafety", Config.SpeedUpgrade.THICKNESS_SAFETY)
+row("META", "speedCostMultiplier", Config.SpeedUpgrade.COST_MULTIPLIER)
+row("META", "bossRespawn", Config.Boss.RESPAWN_SECONDS)
+
+-- ── ความหนากำแพงทุกชนิด ──
+for _, entry in
+	{
+		{ "กำแพงกั้นด่าน", Config.Map.WALL_THICKNESS },
+		{ "กำแพงข้างเลน", Config.Map.LANE_WALL_THICKNESS },
+		{ "กำแพงใสขอบแมพ", Config.Map.BOUNDARY_THICKNESS },
+		{ "รั้วคอก", Config.Map.FENCE_THICKNESS },
+	}
+do
+	row("THICK", entry[1], entry[2], Config.getMinWallThickness(), entry[2] / Config.getMinWallThickness())
+end
+
+-- ── เวลาเดินทางในแต่ละขั้นความเร็ว ──
+-- ต้นเลน→รังบอส 9 · ไป-กลับ · %ของรอบบอส · คอก→รังบอส 1
+local nest9 = Config.getBossNestCenter(9).X - Config.getLaneStartX()
+local nest1 = Config.getBossNestCenter(1).X - Config.getPenPlotCenter(1).X
+for level = 0, Config.SpeedUpgrade.MAX_LEVEL do
+	local v = Config.getWalkSpeed(level)
+	row("TRAVEL", level, v, nest9 / v, nest9 * 2 / v,
+		(nest9 * 2 / v) / Config.Boss.RESPAWN_SECONDS * 100, nest1 / v)
+end
+
+-- ── รายได้ vs รายจ่ายรวมต่อด่าน (แยกทุกบ่อ) ──
+-- ⚠️ ขั้นความเร็ว N ถูกนับไว้ที่ด่าน N เพราะราคาไล่ ×10 ตรงกับรายได้ที่โต ×10 ต่อด่าน
+-- (ตาราง SPEEDBUY ข้างล่างพิสูจน์ว่าซื้อไหวพอดีจริงที่ด่านนั้น)
+for stage = 1, 9 do
+	local income = Config.getReferenceStageIncome(stage)
+	local dmg = Config.getStageDamageUpgradeTotal(stage)
+	local weapon = Config.getWeaponUpgradeCost(stage) or 0
+	local pen = Config.getPenUpgradeCost(stage) or 0
+	local prod = Config.getProductionUpgradeCost(stage - 1) or 0
+	local speed = if stage <= Config.SpeedUpgrade.MAX_LEVEL
+		then Config.getSpeedUpgradeCost(stage - 1) or 0
+		else 0
+	local without = dmg + weapon + pen + prod
+	row("SPEND", stage, income, dmg, speed, weapon, pen, prod,
+		without, without + speed, income / without, income / (without + speed))
+end
+
+-- ── ขั้นความเร็วแต่ละขั้นซื้อได้ตอนด่านไหน (ใช้ส่วนเกินสะสม) ──
+do
+	local bank, tier = 0, 1
+	local boughtAt: { number } = {}
+	local leftover: { number } = {}
+	for stage = 1, 9 do
+		local income = Config.getReferenceStageIncome(stage)
+		local spend = Config.getStageDamageUpgradeTotal(stage)
+			+ (Config.getWeaponUpgradeCost(stage) or 0)
+			+ (Config.getPenUpgradeCost(stage) or 0)
+			+ (Config.getProductionUpgradeCost(stage - 1) or 0)
+		bank += income - spend
+		while tier <= Config.SpeedUpgrade.MAX_LEVEL do
+			local price = Config.getSpeedUpgradeCost(tier - 1) or 0
+			if bank < price then
+				break
+			end
+			bank -= price
+			boughtAt[tier] = stage
+			leftover[tier] = bank
+			tier += 1
+		end
+	end
+	for level = 1, Config.SpeedUpgrade.MAX_LEVEL do
+		row("SPEEDBUY", level, Config.getSpeedUpgradeCost(level - 1) or 0,
+			boughtAt[level] or 0, leftover[level] or 0)
+	end
+end
+
+-- ── ชั่วโมงฟาร์มด่าน 1 กว่าจะซื้อขั้นความเร็วขั้นแรกได้ ──
+do
+	local w = check.REFERENCE_WEIGHT[1]
+	local perHour = Config.getPenCapacity(1) * Config.getCoinsPerMinute(w, 1) * 60
+		+ (3600 / Config.Boss.RESPAWN_SECONDS) * Config.getBossKillReward(1) / check.PLAYERS_PER_SERVER
+	local needed = Config.getSpeedUpgradeCost(0) or 0
+	local others = Config.getStageDamageUpgradeTotal(1)
+		+ (Config.getWeaponUpgradeCost(1) or 0)
+		+ (Config.getPenUpgradeCost(1) or 0)
+		+ (Config.getProductionUpgradeCost(0) or 0)
+	row("FIRSTSPEED", perHour, needed, needed / perHour, others, (needed + others) / perHour)
+end
+
+-- ── เส้นทาง "เร่ง damage ก่อน" vs "เร่งความเร็วก่อน" ──
+-- ⚠️ จำลองการตีทีละช่วงเวลา: เงินไหลเข้าตามรายได้ของด่าน ซื้อของตามคิว
+-- damage ขึ้น → DPS ขึ้นทันที · ความเร็ว **ไม่อยู่ในสมการ DPS เลย** (ลูกเกิดที่ต้นเลน)
+do
+	local function simulate(stage: number, speedFirst: boolean, startCash: number): (number, number)
+		local hp = Config.getStageTotalHp(stage)
+		if hp <= 0 then
+			return 0, startCash
+		end
+		local w = check.REFERENCE_WEIGHT[stage]
+		local incomePerHour = Config.getPenCapacity(stage) * Config.getCoinsPerMinute(w, stage) * 60
+			+ (3600 / Config.Boss.RESPAWN_SECONDS) * Config.getBossKillReward(stage) / check.PLAYERS_PER_SERVER
+		local capDps = Config.getReferenceDps(stage)
+		local capLevel = Config.getMaxDamageLevel(stage)
+		local level = Config.getMaxDamageLevel(stage - 1)
+		local speedPrice = if stage <= Config.SpeedUpgrade.MAX_LEVEL
+			then Config.getSpeedUpgradeCost(stage - 1) or 0
+			else 0
+		local speedPending = speedFirst and speedPrice > 0
+		local cash, elapsed = startCash, 0
+		local dt = 1 / 360 -- ก้าวละ 10 วินาที
+		while hp > 0 and elapsed < 5000 do
+			if speedPending and cash >= speedPrice then
+				cash -= speedPrice
+				speedPending = false
+			end
+			if not speedPending then
+				while level < capLevel do
+					local price = Config.getDamageUpgradeCost(level + 1)
+					if price == nil or cash < price then
+						break
+					end
+					cash -= price
+					level += 1
+				end
+			end
+			hp -= capDps * Config.DamageUpgrade.STEP_MULTIPLIER ^ (level - capLevel) * 3600 * dt
+			cash += incomePerHour * dt
+			elapsed += dt
+		end
+		return elapsed, cash
+	end
+
+	local cashA, cashB = 0, 0
+	for stage = 2, 9 do
+		local hoursA, nextA = simulate(stage, false, cashA)
+		local hoursB, nextB = simulate(stage, true, cashB)
+		-- เส้นทาง A ซื้อความเร็วหลังตีด่านจบ (ถ้าเงินพอ) เพื่อให้จบด่านด้วยของเท่ากัน
+		local price = if stage <= Config.SpeedUpgrade.MAX_LEVEL
+			then Config.getSpeedUpgradeCost(stage - 1) or 0
+			else 0
+		if price > 0 and nextA >= price then
+			nextA -= price
+		end
+		cashA, cashB = nextA, nextB
+		row("PATHRACE", stage, hoursA, hoursB, (hoursB / hoursA - 1) * 100, price)
+	end
+end

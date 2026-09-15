@@ -183,7 +183,8 @@ code{{background:var(--head);padding:1px 5px;border-radius:3px;font-size:12.5px}
 <a href="#s9">9 · damage = HP</a> &nbsp;·&nbsp;
 <a href="#s10">10 · เงิน</a> &nbsp;·&nbsp;
 <a href="#s11">11 · คลาส · น้ำหนัก · ไข่</a> &nbsp;·&nbsp;
-<a href="#s12">12 · ด่าน · บอส · อาวุธ · คอก</a>
+<a href="#s12">12 · ด่าน · บอส · อาวุธ · คอก</a> &nbsp;·&nbsp;
+<a href="#s13">13 · ซื้อความเร็ว — บ่อเงินบ่อที่สอง ⭐</a>
 </div>
 ''')
 
@@ -680,6 +681,145 @@ W(f'''<div class="key warn"><b>ผล ×{float(PRODUP[1][1])/float(PRODUP[0][1])
 ถ้าผลเท่ากับราคา กำแพงจะหมดความหมายกลางเกม<br>
 และในระบบรบใหม่ upgrade นี้ <b>หยุดเพิ่ม damage ตั้งแต่ด่าน {FLIP}</b> (ชนเพดานปล่อย) เหลือประโยชน์แค่เติมคลังเร็วขึ้น
 — ตรงนี้เป็นจุดที่อาจต้องคิดใหม่ว่าคุ้มราคาไหม</div>''')
+
+# ── 13 ─────────────────────────────────────────────
+SPEED = A['SPEED']; THICK = A['THICK']; TRAVEL = A['TRAVEL']
+SPEND = A['SPEND']; SPEEDBUY = A['SPEEDBUY']; RACE = A['PATHRACE']
+FIRSTSPEED = A['FIRSTSPEED'][0]
+_cm = float(META['speedCostMultiplier'])
+
+W('<h2 id="s13"><span class="num">13</span>⭐ ซื้อความเร็ว — บ่อเงินบ่อที่สอง</h2>')
+W(f'''<div class="note">เกมแนวขโมยไข่ให้ผู้เล่นวิ่งบนลู่เพื่อเก็บความเร็ว เกมนี้เปลี่ยนเป็น <b>ซื้อด้วยเงิน</b> แทน
+แบบเดียวกับตัวคูณ damage · <b>ไม่มีแท่นวาปแล้ว</b> ผู้เล่นเดินไปเองทุกที่<br>
+ความเร็วฐาน {float(META['maxWalkSpeed'])/float(META['speedMaxMultiplier']):.0f} studs/วิ ·
+{int(META['speedMaxLevel'])} ขั้น · ตัวคูณสูงสุด ×{fnum(META['speedMaxMultiplier'])} ·
+ราคารวมทั้งสาย {fint(META['speedTotalCost'])} coins</div>''')
+
+W('<h3>ตารางขั้นความเร็ว</h3>')
+rows = []
+for r in SPEED:
+    lv = int(r[0]); price = float(r[1]); gain = float(r[4]) * 100
+    rows.append(([cell('ขั้น ' + str(lv)),
+                  cell(fint(price) if price > 0 else '—', 'dim' if price == 0 else ''),
+                  cell('×' + f'{float(r[2]):.2f}'),
+                  cell(f'{float(r[3]):.1f}'),
+                  cell(f'+{gain:.0f}%' if gain > 0 else '—',
+                       'good' if lv == 1 else ('dim' if gain == 0 else ''))],
+                 'hi' if lv == int(META['speedMaxLevel']) else ''))
+W(table(['ขั้น', 'ราคา', 'ตัวคูณ', 'ความเร็ว (studs/วิ)', 'เร็วขึ้นจากขั้นก่อน'], rows))
+
+_g1 = float(SPEED[1][4]) * 100
+_gl = float(SPEED[-1][4]) * 100
+W(f'''<div class="key"><b>ตัวคูณถดถอย — ขั้นแรกคุ้มที่สุดต่างกัน {_g1/_gl:.1f} เท่า</b>
+(ขั้น 1 เร็วขึ้น {_g1:.0f}% · ขั้น {int(META['speedMaxLevel'])} เร็วขึ้น {_gl:.0f}%)<br>
+สูตร: <code>ตัวคูณ = 1 + {float(META['speedMaxMultiplier'])-1:.0f} × (ขั้น ÷ {int(META['speedMaxLevel'])})<sup>{fnum(META['speedCurveExponent'])}</sup></code>
+— เลขชี้กำลังปรับได้ที่ <code>Config.SpeedUpgrade.CURVE_EXPONENT</code></div>''')
+
+W(f'''<div class="key warn"><b>ทำไม {int(META['speedMaxLevel'])} ขั้น ไม่ใช่ 10 — เป็นการตัดสินใจถาวร</b><br>
+ราคาไล่ ×{_cm:.0f} ต่อขั้น ถ้าทำ 10 ขั้น ขั้นสุดท้ายจะแพงกว่าขั้นแรก <b>{_cm**9:,.0f} เท่า</b>
+แต่ตัวคูณชนเพดาน ×{fnum(META['speedMaxMultiplier'])} แล้ว จึงให้ความเร็วเพิ่มแค่ไม่กี่ %<br>
+= ขั้นที่ไม่มีใครซื้อ เป็นตัวเลขหลอกตาในตาราง แบบเดียวกับคอก Lv11–15 ที่ตัดทิ้งไปแล้ว</div>''')
+
+# ── ก) รายได้ vs รายจ่ายรวมต่อด่าน ──
+W('<h3>ก · รายได้ vs รายจ่ายรวมต่อด่าน (แยกทุกบ่อ)</h3>')
+W(f'''<div class="note">ขั้นความเร็ว N ถูกนับไว้ที่ด่าน N เพราะราคาไล่ ×{_cm:.0f} ตรงกับรายได้ที่โต ×{float(META['coinStageMult']):.0f} ต่อด่าน
+(ตาราง ข พิสูจน์ว่าซื้อไหวพอดีจริงที่ด่านนั้น) · ด่าน {int(META['speedMaxLevel'])+1}–{int(float(META['stageCount']))} ไม่มีขั้นความเร็วเหลือให้ซื้อแล้ว</div>''')
+rows = []
+for r in SPEND:
+    st = int(r[0]); speed = float(r[3]); before = float(r[9]); after = float(r[10])
+    rows.append(([cell('ด่าน ' + str(st)), cell(fnum(r[1])), cell(fnum(r[2])),
+                  cell(fnum(speed) if speed > 0 else '—', 'dim' if speed == 0 else ''),
+                  cell(fnum(r[4])), cell(fnum(r[5])),
+                  cell(fnum(r[6]) if float(r[6]) > 0 else '—'),
+                  cell(f'{before:.2f}×', 'dim'),
+                  cell(f'{after:.2f}×', 'bad' if after < 1.2 else ('good' if after >= 2 else ''))],
+                 'hi' if speed > 0 else ''))
+W(table(['ด่าน', 'รายได้ทั้งด่าน', 'upgrade damage', 'upgrade ความเร็ว', 'อาวุธ', 'คอก', 'อัตราผลิต',
+         'ส่วนเกิน<br>(ก่อนมีความเร็ว)', '<b>ส่วนเกิน (ตอนนี้)</b>'], rows))
+
+_before = [float(r[9]) for r in SPEND]
+_after = [float(r[10]) for r in SPEND]
+_tight = [int(r[0]) for r in SPEND if float(r[10]) < 1.2]
+_speedStages = [int(r[0]) for r in SPEND if float(r[3]) > 0]
+W(f'''<div class="key {"red" if _tight else "warn"}"><b>ส่วนเกินลดจาก {min(_before):.2f}–{max(_before):.2f}× เหลือ {min(_after):.2f}–{max(_after):.2f}×</b><br>
+ด่าน {", ".join(str(x) for x in _tight)} เหลือแค่ ~{min(_after):.2f}× = <b>แทบไม่เหลืออะไรเลย</b>
+ถ้าซื้อขั้นความเร็วทันทีที่ถึงด่านนั้น<br>
+ด่าน {min(_speedStages)}–{max(_speedStages)} เท่านั้นที่โดน · ด่าน {max(_speedStages)+1}–{int(float(META['stageCount']))} ไม่กระทบเลย
+(ส่วนเกินยัง {min(_after[max(_speedStages):]):.2f}–{max(_after):.2f}×) เพราะความเร็วเป็น
+<b>ค่าใช้จ่ายครั้งเดียวตลอดเกม</b> ไม่ใช่ค่าที่ซ้ำทุกด่านแบบ damage</div>''')
+
+# ── ข) ซื้อได้ตอนด่านไหน ──
+W('<h3>ข · ขั้นความเร็วแต่ละขั้นซื้อได้ตอนด่านไหน</h3>')
+W('<div class="note">ใช้ <b>ส่วนเกินสะสม</b> — สมมติผู้เล่นซื้อ damage/อาวุธ/คอก/อัตราผลิตครบก่อนเสมอ แล้วเก็บที่เหลือไว้ซื้อความเร็ว</div>')
+rows = [([cell('ขั้น ' + r[0]), cell(fint(r[1])),
+          cell('ด่าน ' + r[2] if int(r[2]) > 0 else 'ซื้อไม่ไหวจนจบเกม', '' if int(r[2]) > 0 else 'bad'),
+          cell(fnum(r[3]))], '') for r in SPEEDBUY]
+W(table(['ขั้น', 'ราคา', 'ซื้อได้ที่ด่าน', 'เหลือในกระเป๋าหลังซื้อ'], rows))
+
+_hrs = float(FIRSTSPEED[2]); _hrsAll = float(FIRSTSPEED[4])
+W(f'''<div class="key"><b>ขั้น N ซื้อไหวพอดีที่ด่าน N ทุกขั้น</b> — ราคา ×{_cm:.0f} ต่อขั้นตรงกับรายได้ ×{float(META['coinStageMult']):.0f} ต่อด่านพอดี<br>
+<b>ขั้นแรกใช้เวลาไม่นาน</b> รายได้ด่าน 1 = {fint(FIRSTSPEED[0])} coins/ชม.
+(ส่วนใหญ่มาจากฆ่าบอส ซึ่งผู้เล่นใหม่ทำได้ทันที) →
+เก็บ {fint(FIRSTSPEED[1])} ใช้ <b>{_hrs*60:.0f} นาที</b> ถ้าเก็บอย่างเดียว ·
+<b>{_hrsAll*60:.0f} นาที</b> ถ้าซื้อของจำเป็นของด่าน 1 ก่อน</div>''')
+
+# ── ค) เวลาเดินทาง ──
+W('<h3>ค · เวลาเดินทางในแต่ละขั้นความเร็ว</h3>')
+rows = []
+for r in TRAVEL:
+    lv = int(r[0]); pct = float(r[4])
+    rows.append(([cell('ขั้น ' + str(lv)), cell(f'{float(r[1]):.1f}'),
+                  cell(f'{float(r[2]):.1f} วิ'), cell(f'{float(r[3]):.1f} วิ'),
+                  cell(f'{pct:.1f}%', 'bad' if pct >= 25 else ('good' if pct < 14 else '')),
+                  cell(f'{float(r[5]):.1f} วิ')],
+                 'hi' if lv == 0 else ''))
+W(table(['ขั้น', 'ความเร็ว', f'ต้นเลน → รังบอส {int(float(META["stageCount"]))}', 'ไป-กลับ',
+         f'% ของรอบบอส ({int(float(META["bossRespawn"]))} วิ)', 'คอก → รังบอส 1'], rows))
+
+_p0 = float(TRAVEL[0][4]); _p1 = float(TRAVEL[1][4]); _p2 = float(TRAVEL[2][4]); _pl = float(TRAVEL[-1][4])
+W(f'''<div class="key"><b>ปัญหาระยะทางหายเกือบหมดตั้งแต่ขั้น 1</b> —
+ไป-กลับรังบอสด่าน {int(float(META['stageCount']))} กินรอบบอสจาก <b>{_p0:.0f}%</b> เหลือ <b>{_p1:.0f}%</b> ทันที (ลดลงครึ่งหนึ่ง)<br>
+ขั้น 2 เหลือ {_p2:.0f}% ซึ่งถือว่าไม่เป็นปัญหาแล้ว · ขั้น {int(META['speedMaxLevel'])} เหลือ {_pl:.0f}%
+ซึ่งเป็นการซื้อความสบาย ไม่ใช่การแก้ปัญหา<br>
+<b>สอดคล้องกับตัวคูณถดถอย</b> — ขั้นที่แก้ปัญหาจริงคือขั้นที่ถูกที่สุด</div>''')
+
+# ── ง) สองบ่อแข่งกันไหม ──
+W('<h3>ง · เร่ง damage ก่อน vs เร่งความเร็วก่อน</h3>')
+W('<div class="note">จำลองการตีทีละช่วงเวลา เงินไหลเข้าตามรายได้ของด่าน ซื้อของตามคิว · เริ่มด่าน 2 เพราะด่าน 1 ไม่มีกำแพง</div>')
+rows = []
+for r in RACE:
+    st = int(r[0]); diff = float(r[3]); price = float(r[4])
+    rows.append(([cell('ด่าน ' + str(st)), cell(fhours(float(r[1]))), cell(fhours(float(r[2]))),
+                  cell(f'+{diff:.1f}%' if diff > 0.5 else 'เท่ากัน',
+                       'bad' if diff > 5 else 'dim'),
+                  cell(fnum(price) if price > 0 else '—', 'dim' if price == 0 else '')],
+                 'hi' if price > 0 else ''))
+_ta = sum(float(r[1]) for r in RACE); _tb = sum(float(r[2]) for r in RACE)
+rows.append(([cell('<b>รวม</b>'), cell('<b>' + fhours(_ta) + '</b>'), cell('<b>' + fhours(_tb) + '</b>'),
+              cell(f'<b>+{(_tb/_ta-1)*100:.1f}%</b>'), cell('')], ''))
+W(table(['ด่าน', 'เร่ง damage ก่อน', 'เร่งความเร็วก่อน', 'ช้าลง', 'ขั้นความเร็วที่ซื้อ'], rows))
+
+_worst = max(RACE, key=lambda r: float(r[3]))
+W(f'''<div class="key red"><b>🔴 ไม่ใช่การเลือก — "เร่ง damage ก่อน" ชนะทุกด่านที่มีให้เลือก</b><br>
+ช้าลง {min(float(r[3]) for r in RACE if float(r[4])>0):.0f}–{float(_worst[3]):.0f}%
+ถ้าเลือกความเร็วก่อน (แย่สุดที่ด่าน {int(_worst[0])}) และ<b>เสมอกันเป๊ะ</b>ที่ด่าน {max(_speedStages)+1}–{int(float(META['stageCount']))} ที่ไม่มีขั้นความเร็วเหลือ<br><br>
+<b>สาเหตุเชิงโครงสร้าง:</b> <code>damage/วินาที = min(อัตราผลิต, อัตราปล่อย) × damage ต่อตัว × ตัวคูณ</code>
+— <b>ความเร็ววิ่งไม่อยู่ในสมการนี้เลย</b> เพราะลูกเกิดที่แท่นปล่อยต้นเลน ไม่ได้เดินมาจากคอก<br>
+ความเร็วจึงซื้อ <b>ความสบาย + ความได้เปรียบตอนแย่งไข่</b> เท่านั้น ไม่ได้ซื้อความเร็วในการผ่านด่าน</div>''')
+
+# ── ความหนากำแพง ──
+W('<h3>ความหนากำแพง — ผูกกับความเร็วสูงสุด</h3>')
+W(f'''<div class="note">ที่ {float(META['maxWalkSpeed']):.0f} studs/วิ บน {int(float(META['physicsFps']))} fps ตัวละครขยับ
+<b>{float(META['maxWalkSpeed'])/float(META['physicsFps']):.2f} stud ต่อเฟรม</b> —
+กำแพงที่บางกว่านั้นถูก "ข้าม" ทั้งชิ้นระหว่างสองเฟรมโดยไม่มีการชนเกิดขึ้นเลย</div>''')
+rows = [([cell(r[0]), cell(fnum(r[1])), cell(f'{float(r[2]):.2f}'),
+          cell(f'{float(r[3]):.2f}×', 'good' if float(r[3]) >= 1 else 'bad')], '') for r in THICK]
+W(table(['กำแพง', 'ความหนาตอนนี้', 'ขั้นต่ำที่ต้องมี', 'เผื่อไว้'], rows))
+W(f'''<div class="key"><b>ขั้นต่ำเป็นสูตร ไม่ใช่เลขตายตัว</b> —
+<code>ความเร็วสูงสุด ÷ {int(float(META['physicsFps']))} × {fnum(META['thicknessSafety'])}</code>
+ผ่าน <code>Config.getMinWallThickness()</code><br>
+ขึ้นความเร็วแล้วลืมเพิ่มความหนาเมื่อไหร่ <b>เซิร์ฟจะไม่บูต</b> แทนที่จะปล่อยให้ผู้เล่นไปเจอเองว่าวิ่งทะลุได้ ·
+และความเร็วสูงสุดถูกตรึงไม่ให้เกิน {int(float(META['speedCeiling']))} ซึ่งเป็นจุดที่ Roblox เริ่มทะลุของจนเล่นไม่ได้</div>''')
 
 W(f'''<footer>
 สร้างจาก <code>src/shared/Config.lua</code> · ตัวเลขทุกตัวคำนวณจากฟังก์ชันจริงใน Config ไม่ได้พิมพ์มือ<br>

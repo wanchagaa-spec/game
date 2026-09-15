@@ -11,7 +11,7 @@
 
 local Config = require("../src/shared/Config")
 
-local MAP = Config.Map
+local MAP = Config.MapDimensions
 local DIM = Config.MapDimensions
 local SPEED = DIM.Player.WalkSpeed
 
@@ -55,15 +55,15 @@ local plazaD = plazaHalfDepth * 2
 print("")
 print("── โซน ──")
 print(string.format("  แผงร้านค้า    X = %7.1f        (%d แผง · แผงละ %.0f x %.0f)",
-	shop.X, MAP.SHOP_STALL_COUNT, MAP.SHOP_STALL_SIZE.X, MAP.SHOP_STALL_SIZE.Z))
+	shop.X, MAP.Shop.StallCount, MAP.Shop.StallSize.X, MAP.Shop.StallSize.Y))
 print(string.format("  ลานคอก        X = %7.1f .. %-7.1f   %.0f x %.0f studs (%d แปลง %dx%d · แปลงละ %.0f x %.0f)",
 	yardLeft, yardRight, yardW, yardD,
-	Config.World.MAX_PENS, MAP.PEN_ROWS, MAP.PEN_PER_ROW, MAP.PEN_PLOT_SIZE.X, MAP.PEN_PLOT_SIZE.Z))
+	Config.World.MAX_PENS, MAP.Pen.Rows, MAP.Pen.PerRow, MAP.Pen.Size.X, MAP.Pen.Size.Y))
 print(string.format("  ลานหญ้ารวม    X = %7.1f .. %-7.1f   %.0f x %.0f studs (รวมแผงร้าน)",
 	plazaMinX, plazaMaxX, plazaW, plazaD))
 print(string.format("  จุดเกิดกลาง   X = %7.1f", spawn.X))
 print(string.format("  เลนรบ         X = %7.1f .. %-7.1f   ยาว %.0f · กว้าง %.0f · %d ด่าน ด่านละ %.0f",
-	laneStart, laneEnd, laneLength, MAP.LANE_WIDTH, Config.Stage.COUNT, MAP.LANE_LENGTH_PER_STAGE))
+	laneStart, laneEnd, laneLength, MAP.Lane.Width, Config.Stage.COUNT, MAP.Lane.LengthPerStage))
 
 --------------------------------------------------------------------------------
 -- ขนาดแมพทั้งใบ — กรอบที่กำแพงใสล้อมไว้
@@ -71,17 +71,17 @@ print(string.format("  เลนรบ         X = %7.1f .. %-7.1f   ยาว %
 
 -- ⚠️ พื้นลานรวม BOUNDARY_MARGIN ไว้แล้ว (getPlazaMinX / getPlazaHalfDepth)
 -- กำแพงใสวางถอยเข้ามาจากขอบพื้นเท่ากับ margin → นอกกำแพงเป็นหญ้าที่เห็นแต่เดินไม่ถึง
-local margin = MAP.BOUNDARY_MARGIN
+local margin = MAP.Boundary.Margin
 local mapMinX = plazaMinX
 local mapMaxX = laneEnd
-local mapHalfZ = math.max(plazaHalfDepth, Config.getLaneHalfWidthAt(laneEnd), MAP.NEST_SIZE.Z / 2)
+local mapHalfZ = math.max(plazaHalfDepth, Config.getLaneHalfWidthAt(laneEnd), MAP.BossRoom.Size.Y / 2)
 
 print("")
 print("── แมพทั้งใบ (ขอบพื้น) ──")
 print(string.format("  X = %.1f .. %.1f · Z = %.1f .. %.1f", mapMinX, mapMaxX, -mapHalfZ, mapHalfZ))
 print(string.format("  ขนาดรวม %.0f x %.0f studs", mapMaxX - mapMinX, mapHalfZ * 2))
 print(string.format("  กำแพงใส X = %.1f · Z = ±%.1f  (สูง %.0f · กระโดดได้ %.0f · หญ้านอกกำแพง %.0f)",
-	plazaMinX + margin, plazaHalfDepth - margin, MAP.BOUNDARY_HEIGHT, DIM.Player.JumpHeight, margin))
+	plazaMinX + margin, plazaHalfDepth - margin, MAP.Boundary.Height, DIM.Player.JumpHeight, margin))
 
 --------------------------------------------------------------------------------
 -- เวลาเดิน — ตัวเลขที่ใช้ตัดสินว่า "ใหญ่ไปไหม"
@@ -98,7 +98,7 @@ local trips = {
 	{ "จุดเกิด → แผงร้านค้า", math.abs(spawn.X - shop.X) },
 	{ "จุดเกิด → ต้นเลนรบ", math.abs(laneStart - spawn.X) },
 	{ "ต้นเลน → รังบอสด่าน 1", math.abs(nest1 - laneStart) },
-	{ "ข้ามหนึ่งด่าน", MAP.LANE_LENGTH_PER_STAGE },
+	{ "ข้ามหนึ่งด่าน", MAP.Lane.LengthPerStage },
 	{ `ต้นเลน → รังบอสด่าน {Config.Stage.COUNT}`, math.abs(nestLast - laneStart) },
 	{ "ขอบซ้ายสุด → ขอบขวาสุด", mapMaxX - mapMinX },
 	{ "คอก 1 → คอก 3 (ข้ามลาน)", math.abs(Config.getPenPlotCenter(3).X - Config.getPenPlotCenter(1).X) },
@@ -118,7 +118,7 @@ print("  ด่าน │ ช่วง X            │ กำแพง  │ ร
 line("─")
 for stage = 1, Config.Stage.COUNT do
 	local startX = Config.getStageStartX(stage)
-	local endX = startX + MAP.LANE_LENGTH_PER_STAGE
+	local endX = startX + MAP.Lane.LengthPerStage
 	local wallX = Config.getWallX(stage)
 	local nestX = Config.getBossNestCenter(stage).X
 	print(string.format("   %2d  │ %7.0f .. %-7.0f │ %6s │ %6.0f │ %s",
@@ -140,14 +140,14 @@ for index = 1, Config.World.MAX_PENS do
 end
 print("  กึ่งกลางแต่ละแปลง: " .. table.concat(parts, " · "))
 print(string.format("  ขนาดแปลง %.0f x %.0f · ทางเดินกลางกว้าง %.0f · ช่องระหว่างแปลง %.0f · ขอบกันชน %.0f",
-	MAP.PEN_PLOT_SIZE.X, MAP.PEN_PLOT_SIZE.Z, MAP.WALKWAY_WIDTH, MAP.PEN_PLOT_GAP, MAP.PEN_EDGE_MARGIN))
+	MAP.Pen.Size.X, MAP.Pen.Size.Y, MAP.Pen.RowGap, MAP.Pen.ColumnGap, MAP.Pen.EdgeMargin))
 
-local roamX = MAP.PEN_PLOT_SIZE.X - MAP.PEN_EDGE_MARGIN * 2
-local roamZ = MAP.PEN_PLOT_SIZE.Z - MAP.PEN_EDGE_MARGIN * 2
+local roamX = MAP.Pen.Size.X - MAP.Pen.EdgeMargin * 2
+local roamZ = MAP.Pen.Size.Y - MAP.Pen.EdgeMargin * 2
 local diagonal = math.sqrt(roamX * roamX + roamZ * roamZ)
 print(string.format("  พื้นที่ที่แม่เดินได้จริง %.0f x %.0f studs (แนวทแยง %.0f)", roamX, roamZ, diagonal))
 print(string.format("  แม่เดินข้ามคอกด้านยาว %.0f studs ใช้ %.1f วิ  ·  มุมถึงมุม %.0f studs ใช้ %.1f วิ   (ที่ %.1f studs/วิ)",
-	roamX, roamX / MAP.WANDER_SPEED, diagonal, diagonal / MAP.WANDER_SPEED, MAP.WANDER_SPEED))
+	roamX, roamX / MAP.Wander.Speed, diagonal, diagonal / MAP.Wander.Speed, MAP.Wander.Speed))
 print(string.format("  ผู้เล่นวิ่งข้ามคอกมุมถึงมุมใช้ %s", secs(diagonal)))
 
 print("")

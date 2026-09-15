@@ -300,10 +300,10 @@ row("META", "bossRespawn", Config.Boss.RESPAWN_SECONDS)
 -- ── ความหนากำแพงทุกชนิด ──
 for _, entry in
 	{
-		{ "กำแพงกั้นด่าน", Config.Map.WALL_THICKNESS },
-		{ "กำแพงข้างเลน", Config.Map.LANE_WALL_THICKNESS },
-		{ "กำแพงใสขอบแมพ", Config.Map.BOUNDARY_THICKNESS },
-		{ "รั้วคอก", Config.Map.FENCE_THICKNESS },
+		{ "กำแพงกั้นด่าน", Config.MapDimensions.StageWall.Thickness },
+		{ "กำแพงข้างเลน", Config.MapDimensions.Lane.WallThickness },
+		{ "กำแพงใสขอบแมพ", Config.MapDimensions.Boundary.Thickness },
+		{ "รั้วคอก", Config.MapDimensions.Pen.FenceThickness },
 	}
 do
 	row("THICK", entry[1], entry[2], Config.getMinWallThickness(), entry[2] / Config.getMinWallThickness())

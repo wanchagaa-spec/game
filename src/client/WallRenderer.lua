@@ -29,7 +29,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 
 local WallRenderer = {}
 
-local MAP = Config.Map
+local MAP = Config.MapDimensions
 
 local WALL_COLOR = Color3.fromRGB(126, 116, 104)
 local WALL_TOP_COLOR = Color3.fromRGB(154, 142, 126)
@@ -65,8 +65,8 @@ local function buildWall(stage: number, parent: Folder)
 
 	local body = Instance.new("Part")
 	body.Name = "Body"
-	body.Size = Vector3.new(MAP.WALL_THICKNESS, MAP.WALL_HEIGHT, MAP.LANE_WIDTH)
-	body.Position = Vector3.new(wallX, MAP.WALL_HEIGHT / 2, 0)
+	body.Size = Vector3.new(MAP.StageWall.Thickness, MAP.Lane.WallHeight, MAP.Lane.Width)
+	body.Position = Vector3.new(wallX, MAP.Lane.WallHeight / 2, 0)
 	body.Color = WALL_COLOR
 	body.Anchored = true
 	body.CanCollide = true -- ← จุดที่ทำให้ "คนที่ยังไม่พังเดินชน" ทำงานเอง
@@ -79,8 +79,8 @@ local function buildWall(stage: number, parent: Folder)
 	-- ขอบบน ไว้ให้ดูออกว่าเป็นกำแพง ไม่ใช่แค่แท่งทึบ
 	local cap = Instance.new("Part")
 	cap.Name = "Cap"
-	cap.Size = Vector3.new(MAP.WALL_THICKNESS + 1.5, 1, MAP.LANE_WIDTH + 1.5)
-	cap.Position = Vector3.new(wallX, MAP.WALL_HEIGHT + 0.5, 0)
+	cap.Size = Vector3.new(MAP.StageWall.Thickness + 1.5, 1, MAP.Lane.Width + 1.5)
+	cap.Position = Vector3.new(wallX, MAP.Lane.WallHeight + 0.5, 0)
 	cap.Color = WALL_TOP_COLOR
 	cap.Anchored = true
 	cap.CanCollide = true
@@ -90,7 +90,7 @@ local function buildWall(stage: number, parent: Folder)
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "Label"
 	gui.Size = UDim2.fromOffset(200, 44)
-	gui.StudsOffsetWorldSpace = Vector3.new(0, MAP.WALL_HEIGHT / 2 + 4, 0)
+	gui.StudsOffsetWorldSpace = Vector3.new(0, MAP.Lane.WallHeight / 2 + 4, 0)
 	gui.MaxDistance = 300
 	gui.Adornee = body
 	gui.Parent = body

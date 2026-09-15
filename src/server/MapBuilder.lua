@@ -30,7 +30,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 
 local MapBuilder = {}
 
-local MAP = Config.Map
+local MAP = Config.MapDimensions
 local DIM = Config.MapDimensions
 
 --------------------------------------------------------------------------------
@@ -173,8 +173,8 @@ local function fenceRun(
 		return
 	end
 
-	local h = MAP.FENCE_HEIGHT
-	local t = MAP.FENCE_THICKNESS
+	local h = MAP.Pen.FenceHeight
+	local t = MAP.Pen.FenceThickness
 
 	local function place(partName: string, along: number, thick: number, height: number, y: number)
 		local size = if alongX
@@ -186,7 +186,7 @@ local function fenceRun(
 	end
 
 	-- คานแนวนอน — ไล่ความสูงเท่า ๆ กันจากบนลงล่าง ไม่ติดพื้น
-	local rails = MAP.FENCE_RAIL_COUNT
+	local rails = MAP.Pen.FenceRailCount
 	local railHeight = h / (rails * 2 + 1)
 	for rail = 1, rails do
 		local y = h * (rail / (rails + 1)) - railHeight / 2
@@ -194,7 +194,7 @@ local function fenceRun(
 	end
 
 	-- เสา — หัวท้ายเสมอ แล้วแทรกตาม FENCE_POST_SPACING
-	local spans = math.max(1, math.floor(length / MAP.FENCE_POST_SPACING))
+	local spans = math.max(1, math.floor(length / MAP.Pen.FencePostSpacing))
 	for post = 0, spans do
 		local offset = from + length * (post / spans)
 		local size = Vector3.new(t, h, t)
@@ -220,7 +220,7 @@ local function buildFence(plot: Model, center: Vector3, sizeX: number, sizeZ: nu
 	fenceRun(plot, "FenceRight", back, front, right, false)
 
 	-- ด้านประตู: แบ่งเป็นสองช่วง เว้นช่องกลางกว้าง PEN_GATE_WIDTH
-	local gateHalf = MAP.PEN_GATE_WIDTH / 2
+	local gateHalf = MAP.Pen.GateWidth / 2
 	fenceRun(plot, "FenceGateA", left, center.X - gateHalf, gateZ, true)
 	fenceRun(plot, "FenceGateB", center.X + gateHalf, right, gateZ, true)
 
@@ -232,23 +232,23 @@ end
 local function buildPenSign(plot: Model, center: Vector3, gateZ: number, index: number): TextLabel
 	-- ออกไปทางทางเดินกลาง (ตรงข้ามกับกึ่งกลางคอก)
 	local outward = if center.Z > 0 then -1 else 1
-	local signZ = gateZ + outward * MAP.PEN_SIGN_SIZE.Z * 2
+	local signZ = gateZ + outward * MAP.Pen.SignSize.Z * 2
 
 	-- ขยับไปข้างประตู ไม่ขวางทางเข้า
-	local signX = center.X + MAP.PEN_GATE_WIDTH / 2 + MAP.PEN_SIGN_GATE_CLEARANCE + MAP.PEN_SIGN_SIZE.X / 2
+	local signX = center.X + MAP.Pen.GateWidth / 2 + MAP.Pen.SignGateClearance + MAP.Pen.SignSize.X / 2
 
-	local postHeight = MAP.PEN_SIGN_POST_HEIGHT
+	local postHeight = MAP.Pen.SignPostHeight
 	local post = fencePart(
 		plot,
 		`Sign{index}Post`,
-		Vector3.new(MAP.FENCE_THICKNESS * 1.5, postHeight, MAP.FENCE_THICKNESS * 1.5),
+		Vector3.new(MAP.Pen.FenceThickness * 1.5, postHeight, MAP.Pen.FenceThickness * 1.5),
 		Vector3.new(signX, 0, signZ)
 	)
 	post.Material = Enum.Material.Wood
 
 	local board = makePart(
 		`Sign{index}Board`,
-		MAP.PEN_SIGN_SIZE,
+		MAP.Pen.SignSize,
 		Vector3.new(signX, postHeight, signZ),
 		COLORS.sign,
 		plot
@@ -257,7 +257,7 @@ local function buildPenSign(plot: Model, center: Vector3, gateZ: number, index: 
 	board.CanCollide = false
 	board.CastShadow = false
 
-	return makeLabel(`คอก {index}`, 220, board, MAP.PEN_SIGN_SIZE.Y)
+	return makeLabel(`คอก {index}`, 220, board, MAP.Pen.SignSize.Y)
 end
 
 function MapBuilder.buildPlaza(parent: Folder)
@@ -276,7 +276,7 @@ function MapBuilder.buildPlaza(parent: Folder)
 	-- ตัวแถบยังอยู่เพื่อใช้วางแนวคอก 2 แถวเหมือนเดิม แค่กลืนไปกับพื้น
 	local walk = makePart(
 		"Walkway",
-		Vector3.new(maxX - minX, 0.2, MAP.WALKWAY_WIDTH),
+		Vector3.new(maxX - minX, 0.2, MAP.Pen.RowGap),
 		Vector3.new((minX + maxX) / 2, 0, 0),
 		COLORS.grass,
 		plaza
@@ -289,8 +289,8 @@ function MapBuilder.buildPlaza(parent: Folder)
 	pens.Name = "Pens"
 	pens.Parent = plaza
 
-	local sizeX = MAP.PEN_PLOT_SIZE.X
-	local sizeZ = MAP.PEN_PLOT_SIZE.Z
+	local sizeX = MAP.Pen.Size.X
+	local sizeZ = MAP.Pen.Size.Y
 
 	for index = 1, Config.World.MAX_PENS do
 		local center = Config.getPenPlotCenter(index)
@@ -301,7 +301,7 @@ function MapBuilder.buildPlaza(parent: Folder)
 
 		-- แผ่นบาง ๆ ทับบนหญ้า ไว้แยกสีให้เห็นว่าคอกไหนเป็นของใคร
 		local shade = if index % 2 == 0 then COLORS.grassAlt else COLORS.grass
-		local base = makePart("Base", Vector3.new(sizeX, 0.3, sizeZ), center, shade, model)
+		local base = makePart("Base", Vector3.new(sizeX, MAP.Pen.FloorThickness, sizeZ), center, shade, model)
 		base.Material = Enum.Material.Grass
 		base.CanCollide = false
 		model.PrimaryPart = base
@@ -322,11 +322,11 @@ function MapBuilder.buildShop(parent: Folder)
 	shop.Name = "Shop"
 	shop.Parent = parent
 
-	local sizeX = MAP.SHOP_STALL_SIZE.X
-	local sizeZ = MAP.SHOP_STALL_SIZE.Z
-	local h = MAP.SHOP_STALL_HEIGHT
+	local sizeX = MAP.Shop.StallSize.X
+	local sizeZ = MAP.Shop.StallSize.Y
+	local h = MAP.Shop.StallHeight
 
-	for index = 1, MAP.SHOP_STALL_COUNT do
+	for index = 1, MAP.Shop.StallCount do
 		local center = Config.getShopStallCenter(index)
 
 		local model = Instance.new("Model")
@@ -370,7 +370,7 @@ local function laneWallPiece(parent: Folder, name: string, fromX: number, toX: n
 	end
 	local part = makePart(
 		name,
-		Vector3.new(length, MAP.LANE_WALL_HEIGHT, MAP.LANE_WALL_THICKNESS),
+		Vector3.new(length, MAP.Lane.WallHeight, MAP.Lane.WallThickness),
 		Vector3.new((fromX + toX) / 2, 0, z),
 		COLORS.laneWall,
 		parent
@@ -387,7 +387,7 @@ local function laneWallJog(parent: Folder, name: string, x: number, fromZ: numbe
 	end
 	local part = makePart(
 		name,
-		Vector3.new(MAP.LANE_WALL_THICKNESS, MAP.LANE_WALL_HEIGHT, width),
+		Vector3.new(MAP.Lane.WallThickness, MAP.Lane.WallHeight, width),
 		Vector3.new(x, 0, (fromZ + toZ) / 2),
 		COLORS.laneWall,
 		parent
@@ -405,16 +405,16 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	local endX = Config.getLaneEndX()
 
 	-- พื้นเลน (ช่วงปกติ กว้าง LANE_WIDTH) — ส่วนที่ผายออกอยู่กับห้องบอส
-	makeFloor("LaneFloor", endX - startX, MAP.LANE_WIDTH, (startX + endX) / 2, 0, COLORS.lane, lane)
+	makeFloor("LaneFloor", endX - startX, MAP.Lane.Width, (startX + endX) / 2, 0, COLORS.lane, lane)
 
 	-- ══ กำแพงสองข้างทาง ══ เดินเป็นขั้นตรงห้องบอสที่กว้างกว่าเลน
 	local walls = Instance.new("Folder")
 	walls.Name = "SideWalls"
 	walls.Parent = lane
 
-	local laneHalf = MAP.LANE_WIDTH / 2
-	local roomHalfZ = MAP.NEST_SIZE.Z / 2
-	local roomHalfX = MAP.NEST_SIZE.X / 2
+	local laneHalf = MAP.Lane.Width / 2
+	local roomHalfZ = MAP.BossRoom.Size.Y / 2
+	local roomHalfX = MAP.BossRoom.Size.X / 2
 
 	for _, sign in { 1, -1 } do
 		local side = if sign == 1 then "North" else "South"
@@ -447,7 +447,7 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	-- ปิดปลายเลน กันเดินตกท้ายแมพ
 	local cap = makePart(
 		"LaneEndCap",
-		Vector3.new(MAP.LANE_WALL_THICKNESS, MAP.LANE_WALL_HEIGHT, MAP.LANE_WIDTH),
+		Vector3.new(MAP.Lane.WallThickness, MAP.Lane.WallHeight, MAP.Lane.Width),
 		Vector3.new(endX, 0, 0),
 		COLORS.laneWall,
 		lane
@@ -457,8 +457,8 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	-- ⚠️ แท่นปล่อยทหารอยู่ที่ต้นเลน — ทหารโผล่ที่นี่เลย ไม่ต้องเดินมาจากคอก
 	local pad = makePart(
 		"ReleasePad",
-		MAP.RELEASE_PAD_SIZE,
-		Vector3.new(startX + MAP.RELEASE_PAD_SIZE.X / 2, 0, 0),
+		MAP.Lane.ReleasePadSize,
+		Vector3.new(startX + MAP.Lane.ReleasePadSize.X / 2, 0, 0),
 		COLORS.releasePad,
 		lane
 	)
@@ -474,7 +474,7 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	for stage = 1, Config.Stage.COUNT do
 		local marker = makePart(
 			`StageMarker{stage}`,
-			Vector3.new(1.5, 0.3, MAP.LANE_WIDTH),
+			Vector3.new(1.5, 0.3, MAP.Lane.Width),
 			Vector3.new(Config.getStageStartX(stage), 0, 0),
 			COLORS.marker,
 			markers
@@ -502,8 +502,8 @@ function MapBuilder.buildBossRooms(parent: Folder)
 
 		local base = makeFloor(
 			"Floor",
-			MAP.NEST_SIZE.X,
-			MAP.NEST_SIZE.Z,
+			MAP.BossRoom.Size.X,
+			MAP.BossRoom.Size.Y,
 			center.X,
 			center.Z,
 			COLORS.bossFloor,
@@ -520,7 +520,7 @@ function MapBuilder.buildBossRooms(parent: Folder)
 		for i = 1, Config.Boss.EGGS_PER_SPAWN do
 			local spot = makePart(
 				`EggSpot{i}`,
-				MAP.NEST_EGG_PAD_SIZE,
+				MAP.BossRoom.EggPadSize,
 				Config.getBossEggSpot(stage, i),
 				COLORS.bossEgg,
 				model
@@ -546,14 +546,14 @@ function MapBuilder.buildBoundary(parent: Folder)
 	folder.Name = "Boundary"
 	folder.Parent = parent
 
-	local h = MAP.BOUNDARY_HEIGHT
-	local t = MAP.BOUNDARY_THICKNESS
-	local margin = MAP.BOUNDARY_MARGIN
+	local h = MAP.Boundary.Height
+	local t = MAP.Boundary.Thickness
+	local margin = MAP.Boundary.Margin
 
 	local minX = Config.getPlazaMinX() + margin
 	local maxX = Config.getPlazaMaxX()
 	local halfZ = Config.getPlazaHalfDepth() - margin
-	local laneHalf = MAP.LANE_WIDTH / 2
+	local laneHalf = MAP.Lane.Width / 2
 
 	local function invisible(name: string, size: Vector3, position: Vector3)
 		local part = makePart(name, size, position, Color3.fromRGB(255, 255, 255), folder)
@@ -607,8 +607,8 @@ function MapBuilder.buildSpawns(parent: Folder)
 		local point = Config.getSpawnPointForPen(index)
 		local pad = Instance.new("SpawnLocation")
 		pad.Name = `Spawn{index}`
-		pad.Size = MAP.SPAWN_PAD_SIZE
-		pad.Position = Vector3.new(point.X, point.Y + MAP.SPAWN_PAD_SIZE.Y / 2, point.Z)
+		pad.Size = MAP.Player.SpawnPadSize
+		pad.Position = Vector3.new(point.X, point.Y + MAP.Player.SpawnPadSize.Y / 2, point.Z)
 		pad.Anchored = true
 		pad.CanCollide = false -- ไม่ให้สะดุดตอนเดินผ่าน
 		pad.Neutral = true
@@ -642,7 +642,7 @@ function MapBuilder.build()
 	MapBuilder.buildSpawns(folder)
 
 	print(
-		`[MapBuilder] สร้างแมพแล้ว — คอก {Config.World.MAX_PENS} แปลง ({MAP.PEN_PLOT_SIZE.X}x{MAP.PEN_PLOT_SIZE.Z}) · `
+		`[MapBuilder] สร้างแมพแล้ว — คอก {Config.World.MAX_PENS} แปลง ({MAP.Pen.Size.X}x{MAP.Pen.Size.Y}) · `
 			.. `เลนยาว {Config.getLaneLength()} studs · ห้องบอส {Config.Stage.COUNT} ห้อง · `
 			.. `วิ่ง {DIM.Player.WalkSpeed} studs/วิ`
 	)

@@ -27,7 +27,7 @@ local MapBuilder = require(ServerScriptService.MapBuilder)
 
 local PenService = {}
 
-local MAP = Config.Map
+local MAP = Config.MapDimensions
 
 export type Pen = {
 	index: number, -- เลขแปลง 1..MAX_PENS
@@ -65,9 +65,9 @@ local EMPTY_LABEL = "ว่าง"
 -- ครึ่งความกว้าง/ลึกที่ของยังอยู่ในรั้ว (หักขอบกันชนแล้ว)
 -- validate() บังคับว่า PEN_EDGE_MARGIN เล็กกว่าครึ่งด้านสั้นสุดเสมอ ค่านี้จึงเป็นบวกแน่นอน
 local function innerHalfExtents(): (number, number)
-	local size = MAP.PEN_PLOT_SIZE
-	local margin = MAP.PEN_EDGE_MARGIN
-	return size.X / 2 - margin, size.Z / 2 - margin
+	local size = MAP.Pen.Size
+	local margin = MAP.Pen.EdgeMargin
+	return size.X / 2 - margin, size.Y / 2 - margin
 end
 
 -- สุ่มจุดบนพื้นภายในแปลง
@@ -93,7 +93,7 @@ local function pickNextTrip(roamer: Roamer, now: number)
 	roamer.to = Vector3.new(target.X, from.Y, target.Z)
 	roamer.startedAt = now
 	-- ระยะ ÷ ความเร็ว = เวลาที่ใช้ · กันหาร 0 ตอนสุ่มได้จุดเดิมเป๊ะ
-	roamer.duration = math.max(distance / MAP.WANDER_SPEED, 0.05)
+	roamer.duration = math.max(distance / MAP.Wander.Speed, 0.05)
 end
 
 local function updateWander()
@@ -123,7 +123,7 @@ local function updateWander()
 
 		if alpha >= 1 then
 			-- ถึงแล้ว หยุดพักสักครู่ค่อยออกเดินใหม่
-			roamer.waitUntil = now + rng:NextNumber(MAP.WANDER_PAUSE_MIN, MAP.WANDER_PAUSE_MAX)
+			roamer.waitUntil = now + rng:NextNumber(MAP.Wander.PauseMin, MAP.Wander.PauseMax)
 			pickNextTrip(roamer, roamer.waitUntil)
 		end
 	end
@@ -137,7 +137,7 @@ local function startWanderLoop()
 	local accumulated = 0
 	wanderConnection = RunService.Heartbeat:Connect(function(delta)
 		accumulated += delta
-		if accumulated < MAP.WANDER_TICK then
+		if accumulated < MAP.Wander.Tick then
 			return
 		end
 		accumulated = 0
@@ -211,13 +211,13 @@ function PenService.showEgg(player: Player, slotIndex: number, egg: Config.EggTy
 	end
 
 	local spot = randomPointInPen(pen.plot.center)
-	local size = MAP.EGG_BLOCK_SIZE
+	local size = MAP.Blockout.EggSize
 
 	local part = Instance.new("Part")
 	part.Name = `Egg{slotIndex}`
 	part.Shape = Enum.PartType.Ball
 	part.Size = size
-	part.Position = Vector3.new(spot.X, spot.Y + MAP.PEN_PLOT_SIZE.Y / 2 + size.Y / 2, spot.Z)
+	part.Position = Vector3.new(spot.X, spot.Y + MAP.Pen.FloorThickness + size.Y / 2, spot.Z)
 	part.Color = egg.color
 	part.Anchored = true
 	part.CanCollide = false
@@ -260,8 +260,8 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 	pen.mothersFolder:ClearAllChildren()
 
 	local now = os.clock()
-	local size = MAP.MOTHER_BLOCK_SIZE
-	local floorTop = MAP.PEN_PLOT_SIZE.Y / 2
+	local size = MAP.Blockout.MotherSize
+	local floorTop = MAP.Pen.FloorThickness
 
 	for _, mother in mothers do
 		local character = Config.getCharacter(mother.charId)
@@ -307,7 +307,7 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 			startedAt = now,
 			duration = 0.05,
 			-- กระจายเวลาออกเดินครั้งแรก ไม่งั้นแม่ทุกตัวจะขยับพร้อมกันเป๊ะ ดูเป็นหุ่นยนต์
-			waitUntil = now + rng:NextNumber(0, MAP.WANDER_PAUSE_MAX),
+			waitUntil = now + rng:NextNumber(0, MAP.Wander.PauseMax),
 		}
 		pickNextTrip(roamer, roamer.waitUntil)
 		table.insert(roamers, roamer)

@@ -40,7 +40,6 @@ local DIM = Config.MapDimensions
 local COLORS = {
 	grass = Color3.fromRGB(116, 158, 88),
 	grassAlt = Color3.fromRGB(104, 146, 78),
-	walkway = Color3.fromRGB(198, 186, 158),
 	fence = Color3.fromRGB(146, 104, 62),
 	lane = Color3.fromRGB(176, 158, 126),
 	laneWall = Color3.fromRGB(122, 116, 106),
@@ -51,6 +50,7 @@ local COLORS = {
 	stallRoof = Color3.fromRGB(190, 92, 78),
 	marker = Color3.fromRGB(86, 74, 58),
 	spawn = Color3.fromRGB(230, 200, 120),
+	sign = Color3.fromRGB(196, 158, 112),
 }
 
 local FLOOR_THICKNESS = 2
@@ -141,22 +141,123 @@ local built = false
 -- โซน 1 — ลานหญ้า + คอก
 --------------------------------------------------------------------------------
 
--- รั้วไม้เตี้ยรอบแปลง — **แค่บอกขอบเขต ไม่ใช่กำแพงกันทาง**
-local function buildFence(plot: Model, center: Vector3, sizeX: number, sizeZ: number)
+-- ══ รั้วไม้เตี้ยรอบแปลง ══ **แค่บอกขอบเขต ไม่ใช่กำแพงกันทาง**
+--
+-- ⚠️ `CanCollide = false` ทุกชิ้น — ผู้เล่นและแม่เดินทะลุได้
+-- รั้วไม่ได้ทำหน้าที่กันอะไรเลย จึงไม่อยู่ใต้กฎความหนา-ความเร็ว (ดู Config.validate)
+-- **แม่ยังเดินอยู่แค่ในคอกเหมือนเดิม** เพราะขอบเขตสุ่มเดินอ่านจากพิกัดคอก ไม่ได้อ่านจากรั้ว
+--
+-- รูปทรง: เสาเล็ก ๆ ทุก FENCE_POST_SPACING + คานแนวนอน FENCE_RAIL_COUNT ชั้น
+-- (แบบรั้วไม้ฟาร์มปกติ ไม่ใช่แท่งทึบยาวชิ้นเดียว)
+
+local function fencePart(parent: Instance, name: string, size: Vector3, position: Vector3): Part
+	local part = makePart(name, size, position, COLORS.fence, parent)
+	part.Material = Enum.Material.Wood
+	part.CanCollide = false -- ⚠️ ทะลุได้ตั้งใจ
+	part.CastShadow = false
+	return part
+end
+
+-- รั้วหนึ่งช่วง: เสา + คาน ทอดจาก `from` ถึง `to` ตามแกนที่เลือก
+-- alongX = true → ทอดตามแกน X ที่ Z คงที่ · false → ทอดตามแกน Z ที่ X คงที่
+local function fenceRun(
+	parent: Instance,
+	name: string,
+	from: number,
+	to: number,
+	fixed: number,
+	alongX: boolean
+)
+	local length = to - from
+	if length <= 0 then
+		return
+	end
+
 	local h = MAP.FENCE_HEIGHT
 	local t = MAP.FENCE_THICKNESS
 
-	local sides = {
-		{ name = "FenceNorth", size = Vector3.new(sizeX, h, t), offset = Vector3.new(0, 0, sizeZ / 2) },
-		{ name = "FenceSouth", size = Vector3.new(sizeX, h, t), offset = Vector3.new(0, 0, -sizeZ / 2) },
-		{ name = "FenceEast", size = Vector3.new(t, h, sizeZ), offset = Vector3.new(sizeX / 2, 0, 0) },
-		{ name = "FenceWest", size = Vector3.new(t, h, sizeZ), offset = Vector3.new(-sizeX / 2, 0, 0) },
-	}
-	for _, side in sides do
-		local part = makePart(side.name, side.size, center + side.offset, COLORS.fence, plot)
-		part.Material = Enum.Material.WoodPlanks
-		part.CanCollide = true
+	local function place(partName: string, along: number, thick: number, height: number, y: number)
+		local size = if alongX
+			then Vector3.new(along, height, thick)
+			else Vector3.new(thick, height, along)
+		local center = (from + to) / 2
+		local position = if alongX then Vector3.new(center, y, fixed) else Vector3.new(fixed, y, center)
+		fencePart(parent, partName, size, position)
 	end
+
+	-- คานแนวนอน — ไล่ความสูงเท่า ๆ กันจากบนลงล่าง ไม่ติดพื้น
+	local rails = MAP.FENCE_RAIL_COUNT
+	local railHeight = h / (rails * 2 + 1)
+	for rail = 1, rails do
+		local y = h * (rail / (rails + 1)) - railHeight / 2
+		place(`{name}Rail{rail}`, length, t * 0.6, railHeight, y)
+	end
+
+	-- เสา — หัวท้ายเสมอ แล้วแทรกตาม FENCE_POST_SPACING
+	local spans = math.max(1, math.floor(length / MAP.FENCE_POST_SPACING))
+	for post = 0, spans do
+		local offset = from + length * (post / spans)
+		local size = Vector3.new(t, h, t)
+		local position = if alongX then Vector3.new(offset, 0, fixed) else Vector3.new(fixed, 0, offset)
+		fencePart(parent, `{name}Post{post}`, size, position)
+	end
+end
+
+-- รั้วครบสี่ด้านของแปลง · ด้านที่หันเข้าทางเดินกลางเว้นช่องประตูไว้ตรงกลาง
+-- ⚠️ คืนค่า Z ของแนวประตู ให้ผู้เรียกเอาไปวางป้ายข้างประตู
+local function buildFence(plot: Model, center: Vector3, sizeX: number, sizeZ: number): number
+	local halfX, halfZ = sizeX / 2, sizeZ / 2
+	local left, right = center.X - halfX, center.X + halfX
+	local back, front = center.Z - halfZ, center.Z + halfZ
+
+	-- ประตูหันเข้าทางเดินกลาง: แถวบน (Z > 0) หันลง · แถวล่าง (Z < 0) หันขึ้น
+	local gateZ = if center.Z > 0 then back else front
+	local farZ = if center.Z > 0 then front else back
+
+	-- ด้านตรงข้ามประตู + สองด้านข้าง = รั้วเต็มไม่มีช่อง
+	fenceRun(plot, "FenceFar", left, right, farZ, true)
+	fenceRun(plot, "FenceLeft", back, front, left, false)
+	fenceRun(plot, "FenceRight", back, front, right, false)
+
+	-- ด้านประตู: แบ่งเป็นสองช่วง เว้นช่องกลางกว้าง PEN_GATE_WIDTH
+	local gateHalf = MAP.PEN_GATE_WIDTH / 2
+	fenceRun(plot, "FenceGateA", left, center.X - gateHalf, gateZ, true)
+	fenceRun(plot, "FenceGateB", center.X + gateHalf, right, gateZ, true)
+
+	return gateZ
+end
+
+-- ป้ายชื่อคอก — **ปักข้างประตู ไม่ใช่กลางประตู** (กันเดินชน)
+-- ปักบนหญ้าด้านนอกคอก ใกล้ประตู · ยกสูงให้อ่านได้จากมุมกล้องผู้เล่นทั่วไป
+local function buildPenSign(plot: Model, center: Vector3, gateZ: number, index: number): TextLabel
+	-- ออกไปทางทางเดินกลาง (ตรงข้ามกับกึ่งกลางคอก)
+	local outward = if center.Z > 0 then -1 else 1
+	local signZ = gateZ + outward * MAP.PEN_SIGN_SIZE.Z * 2
+
+	-- ขยับไปข้างประตู ไม่ขวางทางเข้า
+	local signX = center.X + MAP.PEN_GATE_WIDTH / 2 + MAP.PEN_SIGN_GATE_CLEARANCE + MAP.PEN_SIGN_SIZE.X / 2
+
+	local postHeight = MAP.PEN_SIGN_POST_HEIGHT
+	local post = fencePart(
+		plot,
+		`Sign{index}Post`,
+		Vector3.new(MAP.FENCE_THICKNESS * 1.5, postHeight, MAP.FENCE_THICKNESS * 1.5),
+		Vector3.new(signX, 0, signZ)
+	)
+	post.Material = Enum.Material.Wood
+
+	local board = makePart(
+		`Sign{index}Board`,
+		MAP.PEN_SIGN_SIZE,
+		Vector3.new(signX, postHeight, signZ),
+		COLORS.sign,
+		plot
+	)
+	board.Material = Enum.Material.WoodPlanks
+	board.CanCollide = false
+	board.CastShadow = false
+
+	return makeLabel(`คอก {index}`, 220, board, MAP.PEN_SIGN_SIZE.Y)
 end
 
 function MapBuilder.buildPlaza(parent: Folder)
@@ -170,14 +271,17 @@ function MapBuilder.buildPlaza(parent: Folder)
 	local halfDepth = Config.getPlazaHalfDepth()
 	makeFloor("GrassFloor", maxX - minX, halfDepth * 2, (minX + maxX) / 2, 0, COLORS.grass, plaza)
 
-	-- ทางเดินกลาง — แค่แถบสีบนหญ้า บอกทางจากร้านไปต้นเลน
+	-- ทางเดินกลาง — **เป็นหญ้าเหมือนพื้นรอบข้าง ไม่มีเส้นแบ่งให้เห็น**
+	-- เดิมเป็นแถบพื้นเทาซึ่งอ่านเป็น "ถนน" ทั้งที่มันคือลานหญ้าผืนเดียวกัน
+	-- ตัวแถบยังอยู่เพื่อใช้วางแนวคอก 2 แถวเหมือนเดิม แค่กลืนไปกับพื้น
 	local walk = makePart(
 		"Walkway",
 		Vector3.new(maxX - minX, 0.2, MAP.WALKWAY_WIDTH),
 		Vector3.new((minX + maxX) / 2, 0, 0),
-		COLORS.walkway,
+		COLORS.grass,
 		plaza
 	)
+	walk.Material = Enum.Material.Grass
 	walk.CanCollide = false
 
 	-- ══ คอก 6 แปลง ══ พื้นในคอกเป็นหญ้าทั้งหมด **ไม่มีแปลงหรือช่องตาราง**
@@ -202,9 +306,8 @@ function MapBuilder.buildPlaza(parent: Folder)
 		base.CanCollide = false
 		model.PrimaryPart = base
 
-		buildFence(model, center, sizeX, sizeZ)
-
-		local label = makeLabel(`คอก {index}`, 200, base, MAP.FENCE_HEIGHT + 5)
+		local gateZ = buildFence(model, center, sizeX, sizeZ)
+		local label = buildPenSign(model, center, gateZ, index)
 
 		penPlots[index] = { index = index, model = model, base = base, center = center, label = label }
 	end

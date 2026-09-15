@@ -811,28 +811,28 @@ return function(t, Config)
 	-- ผังแมพ (blockout)
 	--------------------------------------------------------------------------
 	print("── ผังแมพ: โซนต้องไม่ทับกันและเรียงถูกลำดับ ──")
-	local map = Config.Map
+	local map = Config.MapDimensions
 
-	-- luau CLI ไม่มี Vector3 (เหมือน Config ที่ fallback เป็น table ธรรมดา)
+	-- luau CLI ไม่มี Vector2/Vector3 (เหมือน Config ที่ fallback เป็น table ธรรมดา)
 	-- validate() อ่านแค่ .X/.Y/.Z จึงใช้ table แทนได้ตรง ๆ ตอนยิงค่าพัง ๆ ใส่ยาม
-	local function vec3(x: number, y: number, z: number): any
-		return { X = x, Y = y, Z = z }
+	local function vec2(x: number, y: number): any
+		return { X = x, Y = y }
 	end
 
 	-- ผังคอกต้องพอดีจำนวนผู้เล่นเป๊ะ ไม่ขาดไม่เกิน
-	check("คอก = แถว × ต่อแถว", map.PEN_ROWS * map.PEN_PER_ROW, Config.World.MAX_PENS)
+	check("คอก = แถว × ต่อแถว", map.Pen.Rows * map.Pen.PerRow, Config.World.MAX_PENS)
 	check("คอก = จำนวนผู้เล่นต่อเซิร์ฟ", Config.World.MAX_PENS, Config.BalanceCheck.PLAYERS_PER_SERVER)
 	check("ผู้เล่นต่อเซิร์ฟ = 6", Config.BalanceCheck.PLAYERS_PER_SERVER, 6)
 
 	-- เรียงจากซ้ายไปขวา: แผงร้านค้า → ลานคอก → เลนรบ
-	local shopRight = Config.getShopCenter().X + map.SHOP_STALL_SIZE.X / 2
+	local shopRight = Config.getShopCenter().X + map.Shop.StallSize.X / 2
 	check("แผงร้านค้าอยู่ซ้ายลานคอก", shopRight < Config.getPenYardLeftX(), true)
 	check("เลนรบอยู่ขวาลานคอก", Config.getLaneStartX() >= Config.getPenYardRightX(), true)
-	check("แผงร้านมีมากกว่าหนึ่งแผง", map.SHOP_STALL_COUNT >= 2, true)
+	check("แผงร้านมีมากกว่าหนึ่งแผง", map.Shop.StallCount >= 2, true)
 	local stallGap = true
-	for i = 1, map.SHOP_STALL_COUNT do
+	for i = 1, map.Shop.StallCount do
 		-- แผงต้องขนาบทางเดิน ไม่ใช่ตั้งขวางตรงกลาง
-		if math.abs(Config.getShopStallCenter(i).Z) < map.WALKWAY_WIDTH / 2 then
+		if math.abs(Config.getShopStallCenter(i).Z) < map.Pen.RowGap / 2 then
 			stallGap = false
 		end
 	end
@@ -845,8 +845,8 @@ return function(t, Config)
 		rowsSeen[ca.Z] = true
 		for b = a + 1, Config.World.MAX_PENS do
 			local cb = Config.getPenPlotCenter(b)
-			if math.abs(ca.X - cb.X) < map.PEN_PLOT_SIZE.X - 1e-6
-				and math.abs(ca.Z - cb.Z) < map.PEN_PLOT_SIZE.Z - 1e-6 then
+			if math.abs(ca.X - cb.X) < map.Pen.Size.X - 1e-6
+				and math.abs(ca.Z - cb.Z) < map.Pen.Size.Y - 1e-6 then
 				overlap = true
 			end
 		end
@@ -854,7 +854,7 @@ return function(t, Config)
 	check("ไม่มีคอกทับกัน", overlap, false)
 	local rowCount = 0
 	for _ in rowsSeen do rowCount += 1 end
-	check("คอกกระจายครบทุกแถว", rowCount, map.PEN_ROWS)
+	check("คอกกระจายครบทุกแถว", rowCount, map.Pen.Rows)
 
 	-- ══ เลนรบกับกำแพง ══
 	check("ด่าน 1 ไม่มีกำแพง", Config.getWallX(1), nil)
@@ -875,18 +875,18 @@ return function(t, Config)
 	check("ด่าน 2 ขึ้นไปมีกำแพงครบ", wallsOk, true)
 	check("กำแพงเรียงไปทางขวาเรื่อย ๆ", wallsAscending, true)
 	check("เลนยาว = ยาวต่อด่าน × จำนวนด่าน",
-		Config.getLaneLength(), map.LANE_LENGTH_PER_STAGE * Config.Stage.COUNT)
+		Config.getLaneLength(), map.Lane.LengthPerStage * Config.Stage.COUNT)
 
 	-- ══ รังบอส ══ ต้องอยู่ในช่วงของด่านตัวเอง และหลังกำแพงเสมอ
 	local nestInRange, nestBehindWall = true, true
 	for st = 1, Config.Stage.COUNT do
 		local center = Config.getBossNestCenter(st)
 		local startX = Config.getStageStartX(st)
-		if center.X <= startX or center.X >= startX + map.LANE_LENGTH_PER_STAGE then
+		if center.X <= startX or center.X >= startX + map.Lane.LengthPerStage then
 			nestInRange = false
 		end
 		local wallX = Config.getWallX(st)
-		if wallX and center.X - map.NEST_SIZE.X / 2 <= wallX + map.WALL_THICKNESS / 2 then
+		if wallX and center.X - map.BossRoom.Size.X / 2 <= wallX + map.StageWall.Thickness / 2 then
 			nestBehindWall = false
 		end
 	end
@@ -900,8 +900,8 @@ return function(t, Config)
 		local center = Config.getBossNestCenter(st)
 		for i = 1, Config.Boss.EGGS_PER_SPAWN do
 			local spot = Config.getBossEggSpot(st, i)
-			if math.abs(spot.X - center.X) > map.NEST_SIZE.X / 2
-				or math.abs(spot.Z - center.Z) > map.NEST_SIZE.Z / 2 then
+			if math.abs(spot.X - center.X) > map.BossRoom.Size.X / 2
+				or math.abs(spot.Z - center.Z) > map.BossRoom.Size.Y / 2 then
 				spotsInside = false
 			end
 		end
@@ -911,7 +911,7 @@ return function(t, Config)
 	-- ══ พื้นที่ที่แม่เดินได้ต้องเป็นบวก ══
 	-- ติดลบเมื่อไหร่ = สุ่มจุดหมายไม่ได้ แม่จะยืนนิ่งทั้งคอก
 	check("ขอบกันชนเล็กกว่าครึ่งด้านสั้นสุดของคอก",
-		map.PEN_EDGE_MARGIN < math.min(map.PEN_PLOT_SIZE.X, map.PEN_PLOT_SIZE.Z) / 2, true)
+		map.Pen.EdgeMargin < math.min(map.Pen.Size.X, map.Pen.Size.Y) / 2, true)
 	check("ผู้เล่นใหม่เริ่มที่ด่าน 1", Config.NewPlayer.wallProgress, 1)
 	check("ผู้เล่นใหม่ซื้อ upgrade damage ได้ทันที",
 		Config.getMaxDamageLevel(Config.NewPlayer.wallProgress) > 0, true)
@@ -921,11 +921,11 @@ return function(t, Config)
 	-- ⚠️ เก็บค่าเดิมไว้คืน **อย่า hardcode ค่าคืน** — เคยพลาดมาแล้ว:
 	-- คืนเป็นเลขที่พิมพ์ไว้ตอนเขียนเทสต์ พอปรับ Config รอบถัดไป เทสต์จะคืนค่าผิด
 	-- แล้วเคสที่รันต่อจากนั้นทั้งหมดวัดกับแมพคนละใบโดยไม่มีใครรู้
-	local savedEdgeMargin = map.PEN_EDGE_MARGIN
-	local savedWalkway = map.WALKWAY_WIDTH
-	local savedLaneWidth = map.LANE_WIDTH
-	local savedPauseMax = map.WANDER_PAUSE_MAX
-	local savedWanderSpeed = map.WANDER_SPEED
+	local savedEdgeMargin = map.Pen.EdgeMargin
+	local savedWalkway = map.Pen.RowGap
+	local savedLaneWidth = map.Lane.Width
+	local savedPauseMax = map.Wander.PauseMax
+	local savedWanderSpeed = map.Wander.Speed
 	local function mapGuardCatches(mutate, restore): boolean
 		mutate()
 		local ok = (pcall(Config.validate))
@@ -933,38 +933,38 @@ return function(t, Config)
 		return not ok
 	end
 	check("ผังคอกไม่ตรงจำนวนผู้เล่น → ล้ม", mapGuardCatches(
-		function() map.PEN_PER_ROW += 1 end, function() map.PEN_PER_ROW -= 1 end), true)
+		function() map.Pen.PerRow += 1 end, function() map.Pen.PerRow -= 1 end), true)
 	check("ขอบกันชนกว้างเกินคอก → ล้ม", mapGuardCatches(
-		function() map.PEN_EDGE_MARGIN = map.PEN_PLOT_SIZE.Z end,
-		function() map.PEN_EDGE_MARGIN = savedEdgeMargin end), true)
+		function() map.Pen.EdgeMargin = map.Pen.Size.Y end,
+		function() map.Pen.EdgeMargin = savedEdgeMargin end), true)
 	-- ⚠️ รังบอสไม่มีค่า "ระยะถอย" ให้ตั้งมืออีกแล้ว (NEST_INSET ถูกลบ)
 	-- ตอนนี้คำนวณจากขนาดห้องเอง → ดันห้องให้ใหญ่เกินช่วงด่าน แล้วยามต้องจับได้
-	local savedNest = map.NEST_SIZE
+	local savedNest = map.BossRoom.Size
 	check("ห้องบอสใหญ่เกินช่วงด่าน → ล้ม", mapGuardCatches(
-		function() map.NEST_SIZE = vec3(map.LANE_LENGTH_PER_STAGE * 3, 1, savedNest.Z) end,
-		function() map.NEST_SIZE = savedNest end), true)
+		function() map.BossRoom.Size = vec2(map.Lane.LengthPerStage * 3, savedNest.Y) end,
+		function() map.BossRoom.Size = savedNest end), true)
 	check("ห้องบอสกว้างเกินเลนหลายเท่า → ล้ม", mapGuardCatches(
-		function() map.NEST_SIZE = vec3(savedNest.X, 1, map.LANE_WIDTH * 4) end,
-		function() map.NEST_SIZE = savedNest end), true)
+		function() map.BossRoom.Size = vec2(savedNest.X, map.Lane.Width * 4) end,
+		function() map.BossRoom.Size = savedNest end), true)
 	check("ทางเดินกลางแคบจนเดินไม่ผ่าน → ล้ม", mapGuardCatches(
-		function() map.WALKWAY_WIDTH = 2 end, function() map.WALKWAY_WIDTH = savedWalkway end), true)
+		function() map.Pen.RowGap = 2 end, function() map.Pen.RowGap = savedWalkway end), true)
 	check("เลนรบแคบจนเดินไม่ผ่าน → ล้ม", mapGuardCatches(
-		function() map.LANE_WIDTH = 2 end, function() map.LANE_WIDTH = savedLaneWidth end), true)
+		function() map.Lane.Width = 2 end, function() map.Lane.Width = savedLaneWidth end), true)
 	check("เวลาพักของแม่กลับหัว → ล้ม", mapGuardCatches(
-		function() map.WANDER_PAUSE_MAX = 0 end,
-		function() map.WANDER_PAUSE_MAX = savedPauseMax end), true)
+		function() map.Wander.PauseMax = 0 end,
+		function() map.Wander.PauseMax = savedPauseMax end), true)
 	check("ความเร็วเดินเป็น 0 → ล้ม", mapGuardCatches(
-		function() map.WANDER_SPEED = 0 end,
-		function() map.WANDER_SPEED = savedWanderSpeed end), true)
+		function() map.Wander.Speed = 0 end,
+		function() map.Wander.Speed = savedWanderSpeed end), true)
 	check("คืนค่าแมพเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
 
 	--------------------------------------------------------------------------
 	-- MapDimensions — แหล่งความจริงแหล่งเดียวของรูปทรงแมพ
 	--------------------------------------------------------------------------
-	-- ⚠️ เหตุผลที่บล็อกนี้มี: Config.Map เป็น **alias ที่คำนวณมาจาก MapDimensions**
-	-- ถ้ามีคนเผลอไปแก้ตัวเลขที่ Config.Map ตรง ๆ ทั้งสองฝั่งจะไม่ตรงกันเงียบ ๆ
-	-- แล้ว MapBuilder กับตัวประเมินขนาดแมพจะพูดกันคนละเรื่อง
-	print("── MapDimensions: ต้นทางต้องตรงกับ alias ทุกตัว ──")
+	-- ⚠️ เคยมีตารางที่สอง `Config.Map` เป็น alias ของตารางนี้ พร้อมเทสต์คอยตรวจว่า
+	-- สองฝั่งตรงกัน · **ยุบ alias ทิ้งแล้ว** เทสต์ชุดนั้นจึงหายไปด้วย
+	-- เหลือแค่คุมค่าจริงว่าตรงกับที่ตกลงกันไว้
+	print("── MapDimensions: ค่าต้องตรงกับที่ตกลงไว้ ──")
 	local dim = Config.MapDimensions
 
 	check("ความเร็ววิ่ง = 32 (×2 จากค่าปกติของ Roblox)", dim.Player.WalkSpeed, 32)
@@ -980,36 +980,41 @@ return function(t, Config)
 	-- ⚠️ ข้อนี้คือเหตุผลที่แมพเป็นแท่นลอยแล้วยังเล่นได้
 	-- กำแพงใสเตี้ยกว่ากระโดด = กระโดดข้ามแล้วตกแท่น ซึ่งเป็นสิ่งเดียวที่มันมีไว้กัน
 	check("กำแพงใสสูงกว่าความสูงกระโดด", dim.Boundary.Height > dim.Player.JumpHeight, true)
+
+	-- ⚠️ ความสูงกระโดดต้องเป็น **ค่าที่ Roblox ใช้จริง** ไม่ใช่ตัวเลขที่เดาไว้
+	-- เดิมเขียน 7 โดยที่โปรเจกต์ยังอยู่โหมด JumpPower → ของจริง 6.37 และ 7 ไม่มีใครใช้
+	-- ตอนนี้ default.project.json ตั้ง CharacterUseJumpPower = false
+	-- + CharacterJumpHeight = 7.2 ให้ตรงกับค่านี้ (Main.server.lua เช็คซ้ำตอนบูต)
+	check("ความสูงกระโดด = 7.2 (ค่า JumpHeight จริงของ Roblox)", dim.Player.JumpHeight, 7.2)
 	check("กำแพงใสเผื่อจากขอบพื้น", dim.Boundary.Margin > 0, true)
 
-	-- alias ต้องตรงกับต้นทาง ไม่งั้นแก้ที่เดียวแล้วอีกฝั่งค้าง
-	check("PEN_PLOT_SIZE = Pen.Size",
-		map.PEN_PLOT_SIZE.X == dim.Pen.Size.X and map.PEN_PLOT_SIZE.Z == dim.Pen.Size.Y, true)
-	check("WALKWAY_WIDTH = Pen.RowGap", map.WALKWAY_WIDTH, dim.Pen.RowGap)
-	check("PEN_PLOT_GAP = Pen.ColumnGap", map.PEN_PLOT_GAP, dim.Pen.ColumnGap)
-	check("FENCE_HEIGHT = Pen.FenceHeight", map.FENCE_HEIGHT, dim.Pen.FenceHeight)
-	check("LANE_WIDTH = Lane.Width", map.LANE_WIDTH, dim.Lane.Width)
-	check("LANE_LENGTH_PER_STAGE = Lane.LengthPerStage", map.LANE_LENGTH_PER_STAGE, dim.Lane.LengthPerStage)
-	check("LANE_WALL_HEIGHT = Lane.WallHeight", map.LANE_WALL_HEIGHT, dim.Lane.WallHeight)
-	check("NEST_SIZE = BossRoom.Size",
-		map.NEST_SIZE.X == dim.BossRoom.Size.X and map.NEST_SIZE.Z == dim.BossRoom.Size.Y, true)
-	check("SHOP_STALL_SIZE = Shop.StallSize",
-		map.SHOP_STALL_SIZE.X == dim.Shop.StallSize.X and map.SHOP_STALL_SIZE.Z == dim.Shop.StallSize.Y, true)
-	check("SHOP_STALL_COUNT = Shop.StallCount", map.SHOP_STALL_COUNT, dim.Shop.StallCount)
-	check("BOUNDARY_HEIGHT = Boundary.Height", map.BOUNDARY_HEIGHT, dim.Boundary.Height)
-	check("BOUNDARY_MARGIN = Boundary.Margin", map.BOUNDARY_MARGIN, dim.Boundary.Margin)
-	check("WALK_SPEED_REFERENCE = Player.WalkSpeed", map.WALK_SPEED_REFERENCE, dim.Player.WalkSpeed)
+	-- ค่าที่เพิ่งย้ายเข้ามาตอนยุบ alias — คุมไว้ว่าย้ายมาครบและค่าไม่เพี้ยน
+	check("ผังคอก 2 x 3", `{dim.Pen.Rows}x{dim.Pen.PerRow}`, "2x3")
+	check("ขอบกันชนคอก = 4", dim.Pen.EdgeMargin, 4)
+	check("กำแพงกั้นด่านหนา 5", dim.StageWall.Thickness, 5)
+	check("กำแพงข้างเลนหนา 5", dim.Lane.WallThickness, 5)
+	check("กำแพงใสหนา 5", dim.Boundary.Thickness, 5)
+	check("ระยะจากลานถึงแผงร้าน = 20", dim.Shop.Gap, 20)
+	check("แม่เดิน 4 stud/วิ", dim.Wander.Speed, 4)
+
+	-- ⚠️ ความหนาพื้นคอกเป็นค่าเดียวที่ MapBuilder (สร้างแผ่น) กับ PenService (วางของบนแผ่น)
+	-- ต้องอ่านตรงกัน · เคยแยกกันแล้วของลอยเหนือพื้น 0.2 studs
+	check("ความหนาพื้นคอกเป็นบวกและบางกว่ารั้ว",
+		dim.Pen.FloorThickness > 0 and dim.Pen.FloorThickness < dim.Pen.FenceHeight, true)
+
+	-- ⚠️ **ไม่มี Config.Map แล้ว** — มีชื่อเดียวคือ MapDimensions
+	check("Config.Map ถูกยุบทิ้งแล้ว", (Config :: any).Map, nil)
 
 	-- ⚠️ ความเร็วเดินของแม่เป็น **stud ต่อวินาที** ไม่ใช่ "วินาทีต่อระยะ"
 	-- ของเดิมเป็นเวลาต่อระยะ พอขยายคอกจาก 24 → 80 stud แม่จะเดินช้าเหมือนคลาน
 	-- เทสต์นี้คุมไว้ว่าเวลาเดินต้องแปรตามระยะจริง ไม่ใช่ค่าคงที่
-	local roamSide = map.PEN_PLOT_SIZE.X - map.PEN_EDGE_MARGIN * 2
-	local roamSideZ = map.PEN_PLOT_SIZE.Z - map.PEN_EDGE_MARGIN * 2
+	local roamSide = map.Pen.Size.X - map.Pen.EdgeMargin * 2
+	local roamSideZ = map.Pen.Size.Y - map.Pen.EdgeMargin * 2
 	check("พื้นที่ที่แม่เดินได้เป็นบวก", roamSide > 0 and roamSideZ > 0, true)
 	local diagonal = math.sqrt(roamSide ^ 2 + roamSideZ ^ 2)
-	local cornerSecs = diagonal / map.WANDER_SPEED
+	local cornerSecs = diagonal / map.Wander.Speed
 	t.near("แม่เดินมุมถึงมุมของคอก (วินาที)", cornerSecs, 25.5, 0.5)
-	check("แม่เดินช้ากว่าผู้เล่นวิ่งเสมอ", map.WANDER_SPEED < dim.Player.WalkSpeed, true)
+	check("แม่เดินช้ากว่าผู้เล่นวิ่งเสมอ", map.Wander.Speed < dim.Player.WalkSpeed, true)
 
 	-- ══ ขนาดแมพที่ประกอบออกมาได้ ══ ตัวเลขชุดที่ใช้ตัดสินว่า "ใหญ่ไปไหม"
 	print("── ขนาดแมพที่ประกอบได้ ──")
@@ -1034,19 +1039,19 @@ return function(t, Config)
 	check("รั้วบาง", dim.Pen.FenceThickness, 1)
 	check("รั้วเตี้ยกว่ากำแพงข้างเลนมาก", dim.Pen.FenceHeight * 5 < dim.Lane.WallHeight, true)
 	check("ประตูกว้าง 8", dim.Pen.GateWidth, 8)
-	check("ประตูแคบกว่าตัวคอก", map.PEN_GATE_WIDTH < map.PEN_PLOT_SIZE.X, true)
-	check("ประตูกว้างพอเดินเข้าได้", map.PEN_GATE_WIDTH >= 6, true)
+	check("ประตูแคบกว่าตัวคอก", map.Pen.GateWidth < map.Pen.Size.X, true)
+	check("ประตูกว้างพอเดินเข้าได้", map.Pen.GateWidth >= 6, true)
 
 	-- ⚠️ ทางเดินกลางต้องไม่แคบกว่าเลนรบ ไม่งั้นปากทางเข้าเลนเป็นคอขวด
-	check("ทางเดินกลางกว้างไม่น้อยกว่าเลนรบ", map.WALKWAY_WIDTH >= map.LANE_WIDTH, true)
-	check("ทางเดินกลาง = 90", map.WALKWAY_WIDTH, 90)
-	check("ช่องระหว่างคอก = 20", map.PEN_PLOT_GAP, 20)
+	check("ทางเดินกลางกว้างไม่น้อยกว่าเลนรบ", map.Pen.RowGap >= map.Lane.Width, true)
+	check("ทางเดินกลาง = 90", map.Pen.RowGap, 90)
+	check("ช่องระหว่างคอก = 20", map.Pen.ColumnGap, 20)
 
 	-- คอกต้องอยู่พ้นแนวเลนรบตามแกน Z (รั้วจะได้ไม่ไปบังปากทางเข้าเลน)
 	local pensClearOfLane = true
 	for penIdx = 1, Config.World.MAX_PENS do
 		local c = Config.getPenPlotCenter(penIdx)
-		if math.abs(c.Z) - map.PEN_PLOT_SIZE.Z / 2 < map.LANE_WIDTH / 2 then
+		if math.abs(c.Z) - map.Pen.Size.Y / 2 < map.Lane.Width / 2 then
 			pensClearOfLane = false
 		end
 	end
@@ -1058,40 +1063,40 @@ return function(t, Config)
 	-- ⚠️ เคยพลาดจริง: ดัน Boundary.Margin 20 → 50 แล้วกำแพงกินเข้าไปในคอก 30 studs
 	-- และตัดแผงร้านออกไปอยู่นอกกำแพง เพราะพื้นลานไม่ได้โตตาม margin
 	print("── กำแพงใสต้องไม่กินพื้นที่เล่น ──")
-	local wallHalfZ = Config.getPlazaHalfDepth() - map.BOUNDARY_MARGIN
-	local wallMinX = Config.getPlazaMinX() + map.BOUNDARY_MARGIN
+	local wallHalfZ = Config.getPlazaHalfDepth() - map.Boundary.Margin
+	local wallMinX = Config.getPlazaMinX() + map.Boundary.Margin
 	local pensInside, stallsInside = true, true
 	for penIdx = 1, Config.World.MAX_PENS do
 		local c = Config.getPenPlotCenter(penIdx)
-		if math.abs(c.Z) + map.PEN_PLOT_SIZE.Z / 2 > wallHalfZ
-			or c.X - map.PEN_PLOT_SIZE.X / 2 < wallMinX then
+		if math.abs(c.Z) + map.Pen.Size.Y / 2 > wallHalfZ
+			or c.X - map.Pen.Size.X / 2 < wallMinX then
 			pensInside = false
 		end
 	end
-	for stallIdx = 1, map.SHOP_STALL_COUNT do
+	for stallIdx = 1, map.Shop.StallCount do
 		local stall = Config.getShopStallCenter(stallIdx)
-		if stall.X - map.SHOP_STALL_SIZE.X / 2 < wallMinX
-			or math.abs(stall.Z) + map.SHOP_STALL_SIZE.Z / 2 > wallHalfZ then
+		if stall.X - map.Shop.StallSize.X / 2 < wallMinX
+			or math.abs(stall.Z) + map.Shop.StallSize.Y / 2 > wallHalfZ then
 			stallsInside = false
 		end
 	end
 	check("ทุกคอกอยู่ในกำแพงใส", pensInside, true)
 	check("แผงร้านทุกแผงอยู่ในกำแพงใส", stallsInside, true)
-	check("มีหญ้านอกกำแพงให้เห็น", map.BOUNDARY_MARGIN > 0, true)
+	check("มีหญ้านอกกำแพงให้เห็น", map.Boundary.Margin > 0, true)
 
 	-- ══ ยามต้องจับได้จริง ══
-	local savedMargin = map.BOUNDARY_MARGIN
-	local savedGate = map.PEN_GATE_WIDTH
-	local savedRowGap = map.WALKWAY_WIDTH
+	local savedMargin = map.Boundary.Margin
+	local savedGate = map.Pen.GateWidth
+	local savedRowGap = map.Pen.RowGap
 	check("ประตูกว้างเกินคอก → ล้ม", mapGuardCatches(
-		function() map.PEN_GATE_WIDTH = map.PEN_PLOT_SIZE.X + 1 end,
-		function() map.PEN_GATE_WIDTH = savedGate end), true)
+		function() map.Pen.GateWidth = map.Pen.Size.X + 1 end,
+		function() map.Pen.GateWidth = savedGate end), true)
 	check("ประตูแคบจนเดินไม่เข้า → ล้ม", mapGuardCatches(
-		function() map.PEN_GATE_WIDTH = 1 end,
-		function() map.PEN_GATE_WIDTH = savedGate end), true)
+		function() map.Pen.GateWidth = 1 end,
+		function() map.Pen.GateWidth = savedGate end), true)
 	check("ทางเดินกลางแคบกว่าเลนรบ → ล้ม", mapGuardCatches(
-		function() map.WALKWAY_WIDTH = map.LANE_WIDTH - 1 end,
-		function() map.WALKWAY_WIDTH = savedRowGap end), true)
+		function() map.Pen.RowGap = map.Lane.Width - 1 end,
+		function() map.Pen.RowGap = savedRowGap end), true)
 	-- ⚠️ ยามตัวนี้คือตัวที่จับบั๊กจริงของรอบนี้ได้
 	--
 	-- **ดัน BOUNDARY_MARGIN ขึ้นเฉย ๆ ไม่ทำให้พังอีกแล้ว** เพราะพื้นลานโตตาม margin
@@ -1105,18 +1110,18 @@ return function(t, Config)
 	local realMinX = Config.getPlazaMinX
 	check("ถอยสูตรพื้นลานกลับเป็นแบบเก่า → ล้ม", mapGuardCatches(function()
 		Config.getPlazaHalfDepth = function()
-			return realHalfDepth() - map.BOUNDARY_MARGIN
+			return realHalfDepth() - map.Boundary.Margin
 		end
 		Config.getPlazaMinX = function()
-			return realMinX() + map.BOUNDARY_MARGIN
+			return realMinX() + map.Boundary.Margin
 		end
 	end, function()
 		Config.getPlazaHalfDepth = realHalfDepth
 		Config.getPlazaMinX = realMinX
 	end), true)
 	check("ดัน margin ขึ้นเฉย ๆ ไม่พังแล้ว (พื้นโตตาม)", mapGuardCatches(
-		function() map.BOUNDARY_MARGIN = savedMargin * 3 end,
-		function() map.BOUNDARY_MARGIN = savedMargin end), false)
+		function() map.Boundary.Margin = savedMargin * 3 end,
+		function() map.Boundary.Margin = savedMargin end), false)
 	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
 
 	--------------------------------------------------------------------------
@@ -1192,20 +1197,20 @@ return function(t, Config)
 		Config.getMaxWalkSpeed() <= spd.SPEED_CEILING, true)
 
 	local minThick = Config.getMinWallThickness()
-	check("กำแพงกั้นด่านหนาพอ", map.WALL_THICKNESS >= minThick, true)
-	check("กำแพงข้างเลนหนาพอ", map.LANE_WALL_THICKNESS >= minThick, true)
-	check("กำแพงใสขอบแมพหนาพอ", map.BOUNDARY_THICKNESS >= minThick, true)
+	check("กำแพงกั้นด่านหนาพอ", map.StageWall.Thickness >= minThick, true)
+	check("กำแพงข้างเลนหนาพอ", map.Lane.WallThickness >= minThick, true)
+	check("กำแพงใสขอบแมพหนาพอ", map.Boundary.Thickness >= minThick, true)
 	-- ⚠️ **รั้วคอกจงใจบางกว่าเกณฑ์** เพราะ CanCollide = false
 	-- กฎความหนามีไว้กับกำแพงที่ต้อง "หยุด" ผู้เล่นเท่านั้น
 	-- เคยเอารั้วเข้ากฎนี้แล้วต้องดันหนาเป็น 5 จนกลายเป็นกำแพงเตี้ยแทนที่จะเป็นรั้ว
-	check("รั้วคอกบางกว่าเกณฑ์ได้ เพราะไม่ได้ทำหน้าที่กัน", map.FENCE_THICKNESS < minThick, true)
+	check("รั้วคอกบางกว่าเกณฑ์ได้ เพราะไม่ได้ทำหน้าที่กัน", map.Pen.FenceThickness < minThick, true)
 	check("รั้วยื่นเข้าคอกไม่เกินขอบกันชน",
-		map.PEN_EDGE_MARGIN >= map.FENCE_THICKNESS / 2, true)
+		map.Pen.EdgeMargin >= map.Pen.FenceThickness / 2, true)
 
 	-- ══ ยามต้องจับได้จริง ══
 	print("── ยามความเร็ว/ความหนา ต้องจับค่าที่พังได้จริง ──")
 	local savedMaxMult = spd.MAX_MULTIPLIER
-	local savedBoundary = map.BOUNDARY_THICKNESS
+	local savedBoundary = map.Boundary.Thickness
 	local savedCurve = spd.CURVE_EXPONENT
 
 	-- ดันความเร็วจนเกินเพดาน Roblox → ต้องล้ม
@@ -1215,8 +1220,8 @@ return function(t, Config)
 
 	-- กำแพงบางกว่าระยะต่อเฟรม → ต้องล้ม
 	check("กำแพงใสบางเกินไป → ล้ม", mapGuardCatches(
-		function() map.BOUNDARY_THICKNESS = 1 end,
-		function() map.BOUNDARY_THICKNESS = savedBoundary end), true)
+		function() map.Boundary.Thickness = 1 end,
+		function() map.Boundary.Thickness = savedBoundary end), true)
 
 	-- ⚠️ ข้อที่สำคัญที่สุด: **ขึ้นความเร็วแล้วลืมเพิ่มความหนา ต้องไม่บูต**
 	-- ยามนี้คือเหตุผลที่ความหนาผูกกับสูตร ไม่ใช่เลขตายตัว

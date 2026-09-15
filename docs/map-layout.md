@@ -21,16 +21,18 @@
 ### ⚠️ `MapDimensions` คือแหล่งความจริงแหล่งเดียวของรูปทรง
 
 ```
-Config.MapDimensions   ← ตั้งค่าที่นี่ที่เดียว (ขนาดคอก · เลน · ห้องบอส · แผงร้าน · ขอบแมพ)
+Config.MapDimensions   ← ตั้งค่าที่นี่ที่เดียว
         │
-        ├──► Config.Map          ← alias ที่คำนวณมา **ห้ามแก้ตัวเลขตรงนี้**
-        │        └──► MapBuilder · PenService · WallRenderer · tools/dump-map.luau
+        ├──► MapBuilder · PenService · WallRenderer · tools/dump-map.luau
         └──► Config.get*()       ← ฟังก์ชันหาพิกัด
 ```
 
-`Config.Map` ยังอยู่เพราะโค้ดเดิม (โดยเฉพาะ `PenService`) อ่านชื่อพวกนั้นอยู่
-แต่ค่าที่ซ้ำกับ `MapDimensions` **เป็น alias ล้วน ๆ** และ `validate()` assert ว่าตรงกันเสมอ
-มีคนเผลอไปแก้ที่ `Config.Map` เมื่อไหร่ → เซิร์ฟไม่บูต
+⚠️ **เคยมีตารางที่สองชื่อ `Config.Map` เป็น alias ของตารางนี้ — ยุบทิ้งแล้ว**
+สร้างไว้ตอนขยายแมพเพื่อไม่ต้องแตะ `PenService` ที่ยังใช้ชื่อเดิม
+แต่การมีสองชื่อสำหรับของเดียวกันทำให้คนอ่านโค้ดใหม่ไม่รู้ว่าควรใช้อันไหน
+และต้องมี `assert` คอยตรวจว่าสองฝั่งตรงกัน ซึ่งเป็นงานที่ไม่ควรต้องมีตั้งแต่แรก
+
+**ตอนนี้มีชื่อเดียว** · `Config.MapDimensions.<กลุ่ม>.<ค่า>`
 
 ---
 
@@ -323,7 +325,7 @@ Height = 50          -- สูงกว่าที่กระโดดข้�
 ⚠️ **ไม่ใช้วิธี "ตกแล้วเกิดใหม่"** เพราะจะน่ารำคาญเวลากำลังฟาร์ม —
 ฟาร์มอยู่ดี ๆ แล้วถูกดีดกลับจุดเกิดคือการลงโทษที่ผู้เล่นไม่ได้ทำอะไรผิด
 
-`validate()` บังคับ `Boundary.Height > Player.JumpHeight` —
+`validate()` บังคับ `Boundary.Height > Player.JumpHeight` (7.2) —
 เตี้ยกว่านั้น = กระโดดข้ามได้ ซึ่งคือสิ่งเดียวที่กำแพงใสมีไว้กัน
 
 ### รูปทรงของกรอบ
@@ -454,33 +456,25 @@ luau tools/dump-map.luau
 
 ## 9. ค่าที่ปรับได้ทั้งหมด
 
-### `Config.MapDimensions` — ตั้งที่นี่
+### `Config.MapDimensions` — ที่เดียว
 
 | กลุ่ม | ค่า | ตอนนี้ |
 |---|---|---|
-| `Player` | `Height` · `WalkSpeed` · `JumpHeight` | 5 · 32 · 7 |
-| `Pen` | `Size` · `FenceHeight` · `FenceThickness` · `GateWidth` · `RowGap` · `ColumnGap` | 80×80 · 3 · 1 · 8 · 90 · 20 |
-| `Lane` | `WallHeight` · `Width` · `LengthPerStage` | 40 · 60 · 180 |
-| `Shop` | `StallSize` · `StallCount` | 12×12 · 2 |
-| `BossRoom` | `Size` | 80×80 |
-| `Boundary` | `Height` · `Margin` | 50 · 50 |
+| `Player` | `Height` · `WalkSpeed` · `JumpHeight` · `SpawnPadSize` | 5 · 32 · 7.2 · 10×0.4×10 |
+| `Pen` | `Size` · `Rows` · `PerRow` · `RowGap` · `ColumnGap` · `EdgeMargin` · `FloorThickness` · `Fence*` · `GateWidth` · `Sign*` | 80×80 · 2 · 3 · 90 · 20 · 4 · 0.3 · 3/1/8/2 · 8 · … |
+| `Lane` | `Width` · `LengthPerStage` · `WallHeight` · `WallThickness` · `StartGap` · `ReleasePadSize` | 60 · 180 · 40 · 5 · 0 · 16×1×28 |
+| `StageWall` | `Thickness` (ความสูงใช้ `Lane.WallHeight` ร่วมกัน) | 5 |
+| `Shop` | `StallSize` · `StallCount` · `StallHeight` · `Gap` | 12×12 · 2 · 8 · 20 |
+| `BossRoom` | `Size` · `EggRadiusRatio` · `EggPadSize` | 80×80 · 0.3 · 7×0.4×7 |
+| `Boundary` | `Height` · `Margin` · `Thickness` | 50 · 50 · 5 |
+| `Wander` | `Speed` · `PauseMin` · `PauseMax` · `Tick` | 4 · 1.5 · 5 · 0.1 |
+| `Blockout` | `MotherSize` · `EggSize` | 3.5×3.5×5 · 3×3.8×3 |
 
-### `Config.Map` — ค่าประกอบที่ไม่ได้อยู่ใน MapDimensions
+⚠️ **ไม่มี `Config.Map` แล้ว** ทุกอย่างอยู่ใน `MapDimensions` กลุ่มเดียวกันหมด
+(`StageWall` = กำแพงกั้นด่าน · `Wander` = แม่เดินไปมา · `Blockout` = ขนาดโมเดลชั่วคราว)
 
-| กลุ่ม | ค่า |
-|---|---|
-| ผังคอก | `PEN_ROWS` · `PEN_PER_ROW` · `PEN_EDGE_MARGIN` |
-| รั้ว/ประตู/ป้าย | `FENCE_POST_SPACING` · `FENCE_RAIL_COUNT` · `PEN_SIGN_SIZE` · `PEN_SIGN_POST_HEIGHT` · `PEN_SIGN_GATE_CLEARANCE` |
-| เลนรบ | `LANE_START_GAP` · `RELEASE_PAD_SIZE` · `LANE_WALL_THICKNESS` |
-| กำแพงกั้นด่าน | `WALL_THICKNESS` · `WALL_HEIGHT` |
-| รังบอส | `NEST_EGG_RADIUS` · `NEST_EGG_PAD_SIZE` |
-| ร้านค้า | `SHOP_GAP` · `SHOP_STALL_HEIGHT` |
-| ขอบแมพ | `BOUNDARY_THICKNESS` |
-| จุดเกิด | `SPAWN_PAD_SIZE` |
-| แม่เดินไปมา | `WANDER_SPEED` · `WANDER_PAUSE_MIN/MAX` · `WANDER_TICK` |
-| ขนาดโมเดล | `MOTHER_BLOCK_SIZE` · `EGG_BLOCK_SIZE` |
-
-⚠️ ที่เหลือใน `Config.Map` เป็น **alias ของ `MapDimensions`** — แก้ที่นั่นแล้วเซิร์ฟไม่บูต
+⚠️ **ขนาดที่เป็นผังบนพื้นใช้ `vec2(กว้าง, ลึก)`** — ไม่มีแกน Y
+ส่วนขนาดของ Part จริง ๆ ใช้ `vec3` (มีความสูง) เช่น `ReleasePadSize` · `SignSize` · `SpawnPadSize`
 
 ### ฟังก์ชันหาพิกัด — ห้ามคำนวณเอง
 

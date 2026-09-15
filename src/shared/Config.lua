@@ -260,11 +260,21 @@ Config.MapDimensions = {
 		-- ตัวแม่เดินได้อิสระทั่วคอก ไข่วางตรงไหนก็ได้
 		Size = vec2(80, 80),
 
-		-- รั้วไม้เตี้ย **แค่บอกขอบเขต ไม่ใช่กำแพงกันทาง**
-		FenceHeight = 6,
+		-- ══ รั้วไม้เตี้ย ══ **แค่บอกขอบเขต ไม่ใช่กำแพงกันทาง**
+		-- ⚠️ `CanCollide = false` ทั้งเส้น ผู้เล่นและแม่เดินทะลุได้
+		-- เคยทำหนา 5 เพื่อให้ผ่านกฎความหนา-ความเร็ว แล้วมันกลายเป็น "กำแพงเตี้ย" ไม่ใช่รั้ว
+		-- ตอนนี้ยกเว้นรั้วออกจากกฎนั้นแทน เพราะกฎมีไว้กับกำแพงที่ต้อง **หยุด** ผู้เล่นเท่านั้น
+		FenceHeight = 3, -- รั้วไม้ฟาร์มปกติ ไม่ใช่กำแพง
+		FenceThickness = 1, -- เสากับคานบาง ๆ
 
-		RowGap = 30, -- ทางเดินกลางระหว่าง 2 แถว (เชื่อมร้านค้ากับต้นเลนรบ)
-		ColumnGap = 8, -- ช่องระหว่างคอกในแถวเดียวกัน
+		-- ช่องประตูหน้าคอก — ทำโดย **เว้นช่องกลางรั้วด้านที่หันเข้าทางเดิน** ไม่มีบานประตู
+		-- ทั้ง 6 คอกหันประตูเข้าทางเดินกลาง (แถวบนหันลง · แถวล่างหันขึ้น)
+		GateWidth = 8,
+
+		-- ⚠️ ทางเดินกลางต้องกว้างกว่าเลนรบ (60) ไม่งั้นเดินจากลานเข้าเลนแล้วรู้สึกคอขวด
+		-- เดิม 30 ซึ่งแคบกว่าเลนครึ่งหนึ่ง · 90 = กว้างกว่าเลน 1.5 เท่า
+		RowGap = 90, -- ทางเดินกลางระหว่าง 2 แถว (เชื่อมร้านค้ากับต้นเลนรบ)
+		ColumnGap = 20, -- ช่องระหว่างคอกในแถวเดียวกัน
 	},
 
 	-- ══ เลนรบ ══ ที่เดียวในแมพที่มีกำแพงสองข้างทาง
@@ -290,7 +300,12 @@ Config.MapDimensions = {
 	-- ══ ขอบแมพ ══ แท่นลอย ตกได้ → กั้นด้วยกำแพงใส
 	Boundary = {
 		Height = 50, -- ต้องสูงกว่า Player.JumpHeight (validate() บังคับ)
-		Margin = 20, -- ระยะจากขอบพื้นถึงกำแพงใส
+
+		-- ระยะจากกำแพงใสถึงขอบพื้น = **แถบหญ้าที่มองเห็นแต่เดินไปไม่ถึง**
+		-- มีไว้ให้ขอบแมพไม่จบห้วน ๆ ตรงที่ชนกำแพงพอดี
+		-- ⚠️ พื้นลานขยายตามค่านี้เอง (getPlazaMinX / getPlazaHalfDepth บวกไว้ให้แล้ว)
+		-- ไม่ใช่การ "หดกำแพงเข้ามา" — เคยเป็นแบบนั้นแล้วดันค่าขึ้นทีไรกำแพงกินเข้าไปในคอก
+		Margin = 50,
 	},
 }
 
@@ -317,12 +332,21 @@ Config.Map = {
 	-- ระยะที่แม่/ไข่ต้องอยู่ห่างจากขอบคอก กันไม่ให้โผล่ทะลุรั้ว
 	PEN_EDGE_MARGIN = 4,
 
-	-- ⚠️ รั้วคอกชนได้ (CanCollide = true) จึงต้องหนาพอไม่ให้วิ่งทะลุ
-	-- เดิม 0.8 ซึ่งบางกว่าระยะที่ผู้เล่นขยับได้ใน 1 เฟรมที่ความเร็วเต็มขั้น (2.13 stud)
-	-- ทะลุแล้วไม่ถึงกับพังเกม (รั้วเป็นแค่ขอบเขต กระโดดข้ามได้อยู่แล้ว)
-	-- แต่ทะลุบ้างไม่ทะลุบ้างตามเฟรมเรตเป็นอาการที่อธิบายให้ผู้เล่นไม่ได้
-	-- `validate()` บังคับค่านี้ผ่าน Config.getMinWallThickness()
-	FENCE_THICKNESS = 5,
+	-- ↓ alias จาก MapDimensions.Pen — ห้ามแก้ที่นี่
+	-- ⚠️ รั้ว **ไม่ชน** (CanCollide = false) จึงไม่อยู่ใต้กฎความหนา-ความเร็ว
+	-- กฎนั้นมีไว้กับกำแพงที่ต้อง "หยุด" ผู้เล่น · รั้วนี้ไม่ได้ทำหน้าที่กันอะไรเลย
+	FENCE_THICKNESS = DIM.Pen.FenceThickness,
+	PEN_GATE_WIDTH = DIM.Pen.GateWidth,
+
+	-- รูปทรงรั้ว: เสาทุก ๆ ระยะนี้ + คานแนวนอนกี่ชั้น (แบบรั้วไม้ฟาร์มปกติ)
+	-- เป็นค่าหน้าตาล้วน ๆ ไม่กระทบกติกา
+	FENCE_POST_SPACING = 8,
+	FENCE_RAIL_COUNT = 2,
+
+	-- ป้ายชื่อคอก — ปักบนหญ้า **ข้างประตู ไม่ใช่กลางประตู** (กันเดินชน)
+	PEN_SIGN_SIZE = vec3(10, 3, 0.4),
+	PEN_SIGN_POST_HEIGHT = 5, -- ความสูงเสาป้าย ยกป้ายให้อ่านได้จากมุมกล้องปกติ
+	PEN_SIGN_GATE_CLEARANCE = 3, -- ระยะจากขอบประตูถึงเสาป้าย
 
 	-- ↓ alias จาก MapDimensions.Lane — ห้ามแก้ที่นี่
 	LANE_WIDTH = DIM.Lane.Width,
@@ -2221,22 +2245,27 @@ function Config.getShopStallCenter(index: number): Vector3
 	return vec3(center.X, center.Y, offset)
 end
 
--- ══ ขอบเขตพื้นของลานคอก ══ (รวมแถบร้านค้าทางซ้าย)
+-- ══ ขอบเขตพื้นของลานคอก ══ (รวมแถบร้านค้าทางซ้าย + แถบหญ้านอกกำแพงใส)
+-- ⚠️ ต้องบวก BOUNDARY_MARGIN ด้วยเสมอ
+-- กำแพงใสวางถอยเข้ามาจากขอบพื้นเท่ากับ margin (ดู MapBuilder.buildBoundary)
+-- ถ้าพื้นไม่โตตาม การดัน margin ขึ้นจะกลายเป็นการ **หดกำแพงเข้ามากินพื้นที่เล่น**
+-- แทนที่จะเป็นการเพิ่มแถบหญ้านอกกำแพง — เคยพลาดตรงนี้แล้วกำแพงกินเข้าไปในคอก 30 studs
 function Config.getPlazaMinX(): number
 	local map = Config.Map
-	return Config.getShopCenter().X - map.SHOP_STALL_SIZE.X / 2 - map.SHOP_GAP
+	return Config.getShopCenter().X - map.SHOP_STALL_SIZE.X / 2 - map.SHOP_GAP - map.BOUNDARY_MARGIN
 end
 
 function Config.getPlazaMaxX(): number
 	return Config.getPenYardRightX()
 end
 
--- ความลึกของลานต้องคลุมทั้งคอกและแผงร้าน
+-- ความลึกของลานต้องคลุมทั้งคอกและแผงร้าน + แถบหญ้านอกกำแพงใส
+-- ⚠️ เหตุผลที่บวก BOUNDARY_MARGIN เหมือนกับ getPlazaMinX ข้างบน
 function Config.getPlazaHalfDepth(): number
 	local map = Config.Map
 	local byPens = Config.getPenYardDepth() / 2
 	local byStalls = math.abs(Config.getShopStallCenter(1).Z) + map.SHOP_STALL_SIZE.Z / 2
-	return math.max(byPens, byStalls) + map.SHOP_GAP
+	return math.max(byPens, byStalls) + map.SHOP_GAP + map.BOUNDARY_MARGIN
 end
 
 -- ครึ่งความกว้างของเลนตรงจุด X นั้น — ผายออกตรงรังบอส
@@ -2931,7 +2960,9 @@ function Config.validate()
 			{ name = "Map.WALL_THICKNESS (กำแพงกั้นด่าน)", value = map.WALL_THICKNESS },
 			{ name = "Map.LANE_WALL_THICKNESS (กำแพงข้างเลน)", value = map.LANE_WALL_THICKNESS },
 			{ name = "Map.BOUNDARY_THICKNESS (กำแพงใสขอบแมพ)", value = map.BOUNDARY_THICKNESS },
-			{ name = "Map.FENCE_THICKNESS (รั้วคอก)", value = map.FENCE_THICKNESS },
+			-- ⚠️ **รั้วคอกไม่อยู่ในรายการนี้โดยตั้งใจ** — `CanCollide = false`
+			-- กฎความหนามีไว้กับกำแพงที่ต้อง "หยุด" ผู้เล่นเท่านั้น รั้วเป็นของประดับล้วน
+			-- เคยเอาเข้ามาในรายการนี้แล้วต้องดันรั้วหนาเป็น 5 จนกลายเป็นกำแพงเตี้ย
 		}
 	do
 		assert(
@@ -2941,13 +2972,64 @@ function Config.validate()
 		)
 	end
 
-	-- ⚠️ รั้วคอกหนาขึ้นแล้วต้องไม่กินเข้าไปในพื้นที่ที่แม่เดิน
-	-- รั้ววางคร่อมขอบแปลง ครึ่งหนึ่งจึงยื่นเข้าข้างใน · ขอบกันชนต้องกว้างกว่านั้น
+	-- ⚠️ รั้ววางคร่อมขอบแปลง ครึ่งหนึ่งยื่นเข้าข้างใน · ขอบกันชนต้องกว้างกว่านั้น
+	-- (รั้วทะลุได้ก็จริง แต่แม่ไม่ควรเดินไปยืนซ้อนกับรั้วให้ดูแปลก)
 	assert(
 		map.PEN_EDGE_MARGIN >= map.FENCE_THICKNESS / 2,
 		`Config: รั้วหนา {map.FENCE_THICKNESS} ยื่นเข้าคอก {map.FENCE_THICKNESS / 2} `
-			.. `แต่ขอบกันชนมีแค่ {map.PEN_EDGE_MARGIN} — แม่จะเดินไปติดในรั้ว`
+			.. `แต่ขอบกันชนมีแค่ {map.PEN_EDGE_MARGIN} — แม่จะเดินไปยืนซ้อนกับรั้ว`
 	)
+
+	-- ══ ประตูคอก ══ เว้นช่องกลางรั้วด้านที่หันเข้าทางเดิน
+	assert(
+		map.PEN_GATE_WIDTH < map.PEN_PLOT_SIZE.X,
+		`Config: ประตูกว้าง {map.PEN_GATE_WIDTH} แต่คอกกว้างแค่ {map.PEN_PLOT_SIZE.X} — จะไม่เหลือรั้วเลย`
+	)
+	assert(
+		map.PEN_GATE_WIDTH >= MIN_WALKABLE_WIDTH * 0.75,
+		`Config: ประตูกว้าง {map.PEN_GATE_WIDTH} แคบเกินกว่าจะเดินเข้าได้สบาย`
+	)
+
+	-- ⚠️ ทางเดินกลางต้องกว้างไม่น้อยกว่าเลนรบ
+	-- เดินจากลานเข้าเลนแล้วต้องไม่รู้สึกว่าถูกบีบ · เคยกว้างแค่ครึ่งเดียวของเลน
+	assert(
+		map.WALKWAY_WIDTH >= map.LANE_WIDTH,
+		`Config: ทางเดินกลางกว้าง {map.WALKWAY_WIDTH} แคบกว่าเลนรบ ({map.LANE_WIDTH}) — `
+			.. `ปากทางเข้าเลนจะกลายเป็นคอขวด`
+	)
+
+	-- ⚠️⚠️ กำแพงใสต้องอยู่ **นอก** ของทุกอย่างที่ผู้เล่นต้องเดินไปถึง
+	-- กำแพงวางถอยเข้ามาจากขอบพื้นเท่ากับ BOUNDARY_MARGIN ดังนั้นถ้าพื้นไม่โตตาม margin
+	-- การดัน margin ขึ้นจะกลายเป็นการกินพื้นที่เล่นเข้ามาเรื่อย ๆ
+	-- เคยพลาดจริง: ดัน margin 20 → 50 แล้วกำแพงกินเข้าไปในคอก 30 studs
+	-- และตัดแผงร้านออกไปอยู่นอกกำแพง โดยที่ไม่มียามตัวไหนจับได้เลย
+	local wallHalfZ = Config.getPlazaHalfDepth() - map.BOUNDARY_MARGIN
+	local wallMinX = Config.getPlazaMinX() + map.BOUNDARY_MARGIN
+	for penIndex = 1, Config.World.MAX_PENS do
+		local center = Config.getPenPlotCenter(penIndex)
+		local outerZ = math.abs(center.Z) + map.PEN_PLOT_SIZE.Z / 2
+		assert(
+			wallHalfZ >= outerZ,
+			`Config: กำแพงใสอยู่ที่ Z = ±{wallHalfZ} แต่คอก {penIndex} กินไปถึง ±{outerZ} `
+				.. `— กำแพงกินเข้าไปในคอก {outerZ - wallHalfZ} studs`
+		)
+		assert(
+			wallMinX <= center.X - map.PEN_PLOT_SIZE.X / 2,
+			`Config: กำแพงใสอยู่ที่ X = {wallMinX} ซึ่งกินเข้าไปในคอก {penIndex}`
+		)
+	end
+	for stallIndex = 1, map.SHOP_STALL_COUNT do
+		local stall = Config.getShopStallCenter(stallIndex)
+		assert(
+			wallMinX <= stall.X - map.SHOP_STALL_SIZE.X / 2,
+			`Config: กำแพงใสอยู่ที่ X = {wallMinX} แต่แผงร้าน {stallIndex} อยู่ที่ `
+				.. `{stall.X - map.SHOP_STALL_SIZE.X / 2} — แผงอยู่นอกกำแพง เดินไปไม่ถึง`
+		)
+		assert(
+			math.abs(stall.Z) + map.SHOP_STALL_SIZE.Z / 2 <= wallHalfZ,
+			`Config: แผงร้าน {stallIndex} อยู่นอกกำแพงใสตามแกน Z`
+		)
+	end
 
 	-- ══ แม่เดินไปมา ══
 	assert(map.WANDER_SPEED > 0, "Config: Map.WANDER_SPEED ต้องมากกว่า 0")

@@ -49,7 +49,6 @@ local COLORS = {
 	bossEgg = Color3.fromRGB(230, 218, 190),
 	stall = Color3.fromRGB(158, 112, 76),
 	stallRoof = Color3.fromRGB(190, 92, 78),
-	teleport = Color3.fromRGB(212, 154, 74),
 	marker = Color3.fromRGB(86, 74, 58),
 	spawn = Color3.fromRGB(230, 200, 120),
 }
@@ -248,18 +247,12 @@ function MapBuilder.buildShop(parent: Folder)
 		makeLabel(if index == 1 then "ขายของ · ซื้อไข่" else "ซื้ออาวุธ", 220, counter, h * 0.4 + 3)
 	end
 
-	-- ⚠️ แท่นวาปไปร้านค้า · **อัปเกรดไม่ต้องเดินมา** มีปุ่มติดตัวเปิดได้ทุกที่
-	-- (ตัวคูณ damage มี 72 ขั้น ถ้าต้องเดินทุกครั้งจะน่ารำคาญมาก)
-	local padCenter = Config.getShopCenter()
-	local pad = makePart(
-		"TeleportPad",
-		MAP.TELEPORT_PAD_SIZE,
-		Vector3.new(padCenter.X, 0, 0),
-		COLORS.teleport,
-		shop
-	)
-	pad.CanCollide = false
-	makeLabel("วาปไปร้านค้า", 200, pad, 4)
+	-- ⚠️ **ไม่มีแท่นวาปแล้ว** (เอาออกรอบซื้อความเร็ว)
+	-- ผู้เล่นเดินไปเองทุกที่ · ปัญหาระยะทางแก้ด้วย Config.SpeedUpgrade แทน
+	-- และไม่มีแท่นวาปไปรังบอสด้วย — วาปไปรังได้เมื่อไหร่ การแย่งไข่ก็หมดความหมาย
+	--
+	-- อัปเกรดทั้งสองอย่าง (damage 72 ขั้น · ความเร็ว 5 ขั้น) มี**ปุ่มติดตัว เปิดได้ทุกที่**
+	-- แผงร้านในแมพเหลือไว้สำหรับ ขายของ · ซื้อไข่ · ซื้ออาวุธ เท่านั้น
 end
 
 --------------------------------------------------------------------------------
@@ -274,7 +267,7 @@ local function laneWallPiece(parent: Folder, name: string, fromX: number, toX: n
 	end
 	local part = makePart(
 		name,
-		Vector3.new(length, MAP.LANE_WALL_HEIGHT, MAP.FENCE_THICKNESS * 4),
+		Vector3.new(length, MAP.LANE_WALL_HEIGHT, MAP.LANE_WALL_THICKNESS),
 		Vector3.new((fromX + toX) / 2, 0, z),
 		COLORS.laneWall,
 		parent
@@ -291,7 +284,7 @@ local function laneWallJog(parent: Folder, name: string, x: number, fromZ: numbe
 	end
 	local part = makePart(
 		name,
-		Vector3.new(MAP.FENCE_THICKNESS * 4, MAP.LANE_WALL_HEIGHT, width),
+		Vector3.new(MAP.LANE_WALL_THICKNESS, MAP.LANE_WALL_HEIGHT, width),
 		Vector3.new(x, 0, (fromZ + toZ) / 2),
 		COLORS.laneWall,
 		parent
@@ -351,7 +344,7 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	-- ปิดปลายเลน กันเดินตกท้ายแมพ
 	local cap = makePart(
 		"LaneEndCap",
-		Vector3.new(MAP.FENCE_THICKNESS * 4, MAP.LANE_WALL_HEIGHT, MAP.LANE_WIDTH),
+		Vector3.new(MAP.LANE_WALL_THICKNESS, MAP.LANE_WALL_HEIGHT, MAP.LANE_WIDTH),
 		Vector3.new(endX, 0, 0),
 		COLORS.laneWall,
 		lane

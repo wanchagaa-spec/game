@@ -316,7 +316,13 @@ Config.Map = {
 
 	-- ระยะที่แม่/ไข่ต้องอยู่ห่างจากขอบคอก กันไม่ให้โผล่ทะลุรั้ว
 	PEN_EDGE_MARGIN = 4,
-	FENCE_THICKNESS = 0.8,
+
+	-- ⚠️ รั้วคอกชนได้ (CanCollide = true) จึงต้องหนาพอไม่ให้วิ่งทะลุ
+	-- เดิม 0.8 ซึ่งบางกว่าระยะที่ผู้เล่นขยับได้ใน 1 เฟรมที่ความเร็วเต็มขั้น (2.13 stud)
+	-- ทะลุแล้วไม่ถึงกับพังเกม (รั้วเป็นแค่ขอบเขต กระโดดข้ามได้อยู่แล้ว)
+	-- แต่ทะลุบ้างไม่ทะลุบ้างตามเฟรมเรตเป็นอาการที่อธิบายให้ผู้เล่นไม่ได้
+	-- `validate()` บังคับค่านี้ผ่าน Config.getMinWallThickness()
+	FENCE_THICKNESS = 5,
 
 	-- ↓ alias จาก MapDimensions.Lane — ห้ามแก้ที่นี่
 	LANE_WIDTH = DIM.Lane.Width,
@@ -325,6 +331,11 @@ Config.Map = {
 
 	-- เลนต่อจากปลายลานคอกทันที ไม่มีช่องว่างคั่น (ตามรูปทรงที่ตกลง)
 	LANE_START_GAP = 0,
+
+	-- ⚠️ ความหนาของกำแพงสองข้างเลน — **เคยเป็น `FENCE_THICKNESS * 4` ใน MapBuilder**
+	-- ซึ่งผูกความหนากำแพงกันตกไว้กับความหนารั้วประดับโดยไม่มีเหตุผลเชิงดีไซน์
+	-- แยกออกมาเป็นค่าของตัวเองแล้ว · `validate()` บังคับขั้นต่ำตามความเร็วสูงสุด
+	LANE_WALL_THICKNESS = 5,
 
 	-- แท่นปล่อยทหาร อยู่ที่ต้นเลน ทหารโผล่ที่นี่เลย ไม่ต้องเดินมาจากคอก
 	RELEASE_PAD_SIZE = vec3(16, 1, 28),
@@ -347,7 +358,6 @@ Config.Map = {
 	SHOP_STALL_HEIGHT = 8, -- ความสูงหลังคาแผง (แค่ฉาก)
 	SHOP_GAP = 20, -- ระยะจากขอบซ้ายของลานคอก ถึงแนวแผง
 
-	TELEPORT_PAD_SIZE = vec3(10, 0.4, 10),
 
 	-- ══ จุดเกิดผู้เล่น ══
 	-- แผ่นบาง ๆ วางในคอกของแต่ละคน (CanCollide = false จะได้ไม่สะดุดตอนเดินผ่าน)
@@ -356,7 +366,9 @@ Config.Map = {
 	-- ══ ขอบแมพ ══ ↓ alias จาก MapDimensions.Boundary
 	BOUNDARY_HEIGHT = DIM.Boundary.Height,
 	BOUNDARY_MARGIN = DIM.Boundary.Margin,
-	BOUNDARY_THICKNESS = 2,
+	-- ⚠️ เดิม 2 ซึ่งบางกว่าระยะต่อเฟรมที่ความเร็วเต็มขั้น → วิ่งทะลุแล้วตกแท่นลอย
+	-- เป็นกำแพงที่ทะลุแล้วเจ็บที่สุดในแมพ เพราะข้างหลังไม่มีพื้น
+	BOUNDARY_THICKNESS = 5,
 
 	-- ══ แม่เดินไปมาในคอก ══
 	-- ⚠️ **ห้ามใช้ Humanoid** — แม่เต็มคอก × ผู้เล่นเต็มเซิร์ฟ = Humanoid หลักร้อยตัว หนักเกินไป
@@ -747,6 +759,10 @@ Config.NewPlayer = {
 	-- ⚠️ ต้องเป็น 1 ไม่ใช่ 0 ไม่งั้นเพดาน upgrade damage (wallProgress × STEPS_PER_STAGE)
 	-- จะกลายเป็น 0 แล้วผู้เล่นใหม่ซื้ออะไรไม่ได้เลย (ดู getMaxDamageLevel)
 	wallProgress = 1,
+
+	-- ขั้นความเร็วที่ซื้อแล้ว — เริ่มที่ 0 = วิ่งที่ MapDimensions.Player.WalkSpeed เฉย ๆ
+	-- ⚠️ เป็นของบัญชี ไม่ใช่ของตัวละคร ตายแล้วเกิดใหม่ต้องได้ความเร็วเดิมกลับมา
+	speedLevel = 0,
 }
 
 --------------------------------------------------------------------------------
@@ -1174,6 +1190,52 @@ Config.DamageUpgrade = {
 		67000000000, -- ด่าน 8
 		2100000000000, -- ด่าน 9
 	},
+}
+
+--------------------------------------------------------------------------------
+-- อัปเกรดความเร็ววิ่ง — บ่อเงินบ่อที่สอง
+--------------------------------------------------------------------------------
+-- ⚠️ โครงหลัก: เป็นบ่อดูดเงินบ่อที่สองต่อจาก DamageUpgrade
+-- `speedLevel` ฝังอยู่ใน PlayerData ที่เซฟไปแล้ว · **เป็นของบัญชีผู้เล่น ไม่ใช่ของตัวละคร**
+-- (ตายแล้วเกิดใหม่ต้องได้ความเร็วเดิมกลับมา ไม่ต้องซื้อซ้ำ)
+--
+-- ที่มา: เกมแนวขโมยไข่ให้ผู้เล่นวิ่งบนลู่เพื่อเก็บความเร็ว เกมนี้เปลี่ยนเป็น
+-- **ซื้อด้วยเงิน** แทน แบบเดียวกับตัวคูณ damage เพราะแมพยาว 1,968 studs
+-- และเวลาเดินทางไป-กลับรังบอสด่าน 9 กินถึง 33% ของรอบบอส 5 นาที
+--
+-- ⚠️⚠️ **5 ขั้น ไม่ใช่ 10 — เป็นการตัดสินใจถาวร ห้ามขยาย**
+-- ราคาไล่ ×10 ต่อขั้น ถ้าทำ 10 ขั้น ขั้นสุดท้ายจะแพงกว่าขั้นแรก **หนึ่งพันล้านเท่า**
+-- แต่ให้ความเร็วเพิ่มแค่ 3-4% (เพราะตัวคูณถดถอยและชนเพดาน ×4)
+-- = ขั้นที่ไม่มีใครซื้อ เป็นตัวเลขหลอกตาในตารางเฉย ๆ แบบเดียวกับคอก Lv11-15 ที่ตัดทิ้งไปแล้ว
+-- 5 ขั้นจบที่ 100M ยังคุ้มทุกขั้น และครอบคลุมช่วงเกมพอแล้ว (ดู docs/data-schema.md §8.8)
+Config.SpeedUpgrade = {
+	MAX_LEVEL = 5, -- ⚠️ ห้ามขยายเป็น 10 (เหตุผลข้างบน)
+
+	-- ราคา: ขั้นแรก 10,000 แล้ว ×10 ทุกขั้น → 10K · 100K · 1M · 10M · 100M (รวม 111.11M)
+	-- ไล่ ×10 ให้ตรงกับรายได้ที่โต ×10 ต่อด่าน → ขั้น N ซื้อไหวพอดีที่ด่าน N
+	BASE_COST = 10000,
+	COST_MULTIPLIER = 10,
+
+	-- ตัวคูณความเร็วสูงสุดที่ขั้นสุดท้าย (ขั้น 0 = ×1 เสมอ)
+	MAX_MULTIPLIER = 4,
+
+	-- ⚠️ **ตัวคูณถดถอย** — ขั้นแรกให้เยอะสุด (+90%) แล้วค่อย ๆ ลดลงเหลือ +13%
+	-- สูตร: ตัวคูณ = 1 + (MAX_MULTIPLIER - 1) × (ขั้น ÷ MAX_LEVEL) ^ CURVE_EXPONENT
+	-- ยิ่งเลขชี้กำลังน้อย ขั้นแรก ๆ ยิ่งให้เยอะ · 1.0 = เพิ่มเท่ากันทุกขั้น
+	-- ตั้งเป็นค่าใน Config เพื่อให้ปรับความรู้สึกได้โดยไม่ต้องแก้โค้ด
+	CURVE_EXPONENT = 0.75,
+
+	-- ⚠️ เพดานที่ Roblox รับได้ — ต่ำกว่า ~100 ปลอดภัย · 100-200 เริ่มทะลุของบาง ·
+	-- เกิน 200 ทะลุบ่อยจนเล่นไม่ได้ · ความเร็วสูงสุดตอนนี้ 128 อยู่ในโซนเสี่ยง
+	-- จึงต้องมีกฎความหนากำแพงคู่กันเสมอ (Config.getMinWallThickness)
+	SPEED_CEILING = 200,
+
+	-- เฟรมเรตที่ใช้คิดว่า "ขยับกี่ stud ต่อเฟรม" ตอนหาความหนากำแพงขั้นต่ำ
+	-- 60 fps เป็นค่าปกติของ Roblox · ต่ำกว่านี้ยิ่งขยับไกลต่อเฟรมยิ่งต้องหนา
+	PHYSICS_FPS = 60,
+
+	-- เผื่อกี่เท่าของระยะต่อเฟรม — 2 เท่าคือเผื่อกรณีเฟรมตกครึ่งหนึ่ง
+	THICKNESS_SAFETY = 2,
 }
 
 Config.Combat = {
@@ -1918,6 +1980,64 @@ function Config.getStageDamageUpgradeTotal(stage: number): number
 	return total
 end
 
+--------------------------------------------------------------------------------
+-- อัปเกรดความเร็ววิ่ง
+--------------------------------------------------------------------------------
+
+-- ตัวคูณความเร็วที่ขั้นนั้น (ขั้น 0 = ×1) — ถดถอย ขั้นแรกให้เยอะสุด
+function Config.getSpeedMultiplier(level: number): number
+	local upgrade = Config.SpeedUpgrade
+	local clamped = math.clamp(math.floor(level), 0, upgrade.MAX_LEVEL)
+	if clamped <= 0 then
+		return 1
+	end
+	local progress = clamped / upgrade.MAX_LEVEL
+	return 1 + (upgrade.MAX_MULTIPLIER - 1) * progress ^ upgrade.CURVE_EXPONENT
+end
+
+-- ความเร็ววิ่งจริงที่ขั้นนั้น (studs/วินาที)
+function Config.getWalkSpeed(level: number): number
+	return Config.MapDimensions.Player.WalkSpeed * Config.getSpeedMultiplier(level)
+end
+
+-- ความเร็วสูงสุดที่เป็นไปได้ในเกม — ตัวตั้งของกฎความหนากำแพง
+function Config.getMaxWalkSpeed(): number
+	return Config.getWalkSpeed(Config.SpeedUpgrade.MAX_LEVEL)
+end
+
+-- ราคาอัปจากขั้น level ไปขั้นถัดไป · nil = เต็มเพดานแล้ว
+-- ⚠️ level เป็น "ขั้นที่มีอยู่ตอนนี้" (0 = ยังไม่ได้ซื้ออะไร) ไม่ใช่ขั้นที่จะซื้อ
+function Config.getSpeedUpgradeCost(level: number): number?
+	local upgrade = Config.SpeedUpgrade
+	local current = math.floor(level)
+	if current < 0 or current >= upgrade.MAX_LEVEL then
+		return nil
+	end
+	return upgrade.BASE_COST * upgrade.COST_MULTIPLIER ^ current
+end
+
+-- ราคารวมของทุกขั้นความเร็ว (ซื้อครบตั้งแต่ 0 ถึงเพดาน)
+function Config.getSpeedUpgradeTotalCost(): number
+	local total = 0
+	for level = 0, Config.SpeedUpgrade.MAX_LEVEL - 1 do
+		total += Config.getSpeedUpgradeCost(level) or 0
+	end
+	return total
+end
+
+-- ⚠️ ความหนาขั้นต่ำที่กำแพงทุกชนิดต้องมี — **ผูกกับความเร็วสูงสุดจริง ไม่ใช่เลขตายตัว**
+--
+-- ที่ความเร็ว v ผู้เล่นขยับ v ÷ PHYSICS_FPS stud ต่อเฟรม
+-- กำแพงที่บางกว่านั้นจะถูก "ข้าม" ไปทั้งชิ้นระหว่างสองเฟรมโดยไม่มีการชนเกิดขึ้นเลย
+-- คูณ THICKNESS_SAFETY เผื่อกรณีเฟรมตก
+--
+-- เขียนเป็นสูตรเพราะถ้าวันไหนขึ้นความเร็วแล้วลืมเพิ่มความหนา **เซิร์ฟจะไม่บูต**
+-- แทนที่จะปล่อยให้ผู้เล่นไปเจอเองว่าวิ่งทะลุกำแพงได้
+function Config.getMinWallThickness(): number
+	local upgrade = Config.SpeedUpgrade
+	return Config.getMaxWalkSpeed() / upgrade.PHYSICS_FPS * upgrade.THICKNESS_SAFETY
+end
+
 -- อัตราปล่อยทหารของด่านนั้น (ตัว/วินาที)
 function Config.getReleaseRate(stage: number): number
 	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
@@ -2592,7 +2712,6 @@ function Config.validate()
 			{ name = "NEST_SIZE", value = map.NEST_SIZE },
 			{ name = "SHOP_STALL_SIZE", value = map.SHOP_STALL_SIZE },
 			{ name = "RELEASE_PAD_SIZE", value = map.RELEASE_PAD_SIZE },
-			{ name = "TELEPORT_PAD_SIZE", value = map.TELEPORT_PAD_SIZE },
 			{ name = "MOTHER_BLOCK_SIZE", value = map.MOTHER_BLOCK_SIZE },
 			{ name = "EGG_BLOCK_SIZE", value = map.EGG_BLOCK_SIZE },
 			{ name = "NEST_EGG_PAD_SIZE", value = map.NEST_EGG_PAD_SIZE },
@@ -2747,6 +2866,87 @@ function Config.validate()
 		centerSpawn.X >= plazaMinX and centerSpawn.X <= plazaMaxX
 			and math.abs(centerSpawn.Z) <= plazaHalfZ,
 		"Config: จุดเกิดกลางอยู่นอกพื้นลาน"
+	)
+
+	----------------------------------------------------------------------------
+	-- อัปเกรดความเร็ว + กฎความหนากำแพงที่ผูกกับความเร็ว
+	----------------------------------------------------------------------------
+	local speed = Config.SpeedUpgrade
+	assert(
+		speed.MAX_LEVEL >= 1 and speed.MAX_LEVEL % 1 == 0,
+		"Config: SpeedUpgrade.MAX_LEVEL ต้องเป็นจำนวนเต็มบวก"
+	)
+	assert(speed.BASE_COST > 0, "Config: SpeedUpgrade.BASE_COST ต้องมากกว่า 0")
+	assert(speed.COST_MULTIPLIER > 1, "Config: ราคาขั้นความเร็วต้องแพงขึ้นทุกขั้น (COST_MULTIPLIER > 1)")
+	assert(speed.CURVE_EXPONENT > 0, "Config: SpeedUpgrade.CURVE_EXPONENT ต้องมากกว่า 0")
+	assert(speed.PHYSICS_FPS > 0, "Config: SpeedUpgrade.PHYSICS_FPS ต้องมากกว่า 0")
+	assert(speed.THICKNESS_SAFETY >= 1, "Config: SpeedUpgrade.THICKNESS_SAFETY ต้องไม่น้อยกว่า 1")
+	assert(
+		speed.MAX_MULTIPLIER > 1,
+		"Config: SpeedUpgrade.MAX_MULTIPLIER ต้องมากกว่า 1 ไม่งั้นซื้อแล้วไม่ได้อะไร"
+	)
+
+	-- ราคาต้องเรียงจากน้อยไปมากเสมอ และขั้นสุดท้ายต้องมีราคา (ไม่ใช่ nil)
+	local prevCost = 0
+	for level = 0, speed.MAX_LEVEL - 1 do
+		local cost = Config.getSpeedUpgradeCost(level)
+		assert(cost ~= nil, `Config: ขั้นความเร็ว {level + 1} ไม่มีราคา`)
+		assert(
+			(cost :: number) > prevCost,
+			`Config: ราคาขั้นความเร็ว {level + 1} ({cost}) ไม่ได้แพงกว่าขั้นก่อนหน้า ({prevCost})`
+		)
+		prevCost = cost :: number
+	end
+	assert(
+		Config.getSpeedUpgradeCost(speed.MAX_LEVEL) == nil,
+		"Config: เต็มเพดานความเร็วแล้วต้องซื้อต่อไม่ได้ (ต้องคืน nil)"
+	)
+
+	-- ตัวคูณต้องไล่ขึ้นไม่ถอยหลัง และจบที่ MAX_MULTIPLIER พอดี
+	local prevMult = 0
+	for level = 0, speed.MAX_LEVEL do
+		local mult = Config.getSpeedMultiplier(level)
+		assert(mult > prevMult, `Config: ตัวคูณความเร็วขั้น {level} ไม่ได้มากกว่าขั้นก่อนหน้า`)
+		prevMult = mult
+	end
+	assert(
+		math.abs(Config.getSpeedMultiplier(speed.MAX_LEVEL) - speed.MAX_MULTIPLIER) < 1e-9,
+		"Config: ตัวคูณขั้นสุดท้ายต้องเท่ากับ MAX_MULTIPLIER พอดี"
+	)
+
+	-- ⚠️ เพดานความเร็วที่ Roblox รับได้ — เกินแล้วตัวละครทะลุของทั้งแมพ
+	-- ไม่ใช่เรื่องที่แก้ด้วยความหนากำแพงได้ เพราะกำแพงที่หนาพอจะกินพื้นที่เล่นไปหมด
+	local maxSpeed = Config.getMaxWalkSpeed()
+	assert(
+		maxSpeed <= speed.SPEED_CEILING,
+		`Config: ความเร็วสูงสุด {string.format("%.1f", maxSpeed)} เกินเพดาน {speed.SPEED_CEILING} `
+			.. `— เกินแล้วตัวละครทะลุกำแพงจนเล่นไม่ได้ ลด MAX_MULTIPLIER หรือ MapDimensions.Player.WalkSpeed`
+	)
+
+	-- ⚠️ กำแพงทุกชนิดที่ **ชนได้** ต้องหนากว่าระยะที่ผู้เล่นขยับได้ใน 1 เฟรม
+	-- ขึ้นความเร็วแล้วลืมเพิ่มความหนา = วิ่งทะลุ ซึ่งมองไม่เห็นจนกว่าจะเจอในเกม
+	local minThickness = Config.getMinWallThickness()
+	for _, entry in
+		{
+			{ name = "Map.WALL_THICKNESS (กำแพงกั้นด่าน)", value = map.WALL_THICKNESS },
+			{ name = "Map.LANE_WALL_THICKNESS (กำแพงข้างเลน)", value = map.LANE_WALL_THICKNESS },
+			{ name = "Map.BOUNDARY_THICKNESS (กำแพงใสขอบแมพ)", value = map.BOUNDARY_THICKNESS },
+			{ name = "Map.FENCE_THICKNESS (รั้วคอก)", value = map.FENCE_THICKNESS },
+		}
+	do
+		assert(
+			entry.value >= minThickness,
+			`Config: {entry.name} หนา {entry.value} บางกว่าขั้นต่ำ {string.format("%.2f", minThickness)} `
+				.. `ที่ความเร็วสูงสุด {string.format("%.1f", maxSpeed)} — ผู้เล่นจะวิ่งทะลุ`
+		)
+	end
+
+	-- ⚠️ รั้วคอกหนาขึ้นแล้วต้องไม่กินเข้าไปในพื้นที่ที่แม่เดิน
+	-- รั้ววางคร่อมขอบแปลง ครึ่งหนึ่งจึงยื่นเข้าข้างใน · ขอบกันชนต้องกว้างกว่านั้น
+	assert(
+		map.PEN_EDGE_MARGIN >= map.FENCE_THICKNESS / 2,
+		`Config: รั้วหนา {map.FENCE_THICKNESS} ยื่นเข้าคอก {map.FENCE_THICKNESS / 2} `
+			.. `แต่ขอบกันชนมีแค่ {map.PEN_EDGE_MARGIN} — แม่จะเดินไปติดในรั้ว`
 	)
 
 	-- ══ แม่เดินไปมา ══
@@ -2912,6 +3112,10 @@ function Config.validate()
 		assert(amount > 0, `Config: NewPlayer.startingEggs["{eggId}"] ต้องมากกว่า 0`)
 	end
 	assert(Config.NewPlayer.coins >= 0 and Config.NewPlayer.gems >= 0, "Config: ของเริ่มต้นติดลบไม่ได้")
+	assert(
+		Config.NewPlayer.speedLevel >= 0 and Config.NewPlayer.speedLevel <= Config.SpeedUpgrade.MAX_LEVEL,
+		"Config: NewPlayer.speedLevel ต้องอยู่ในช่วง 0 ถึงเพดาน"
+	)
 	-- ⚠️ off-by-one ที่เคยพลาด: wallProgress = 0 ทำให้เพดาน upgrade damage เป็น 0
 	-- ผู้เล่นใหม่จะซื้ออะไรไม่ได้เลยและตันตั้งแต่ด่านแรก
 	assert(

@@ -1002,8 +1002,10 @@ return function(t, Config)
 
 	-- ⚠️ ความหนาพื้นคอกเป็นค่าเดียวที่ MapBuilder (สร้างแผ่น) กับ PenService (วางของบนแผ่น)
 	-- ต้องอ่านตรงกัน · เคยแยกกันแล้วของลอยเหนือพื้น 0.2 studs
-	check("ความหนาพื้นคอกเป็นบวกและบางกว่ารั้ว",
-		dim.Pen.FloorThickness > 0 and dim.Pen.FloorThickness < dim.Pen.FenceHeight, true)
+	-- ⚠️ แผ่นพื้นคอก `CanCollide = false` และสีเกือบเท่าหญ้า → ผู้เล่นเดินบนหญ้าที่ Y = 0
+	-- ของที่วางบนผิวแผ่นจึงดู "ลอย" เท่ากับความหนาแผ่น · **ต้องบางจนมองไม่เห็น**
+	check("แผ่นพื้นคอกบางจนไม่เห็นว่าลอย", dim.Pen.FloorThickness <= 0.1, true)
+	check("แผ่นพื้นคอกยังเป็นบวก", dim.Pen.FloorThickness > 0, true)
 
 	-- ⚠️ **ไม่มี Config.Map แล้ว** — มีชื่อเดียวคือ MapDimensions
 	check("Config.Map ถูกยุบทิ้งแล้ว", (Config :: any).Map, nil)
@@ -1022,8 +1024,11 @@ return function(t, Config)
 	local eggSize = dim.Blockout.EggSize
 	check("รัศมีไข่ = min(X,Y,Z)/2", Config.getBallRadius(eggSize),
 		math.min(eggSize.X, eggSize.Y, eggSize.Z) / 2)
-	check("รัศมีไข่ไม่ใช่ Y/2 (ถ้าขนาดไม่เท่ากันทุกแกน)",
-		Config.getBallRadius(eggSize) < eggSize.Y / 2, true)
+	-- ⚠️ ไข่ต้องเท่ากันทั้งสามแกน — Roblox ไม่รับประกันว่าลูกบอลที่ขนาดไม่เท่ากัน
+	-- จะวาดออกมาเป็นทรงกลม (min) หรือทรงรี (แต่ละแกน) · เท่ากันแล้วตีความยังไงก็ตรงกัน
+	check("ไข่เป็นลูกบอลด้านเท่า ไม่กำกวม",
+		eggSize.X == eggSize.Y and eggSize.Y == eggSize.Z, true)
+	check("รัศมีไข่ = ครึ่งด้าน", Config.getBallRadius(eggSize), eggSize.Y / 2)
 	check("ทรงกลมด้านเท่าได้รัศมี = ครึ่งด้าน", Config.getBallRadius(vec3(4, 4, 4)), 2)
 
 	-- ⚠️ ข้อที่ต้องจริงเสมอ: **Y ของจุดศูนย์กลาง − รัศมี = ผิวบนของพื้น**
@@ -1048,8 +1053,8 @@ return function(t, Config)
 	check("ไข่ทุกขนาดนั่งพื้นพอดี", everySizeRests, true)
 
 	-- เทียบกับค่าจริงที่ควรได้ กันสูตรเพี้ยนแบบเงียบ ๆ
-	t.near("ไข่ blockout อยู่ที่ Y = 1.8", Config.getPenRestingY(eggRadius), 1.8, 1e-9)
-	t.near("แม่ blockout อยู่ที่ Y = 2.05", Config.getPenRestingY(motherSize.Y / 2), 2.05, 1e-9)
+	t.near("ไข่ blockout อยู่ที่ Y = 1.55", Config.getPenRestingY(eggRadius), 1.55, 1e-9)
+	t.near("แม่ blockout อยู่ที่ Y = 1.8", Config.getPenRestingY(motherSize.Y / 2), 1.8, 1e-9)
 
 	-- ⚠️ ความเร็วเดินของแม่เป็น **stud ต่อวินาที** ไม่ใช่ "วินาทีต่อระยะ"
 	-- ของเดิมเป็นเวลาต่อระยะ พอขยายคอกจาก 24 → 80 stud แม่จะเดินช้าเหมือนคลาน

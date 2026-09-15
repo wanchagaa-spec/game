@@ -2260,6 +2260,32 @@ function Config.getLaneHalfWidthAt(x: number): number
 	return half
 end
 
+-- ══ วางของบนพื้นคอก ══
+-- ⚠️ **ทั้งแม่และไข่ต้องใช้ชุดฟังก์ชันนี้ ห้ามคำนวณ Y เอง**
+-- เคยคำนวณแยกกันสองที่แล้วไข่ลอยเหนือพื้น 0.4 studs อยู่หลายรอบโดยไม่มีใครจับได้
+-- (แม่นั่งพื้นพอดีเพราะบังเอิญเป็นทรงกล่อง ส่วนไข่เป็นทรงกลมซึ่งคิดรัศมีคนละแบบ)
+
+-- ผิวบนของแผ่นพื้นคอก = ระดับที่ของทุกอย่างในคอกวางอยู่
+-- แผ่นพื้นสร้างที่ Y = 0 แล้วยกขึ้นครึ่งความสูง จึงกินช่วง 0 .. FloorThickness
+function Config.getPenFloorY(): number
+	return Config.MapDimensions.Pen.FloorThickness
+end
+
+-- ⚠️ รัศมีจริงของ Part ที่ `Shape = Ball`
+-- **Roblox วาดลูกบอลด้วยเส้นผ่านศูนย์กลาง = min(X, Y, Z) ไม่ใช่ Y**
+-- แกนที่เหลือถูกเพิกเฉยทั้งหมด · ไข่ blockout ขนาด (3, 3.8, 3) จึงเป็นทรงกลมเส้นผ่านศูนย์กลาง 3
+-- ไม่ใช่ 3.8 → ใครใช้ Y/2 เป็นรัศมีจะได้ค่ามากเกินจริงแล้วของลอย
+function Config.getBallRadius(size: Vector3): number
+	return math.min(size.X, size.Y, size.Z) / 2
+end
+
+-- Y ของ **จุดศูนย์กลาง** Part ที่วางแตะพื้นคอกพอดี
+-- ส่งครึ่งความสูงจริงของ Part เข้ามา (ทรงกล่อง = Y/2 · ทรงกลม = getBallRadius)
+-- ⚠️ ของที่ขนาดต่างกันทุกฟองก็ใช้ได้ เพราะรับครึ่งความสูงของชิ้นนั้น ๆ ไม่ได้อ่านค่ากลาง
+function Config.getPenRestingY(halfHeight: number): number
+	return Config.getPenFloorY() + halfHeight
+end
+
 -- จุดที่ผู้เล่นเกิด — ⚠️ เกิดใกล้คอกตัวเอง ไม่ต้องวิ่งข้ามลานไปหา
 -- ยืนที่ทางเดินกลางตรงหน้าคอกแปลงนั้นพอดี
 function Config.getSpawnPointForPen(index: number): Vector3

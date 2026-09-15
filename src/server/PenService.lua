@@ -217,7 +217,10 @@ function PenService.showEgg(player: Player, slotIndex: number, egg: Config.EggTy
 	part.Name = `Egg{slotIndex}`
 	part.Shape = Enum.PartType.Ball
 	part.Size = size
-	part.Position = Vector3.new(spot.X, spot.Y + MAP.Pen.FloorThickness + size.Y / 2, spot.Z)
+	-- ⚠️ ไข่เป็น **ทรงกลม** รัศมีจึงเป็น min(X,Y,Z)/2 ไม่ใช่ Y/2
+	-- ใช้ Y/2 เมื่อไหร่ไข่จะลอยเหนือพื้นเท่ากับส่วนต่างของสองค่านั้น
+	part.Position =
+		Vector3.new(spot.X, Config.getPenRestingY(Config.getBallRadius(size)), spot.Z)
 	part.Color = egg.color
 	part.Anchored = true
 	part.CanCollide = false
@@ -261,7 +264,8 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 
 	local now = os.clock()
 	local size = MAP.Blockout.MotherSize
-	local floorTop = MAP.Pen.FloorThickness
+	-- แม่เป็นทรงกล่อง ครึ่งความสูงจึงเป็น Y/2 ตรง ๆ (ต่างจากไข่ที่เป็นทรงกลม)
+	local restingY = Config.getPenRestingY(size.Y / 2)
 
 	for _, mother in mothers do
 		local character = Config.getCharacter(mother.charId)
@@ -272,7 +276,7 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 		local part = Instance.new("Part")
 		part.Name = mother.uid
 		part.Size = size
-		part.Position = Vector3.new(spot.X, spot.Y + floorTop + size.Y / 2, spot.Z)
+		part.Position = Vector3.new(spot.X, restingY, spot.Z)
 		part.Color = CLASS_COLORS[class] or CLASS_COLORS.C
 		part.Anchored = true
 		part.CanCollide = false

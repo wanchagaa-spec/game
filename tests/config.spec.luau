@@ -818,6 +818,9 @@ return function(t, Config)
 	local function vec2(x: number, y: number): any
 		return { X = x, Y = y }
 	end
+	local function vec3(x: number, y: number, z: number): any
+		return { X = x, Y = y, Z = z }
+	end
 
 	-- ผังคอกต้องพอดีจำนวนผู้เล่นเป๊ะ ไม่ขาดไม่เกิน
 	check("คอก = แถว × ต่อแถว", map.Pen.Rows * map.Pen.PerRow, Config.World.MAX_PENS)
@@ -1004,6 +1007,49 @@ return function(t, Config)
 
 	-- ⚠️ **ไม่มี Config.Map แล้ว** — มีชื่อเดียวคือ MapDimensions
 	check("Config.Map ถูกยุบทิ้งแล้ว", (Config :: any).Map, nil)
+
+	--------------------------------------------------------------------------
+	-- วางของบนพื้นคอก — ของต้องแตะพื้นพอดี ไม่ลอย ไม่จม
+	--------------------------------------------------------------------------
+	-- ⚠️ แผ่นพื้นคอกสร้างที่ Y = 0 แล้ว makePart ยกขึ้นครึ่งความสูง
+	-- → กินช่วง 0 .. FloorThickness · **ผิวบน = FloorThickness เต็ม ๆ ไม่ใช่ครึ่งหนึ่ง**
+	print("── ของในคอกต้องนั่งบนพื้นพอดี ──")
+	check("ผิวบนพื้นคอก = FloorThickness", Config.getPenFloorY(), dim.Pen.FloorThickness)
+
+	-- ⚠️ **หัวใจของบั๊กไข่ลอย**: Roblox วาด Ball ด้วยเส้นผ่านศูนย์กลาง min(X,Y,Z)
+	-- ไข่ blockout เป็น (3, 3.8, 3) → ทรงกลมเส้นผ่านศูนย์กลาง 3 ไม่ใช่ 3.8
+	-- โค้ดเดิมใช้ Y/2 = 1.9 เป็นรัศมี ทั้งที่ของจริง 1.5 → ลอย 0.4 studs
+	local eggSize = dim.Blockout.EggSize
+	check("รัศมีไข่ = min(X,Y,Z)/2", Config.getBallRadius(eggSize),
+		math.min(eggSize.X, eggSize.Y, eggSize.Z) / 2)
+	check("รัศมีไข่ไม่ใช่ Y/2 (ถ้าขนาดไม่เท่ากันทุกแกน)",
+		Config.getBallRadius(eggSize) < eggSize.Y / 2, true)
+	check("ทรงกลมด้านเท่าได้รัศมี = ครึ่งด้าน", Config.getBallRadius(vec3(4, 4, 4)), 2)
+
+	-- ⚠️ ข้อที่ต้องจริงเสมอ: **Y ของจุดศูนย์กลาง − รัศมี = ผิวบนของพื้น**
+	-- ผิดเมื่อไหร่ = ของลอย (มากไป) หรือจมพื้น (น้อยไป)
+	local eggRadius = Config.getBallRadius(eggSize)
+	t.near("ไข่: Y − รัศมี = ผิวพื้น",
+		Config.getPenRestingY(eggRadius) - eggRadius, Config.getPenFloorY(), 1e-9)
+
+	local motherSize = dim.Blockout.MotherSize
+	t.near("แม่: Y − ครึ่งความสูง = ผิวพื้น",
+		Config.getPenRestingY(motherSize.Y / 2) - motherSize.Y / 2, Config.getPenFloorY(), 1e-9)
+
+	-- ⚠️ ไข่หลายขนาด (ถ้าวันหนึ่งขนาดแปรตามน้ำหนัก) ต้องนั่งพื้นพอดีทุกฟอง
+	-- ฟังก์ชันรับครึ่งความสูงของชิ้นนั้น ๆ ไม่ได้อ่านค่ากลาง จึงใช้ได้เลย
+	local everySizeRests = true
+	for _, side in { 1, 2, 3, 5.5, 12 } do
+		local r = Config.getBallRadius(vec3(side, side * 1.3, side))
+		if math.abs((Config.getPenRestingY(r) - r) - Config.getPenFloorY()) > 1e-9 then
+			everySizeRests = false
+		end
+	end
+	check("ไข่ทุกขนาดนั่งพื้นพอดี", everySizeRests, true)
+
+	-- เทียบกับค่าจริงที่ควรได้ กันสูตรเพี้ยนแบบเงียบ ๆ
+	t.near("ไข่ blockout อยู่ที่ Y = 1.8", Config.getPenRestingY(eggRadius), 1.8, 1e-9)
+	t.near("แม่ blockout อยู่ที่ Y = 2.05", Config.getPenRestingY(motherSize.Y / 2), 2.05, 1e-9)
 
 	-- ⚠️ ความเร็วเดินของแม่เป็น **stud ต่อวินาที** ไม่ใช่ "วินาทีต่อระยะ"
 	-- ของเดิมเป็นเวลาต่อระยะ พอขยายคอกจาก 24 → 80 stud แม่จะเดินช้าเหมือนคลาน

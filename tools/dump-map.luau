@@ -69,16 +69,19 @@ print(string.format("  เลนรบ         X = %7.1f .. %-7.1f   ยาว %
 -- ขนาดแมพทั้งใบ — กรอบที่กำแพงใสล้อมไว้
 --------------------------------------------------------------------------------
 
+-- ⚠️ พื้นลานรวม BOUNDARY_MARGIN ไว้แล้ว (getPlazaMinX / getPlazaHalfDepth)
+-- กำแพงใสวางถอยเข้ามาจากขอบพื้นเท่ากับ margin → นอกกำแพงเป็นหญ้าที่เห็นแต่เดินไม่ถึง
 local margin = MAP.BOUNDARY_MARGIN
-local mapMinX = plazaMinX - margin
-local mapMaxX = laneEnd + margin
-local mapHalfZ = math.max(plazaHalfDepth, Config.getLaneHalfWidthAt(laneEnd), MAP.NEST_SIZE.Z / 2) + margin
+local mapMinX = plazaMinX
+local mapMaxX = laneEnd
+local mapHalfZ = math.max(plazaHalfDepth, Config.getLaneHalfWidthAt(laneEnd), MAP.NEST_SIZE.Z / 2)
 
 print("")
-print("── แมพทั้งใบ (ในกรอบกำแพงใส) ──")
+print("── แมพทั้งใบ (ขอบพื้น) ──")
 print(string.format("  X = %.1f .. %.1f · Z = %.1f .. %.1f", mapMinX, mapMaxX, -mapHalfZ, mapHalfZ))
-print(string.format("  ขนาดรวม %.0f x %.0f studs  (กำแพงใสสูง %.0f · กระโดดได้ %.0f)",
-	mapMaxX - mapMinX, mapHalfZ * 2, MAP.BOUNDARY_HEIGHT, DIM.Player.JumpHeight))
+print(string.format("  ขนาดรวม %.0f x %.0f studs", mapMaxX - mapMinX, mapHalfZ * 2))
+print(string.format("  กำแพงใส X = %.1f · Z = ±%.1f  (สูง %.0f · กระโดดได้ %.0f · หญ้านอกกำแพง %.0f)",
+	plazaMinX + margin, plazaHalfDepth - margin, MAP.BOUNDARY_HEIGHT, DIM.Player.JumpHeight, margin))
 
 --------------------------------------------------------------------------------
 -- เวลาเดิน — ตัวเลขที่ใช้ตัดสินว่า "ใหญ่ไปไหม"
@@ -98,6 +101,7 @@ local trips = {
 	{ "ข้ามหนึ่งด่าน", MAP.LANE_LENGTH_PER_STAGE },
 	{ `ต้นเลน → รังบอสด่าน {Config.Stage.COUNT}`, math.abs(nestLast - laneStart) },
 	{ "ขอบซ้ายสุด → ขอบขวาสุด", mapMaxX - mapMinX },
+	{ "คอก 1 → คอก 3 (ข้ามลาน)", math.abs(Config.getPenPlotCenter(3).X - Config.getPenPlotCenter(1).X) },
 }
 
 for _, trip in trips do

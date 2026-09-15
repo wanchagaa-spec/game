@@ -1013,8 +1013,8 @@ return function(t, Config)
 
 	-- ══ ขนาดแมพที่ประกอบออกมาได้ ══ ตัวเลขชุดที่ใช้ตัดสินว่า "ใหญ่ไปไหม"
 	print("── ขนาดแมพที่ประกอบได้ ──")
-	check("ลานคอกกว้าง 256", Config.getPenYardWidth(), 256)
-	check("ลานคอกลึก 190", Config.getPenYardDepth(), 190)
+	check("ลานคอกกว้าง 280", Config.getPenYardWidth(), 280)
+	check("ลานคอกลึก 250", Config.getPenYardDepth(), 250)
 	check("เลนรบยาว 1620", Config.getLaneLength(), 1620)
 
 	-- ⚠️ ข้อนี้คือยามขนาดแมพช่วงเริ่มเกม
@@ -1025,6 +1025,99 @@ return function(t, Config)
 	local startTrip = (nest1X - worstPenX) / dim.Player.WalkSpeed
 	print(string.format("   คอกไกลสุด → รังบอสด่าน 1 = %.0f studs = %.1f วิ", nest1X - worstPenX, startTrip))
 	check("วิ่งจากคอกถึงรังบอสด่าน 1 ไม่เกิน 15 วิ", startTrip <= 15, true)
+
+	--------------------------------------------------------------------------
+	-- รั้ว · ประตู · ทางเดินกลาง
+	--------------------------------------------------------------------------
+	print("── รั้ว ประตู และทางเดินกลาง ──")
+	check("รั้วเตี้ย (ไม่ใช่กำแพง)", dim.Pen.FenceHeight, 3)
+	check("รั้วบาง", dim.Pen.FenceThickness, 1)
+	check("รั้วเตี้ยกว่ากำแพงข้างเลนมาก", dim.Pen.FenceHeight * 5 < dim.Lane.WallHeight, true)
+	check("ประตูกว้าง 8", dim.Pen.GateWidth, 8)
+	check("ประตูแคบกว่าตัวคอก", map.PEN_GATE_WIDTH < map.PEN_PLOT_SIZE.X, true)
+	check("ประตูกว้างพอเดินเข้าได้", map.PEN_GATE_WIDTH >= 6, true)
+
+	-- ⚠️ ทางเดินกลางต้องไม่แคบกว่าเลนรบ ไม่งั้นปากทางเข้าเลนเป็นคอขวด
+	check("ทางเดินกลางกว้างไม่น้อยกว่าเลนรบ", map.WALKWAY_WIDTH >= map.LANE_WIDTH, true)
+	check("ทางเดินกลาง = 90", map.WALKWAY_WIDTH, 90)
+	check("ช่องระหว่างคอก = 20", map.PEN_PLOT_GAP, 20)
+
+	-- คอกต้องอยู่พ้นแนวเลนรบตามแกน Z (รั้วจะได้ไม่ไปบังปากทางเข้าเลน)
+	local pensClearOfLane = true
+	for penIdx = 1, Config.World.MAX_PENS do
+		local c = Config.getPenPlotCenter(penIdx)
+		if math.abs(c.Z) - map.PEN_PLOT_SIZE.Z / 2 < map.LANE_WIDTH / 2 then
+			pensClearOfLane = false
+		end
+	end
+	check("ไม่มีคอกล้ำเข้ามาในแนวเลนรบ", pensClearOfLane, true)
+
+	--------------------------------------------------------------------------
+	-- กำแพงใสต้องอยู่นอกของทุกอย่างที่ต้องเดินไปถึง
+	--------------------------------------------------------------------------
+	-- ⚠️ เคยพลาดจริง: ดัน Boundary.Margin 20 → 50 แล้วกำแพงกินเข้าไปในคอก 30 studs
+	-- และตัดแผงร้านออกไปอยู่นอกกำแพง เพราะพื้นลานไม่ได้โตตาม margin
+	print("── กำแพงใสต้องไม่กินพื้นที่เล่น ──")
+	local wallHalfZ = Config.getPlazaHalfDepth() - map.BOUNDARY_MARGIN
+	local wallMinX = Config.getPlazaMinX() + map.BOUNDARY_MARGIN
+	local pensInside, stallsInside = true, true
+	for penIdx = 1, Config.World.MAX_PENS do
+		local c = Config.getPenPlotCenter(penIdx)
+		if math.abs(c.Z) + map.PEN_PLOT_SIZE.Z / 2 > wallHalfZ
+			or c.X - map.PEN_PLOT_SIZE.X / 2 < wallMinX then
+			pensInside = false
+		end
+	end
+	for stallIdx = 1, map.SHOP_STALL_COUNT do
+		local stall = Config.getShopStallCenter(stallIdx)
+		if stall.X - map.SHOP_STALL_SIZE.X / 2 < wallMinX
+			or math.abs(stall.Z) + map.SHOP_STALL_SIZE.Z / 2 > wallHalfZ then
+			stallsInside = false
+		end
+	end
+	check("ทุกคอกอยู่ในกำแพงใส", pensInside, true)
+	check("แผงร้านทุกแผงอยู่ในกำแพงใส", stallsInside, true)
+	check("มีหญ้านอกกำแพงให้เห็น", map.BOUNDARY_MARGIN > 0, true)
+
+	-- ══ ยามต้องจับได้จริง ══
+	local savedMargin = map.BOUNDARY_MARGIN
+	local savedGate = map.PEN_GATE_WIDTH
+	local savedRowGap = map.WALKWAY_WIDTH
+	check("ประตูกว้างเกินคอก → ล้ม", mapGuardCatches(
+		function() map.PEN_GATE_WIDTH = map.PEN_PLOT_SIZE.X + 1 end,
+		function() map.PEN_GATE_WIDTH = savedGate end), true)
+	check("ประตูแคบจนเดินไม่เข้า → ล้ม", mapGuardCatches(
+		function() map.PEN_GATE_WIDTH = 1 end,
+		function() map.PEN_GATE_WIDTH = savedGate end), true)
+	check("ทางเดินกลางแคบกว่าเลนรบ → ล้ม", mapGuardCatches(
+		function() map.WALKWAY_WIDTH = map.LANE_WIDTH - 1 end,
+		function() map.WALKWAY_WIDTH = savedRowGap end), true)
+	-- ⚠️ ยามตัวนี้คือตัวที่จับบั๊กจริงของรอบนี้ได้
+	--
+	-- **ดัน BOUNDARY_MARGIN ขึ้นเฉย ๆ ไม่ทำให้พังอีกแล้ว** เพราะพื้นลานโตตาม margin
+	-- (wallHalfZ = plazaHalfDepth − margin ซึ่งตัด margin ออกหมดพอดี)
+	-- นั่นคือตัวการแก้ ไม่ใช่เรื่องที่ยามจะจับ
+	--
+	-- สิ่งที่ยามมีไว้จับคือ **การถอยสูตรพื้นลานกลับไปเป็นแบบเดิม** (ไม่บวก margin)
+	-- ซึ่งเป็นบั๊กตัวจริงที่ทำให้กำแพงกินเข้าไปในคอก 30 studs
+	-- จึงทดสอบด้วยการสลับฟังก์ชันกลับเป็นสูตรเก่าตรง ๆ
+	local realHalfDepth = Config.getPlazaHalfDepth
+	local realMinX = Config.getPlazaMinX
+	check("ถอยสูตรพื้นลานกลับเป็นแบบเก่า → ล้ม", mapGuardCatches(function()
+		Config.getPlazaHalfDepth = function()
+			return realHalfDepth() - map.BOUNDARY_MARGIN
+		end
+		Config.getPlazaMinX = function()
+			return realMinX() + map.BOUNDARY_MARGIN
+		end
+	end, function()
+		Config.getPlazaHalfDepth = realHalfDepth
+		Config.getPlazaMinX = realMinX
+	end), true)
+	check("ดัน margin ขึ้นเฉย ๆ ไม่พังแล้ว (พื้นโตตาม)", mapGuardCatches(
+		function() map.BOUNDARY_MARGIN = savedMargin * 3 end,
+		function() map.BOUNDARY_MARGIN = savedMargin end), false)
+	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
 
 	--------------------------------------------------------------------------
 	-- อัปเกรดความเร็ว (บ่อเงินบ่อที่สอง)
@@ -1102,7 +1195,10 @@ return function(t, Config)
 	check("กำแพงกั้นด่านหนาพอ", map.WALL_THICKNESS >= minThick, true)
 	check("กำแพงข้างเลนหนาพอ", map.LANE_WALL_THICKNESS >= minThick, true)
 	check("กำแพงใสขอบแมพหนาพอ", map.BOUNDARY_THICKNESS >= minThick, true)
-	check("รั้วคอกหนาพอ", map.FENCE_THICKNESS >= minThick, true)
+	-- ⚠️ **รั้วคอกจงใจบางกว่าเกณฑ์** เพราะ CanCollide = false
+	-- กฎความหนามีไว้กับกำแพงที่ต้อง "หยุด" ผู้เล่นเท่านั้น
+	-- เคยเอารั้วเข้ากฎนี้แล้วต้องดันหนาเป็น 5 จนกลายเป็นกำแพงเตี้ยแทนที่จะเป็นรั้ว
+	check("รั้วคอกบางกว่าเกณฑ์ได้ เพราะไม่ได้ทำหน้าที่กัน", map.FENCE_THICKNESS < minThick, true)
 	check("รั้วยื่นเข้าคอกไม่เกินขอบกันชน",
 		map.PEN_EDGE_MARGIN >= map.FENCE_THICKNESS / 2, true)
 

@@ -28,6 +28,23 @@ Config.SCHEMA_VERSION = 1
 -- (ถ้าวันไหนมีคนเอา .Magnitude หรือ :Lerp() ไปใช้ ต้องกลับมาเติมที่นี่)
 local HAS_COLOR3 = (Color3 :: any) ~= nil
 local HAS_VECTOR3 = (Vector3 :: any) ~= nil
+local HAS_VECTOR2 = (Vector2 :: any) ~= nil
+
+-- ⚠️⚠️ **fallback ต้องเข้มเท่าของจริง ไม่งั้นเทสต์จะบอกว่าผ่านทั้งที่ Studio พัง**
+--
+-- `Vector2` / `Vector3` ของ Roblox เป็น **userdata ที่ error ทันทีเมื่ออ่าน member ที่ไม่มี**
+-- ส่วน table ธรรมดาคืน `nil` เงียบ ๆ · ความต่างนี้เคยทำให้บั๊กหลุดไปถึง Studio มาแล้ว:
+-- `validate()` เขียน `value.Z` บนค่าที่เป็น Vector2 → เทสต์ผ่าน (nil) แต่ Studio พัง (error)
+-- → `Config.validate()` ตายตอนบูต → `MapBuilder.build()` ไม่ถูกเรียก → **แมพไม่ขึ้นทั้งใบ**
+--
+-- ทำ fallback ให้ error แบบเดียวกัน = ความผิดแบบนี้จะถูกจับตั้งแต่ `luau tests/run.luau`
+local function strictVector(fields: { [string]: number }, typeName: string): any
+	return setmetatable(fields, {
+		__index = function(_, key)
+			error(`{key} is not a valid member of {typeName}`, 2)
+		end,
+	})
+end
 
 local function rgb(r: number, g: number, b: number): Color3
 	if HAS_COLOR3 then
@@ -40,17 +57,33 @@ local function vec3(x: number, y: number, z: number): Vector3
 	if HAS_VECTOR3 then
 		return Vector3.new(x, y, z)
 	end
-	return ({ X = x, Y = y, Z = z } :: any) :: Vector3
+	return strictVector({ X = x, Y = y, Z = z }, "Vector3") :: Vector3
 end
-
-local HAS_VECTOR2 = (Vector2 :: any) ~= nil
 
 local function vec2(x: number, y: number): Vector2
 	if HAS_VECTOR2 then
 		return Vector2.new(x, y)
 	end
-	return ({ X = x, Y = y } :: any) :: Vector2
+	return strictVector({ X = x, Y = y }, "Vector2") :: Vector2
 end
+
+-- ⚠️ อ่านแกน Z จากค่าที่ **อาจเป็น Vector2 หรือ Vector3** โดยไม่พัง
+-- `Vector2` ของ Roblox เป็น userdata → อ่าน `.Z` แล้ว **error** ไม่ใช่คืน nil
+-- ส่วน fallback นอก Roblox ก็ถูกทำให้ error เหมือนกัน (strictVector ข้างบน)
+-- จึงต้องห่อด้วย pcall ทั้งสองโลก
+local function optionalZ(value: any): number?
+	local ok, z = pcall(function()
+		return value.Z
+	end)
+	if ok then
+		return z
+	end
+	return nil
+end
+
+-- เปิดออกมาให้ชุดเทสต์เรียกได้ด้วย — เทสต์ตรึงไว้ว่าค่าสองแกนต้องคืน nil ไม่ใช่ error
+-- (ถ้าวันไหนมีคนลบตัวช่วยนี้แล้วกลับไปอ่าน `.Z` ตรง ๆ เทสต์จะล้มทันที)
+Config.getOptionalZ = optionalZ
 
 --------------------------------------------------------------------------------
 -- Types
@@ -2777,9 +2810,14 @@ function Config.validate()
 				assert(value > 0, `Config: MapDimensions.{path} ({value}) ต้องเป็นบวก`)
 			else
 				-- vec2 = ผังบนพื้น (ไม่มีแกน Y) · vec3 = ขนาด Part จริง (มีความสูง)
-				local axes = if (value :: any).Z ~= nil then "สามแกน" else "สองแกน"
+				-- ⚠️ **ห้ามเขียน `value.Z` ตรง ๆ** — `Vector2` จริงของ Roblox เป็น userdata
+				-- ที่ **error ทันทีเมื่ออ่าน member ที่ไม่มี** ไม่ใช่คืน nil เหมือน table ธรรมดา
+				-- เคยเขียนแบบนั้นแล้ว validate() พังตอนบูตใน Studio (เซิร์ฟไม่สร้างแมพเลย)
+				-- แต่เทสต์ผ่าน เพราะ fallback นอก Roblox เป็น table ที่คืน nil
+				local z = optionalZ(value)
+				local axes = if z ~= nil then "สามแกน" else "สองแกน"
 				assert(
-					value.X > 0 and value.Y > 0 and ((value :: any).Z == nil or (value :: any).Z > 0),
+					value.X > 0 and value.Y > 0 and (z == nil or z > 0),
 					`Config: MapDimensions.{path} ต้องเป็นบวกทั้ง{axes}`
 				)
 			end

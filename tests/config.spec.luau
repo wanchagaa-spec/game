@@ -1284,4 +1284,33 @@ return function(t, Config)
 		function() spd.CURVE_EXPONENT = -1 end,
 		function() spd.CURVE_EXPONENT = savedCurve end), true)
 	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
+
+	--------------------------------------------------------------------------
+	-- ค่าที่ไม่ใช่ตัวเลข: อ่าน member ที่ไม่มี ต้อง **error** ไม่ใช่คืน nil
+	--------------------------------------------------------------------------
+	-- ⚠️⚠️ เทสต์ชุดนี้มีไว้เพราะบั๊กที่ทำให้ **แมพไม่ขึ้นทั้งใบ** ใน Studio
+	-- `validate()` เคยเขียน `value.Z` บนค่าที่เป็น Vector2:
+	--   · ใน Roblox — Vector2 เป็น userdata → **error ทันที** → validate() ตายตอนบูต
+	--     → MapBuilder.build() ไม่ถูกเรียก → ไม่มีพื้น ไม่มีใครเกิด = ท้องฟ้าว่างเปล่า
+	--   · ใน luau CLI — fallback เป็น table ธรรมดา → คืน nil เงียบ ๆ → เทสต์ผ่านหมด
+	-- ความต่างตรงนี้คือเหตุผลเดียวที่บั๊กหลุดไปถึง Studio ได้
+	-- ตอนนี้ fallback ถูกทำให้ error เหมือนกัน · เทสต์ข้างล่างตรึงพฤติกรรมนั้นไว้
+	print("── fallback ของ Vector ต้องเข้มเท่า Roblox ──")
+
+	local flat = Config.MapDimensions.Pen.Size -- Vector2 (ผังบนพื้น)
+	local solid = Config.MapDimensions.Blockout.EggSize -- Vector3 (ขนาด Part จริง)
+
+	check("อ่าน .X/.Y จาก vec2 ได้ปกติ", flat.X > 0 and flat.Y > 0, true)
+	check("อ่าน .Z จาก vec2 ต้อง error", (pcall(function()
+		return (flat :: any).Z
+	end)), false)
+	check("อ่าน member มั่ว ๆ จาก vec3 ต้อง error", (pcall(function()
+		return (solid :: any).Nope
+	end)), false)
+	check("อ่าน .Z จาก vec3 ได้ปกติ", solid.Z > 0, true)
+
+	-- ตัวช่วยที่ validate() ใช้แทนการอ่าน .Z ตรง ๆ — ต้องแยกสองแกน/สามแกนได้โดยไม่พัง
+	check("มีตัวช่วยอ่านแกน Z แบบไม่พัง", type(Config.getOptionalZ), "function")
+	check("vec2 → ไม่มีแกน Z", Config.getOptionalZ(flat), nil)
+	check("vec3 → ได้แกน Z กลับมา", Config.getOptionalZ(solid), solid.Z)
 end

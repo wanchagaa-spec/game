@@ -57,6 +57,27 @@ if StarterPlayer.CharacterWalkSpeed ~= Config.MapDimensions.Player.WalkSpeed the
 	)
 end
 
+-- ⚠️ ความสูงกระโดดต้องตรงกับ Config.MapDimensions.Player.JumpHeight ด้วย
+-- เพราะ `validate()` ใช้ค่านั้นตัดสินว่ากำแพงใสขอบแมพสูงพอกันกระโดดข้ามไหม
+--
+-- ⚠️ **ต้องเช็ค UseJumpPower ด้วย ไม่ใช่เช็คแค่ตัวเลข** — Roblox มีสองโหมด
+-- ถ้า UseJumpPower ยังเป็น true ค่า JumpHeight จะถูกเพิกเฉยทั้งค่า
+-- แล้วความสูงจริงจะมาจาก JumpPower แทน (50 → ราว 6.37 studs)
+-- ซึ่งเป็นสภาพที่โปรเจกต์นี้เคยอยู่: Config เขียน 7 แต่ของจริง 6.37 และไม่มีใครรู้
+if StarterPlayer.CharacterUseJumpPower then
+	warn(
+		`[Main] ⚠️ CharacterUseJumpPower = true — ค่า CharacterJumpHeight ถูกเพิกเฉย `
+			.. `ความสูงกระโดดจริงมาจาก JumpPower ({StarterPlayer.CharacterJumpPower}) แทน · `
+			.. `แก้ที่ default.project.json`
+	)
+elseif StarterPlayer.CharacterJumpHeight ~= Config.MapDimensions.Player.JumpHeight then
+	warn(
+		`[Main] ⚠️ CharacterJumpHeight = {StarterPlayer.CharacterJumpHeight} แต่ Config ตั้งไว้ `
+			.. `{Config.MapDimensions.Player.JumpHeight} — เกณฑ์ความสูงกำแพงใสจะคำนวณจากค่าที่ไม่ตรงกับของจริง · `
+			.. `แก้ที่ default.project.json`
+	)
+end
+
 Remotes.setupServer()
 MapBuilder.build()
 PenService.buildWorld()

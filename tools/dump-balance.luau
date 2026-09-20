@@ -24,47 +24,47 @@ local function row(...)
 	print(table.concat(p, "\t"))
 end
 local function classChar(c) for id, ch in Config.Characters do if ch.class == c then return id end end return nil end
-local check = Config.BalanceCheck
+local check = Config.Balance.BalanceCheck
 local CLASSES = { "C", "B", "A", "S", "SS" }
 local WEIGHTS = { 100, 1000, 10000, 100000, 1000000, 10000000, 100000000 }
 
-row("META", "stepMultiplier", Config.DamageUpgrade.STEP_MULTIPLIER)
-row("META", "stepsPerStage", Config.DamageUpgrade.STEPS_PER_STAGE)
-row("META", "maxLevel", Config.DamageUpgrade.MAX_LEVEL)
-row("META", "weightExponent", Config.Production.WEIGHT_EXPONENT)
-row("META", "stackCap", Config.Production.STACK_CAP)
-row("META", "tollCeiling", Config.BalanceCheck.TURRET_TOLL_CEILING)
-row("META", "onlinePerMinute", Config.Production.ONLINE_PER_MINUTE)
-row("META", "offlineRatio", Config.Production.OFFLINE_RATE_RATIO)
-row("META", "offlineCapHours", Config.Production.OFFLINE_CAP_SECONDS / 3600)
+row("META", "stepMultiplier", Config.Balance.DamageUpgrade.STEP_MULTIPLIER)
+row("META", "stepsPerStage", Config.Balance.DamageUpgrade.STEPS_PER_STAGE)
+row("META", "maxLevel", Config.Balance.DamageUpgrade.MAX_LEVEL)
+row("META", "weightExponent", Config.Balance.Production.WEIGHT_EXPONENT)
+row("META", "stackCap", Config.Balance.Production.STACK_CAP)
+row("META", "tollCeiling", Config.Balance.BalanceCheck.TURRET_TOLL_CEILING)
+row("META", "onlinePerMinute", Config.Balance.Production.ONLINE_PER_MINUTE)
+row("META", "offlineRatio", Config.Balance.Production.OFFLINE_RATE_RATIO)
+row("META", "offlineCapHours", Config.Balance.Production.OFFLINE_CAP_SECONDS / 3600)
 row("META", "minHours", check.MIN_HOURS_PER_STAGE)
 row("META", "maxHours", check.MAX_HOURS_PER_STAGE)
-row("META", "childRatio", Config.Weight.CHILD_RATIO)
-row("META", "damageFormula", Config.Damage.ACTIVE_FORMULA)
-row("META", "coinBase", Config.Economy.BASE_PER_MINUTE)
-row("META", "coinStageMult", Config.Economy.STAGE_MULTIPLIER)
-row("META", "sellMinutes", Config.Economy.SELL_MOTHER_MINUTES)
-row("META", "autoPause", Config.Combat.AUTO_PAUSE_AFTER_UNITS)
-row("META", "maxVisible", Config.Combat.MAX_VISIBLE_UNITS)
-row("META", "walkSeconds", Config.Combat.WALK_SECONDS_TO_WALL)
-row("META", "bagCapacity", Config.Bag.CAPACITY)
-row("META", "maxSsOverS", Config.BalanceCheck.MAX_SS_OVER_S_RATIO)
-row("META", "costMultInStage", Config.DamageUpgrade.COST_MULTIPLIER_IN_STAGE)
-row("META", "startingCoins", Config.NewPlayer.coins)
-row("META", "stageCount", Config.Stage.COUNT)
-row("META", "killDefenderBase", Config.Economy.KILL_DEFENDER_BASE)
-row("META", "killBossBase", Config.Economy.KILL_BOSS_BASE)
-row("META", "killDefenderMult", Config.Economy.KILL_DEFENDER_MULTIPLIER)
-row("META", "killBossMult", Config.Economy.KILL_BOSS_MULTIPLIER)
-row("META", "minUpgradeShare", Config.BalanceCheck.MIN_UPGRADE_SHARE)
-row("META", "maxUpgradeShare", Config.BalanceCheck.MAX_UPGRADE_SHARE)
+row("META", "childRatio", Config.Balance.Weight.CHILD_RATIO)
+row("META", "damageFormula", Config.Balance.Damage.ACTIVE_FORMULA)
+row("META", "coinBase", Config.Balance.Economy.BASE_PER_MINUTE)
+row("META", "coinStageMult", Config.Balance.Economy.STAGE_MULTIPLIER)
+row("META", "sellMinutes", Config.Balance.Economy.SELL_MOTHER_MINUTES)
+row("META", "autoPause", Config.Balance.Combat.AUTO_PAUSE_AFTER_UNITS)
+row("META", "maxVisible", Config.Balance.Combat.MAX_VISIBLE_UNITS)
+row("META", "walkSeconds", Config.Balance.Combat.WALK_SECONDS_TO_WALL)
+row("META", "bagCapacity", Config.Balance.Bag.CAPACITY)
+row("META", "maxSsOverS", Config.Balance.BalanceCheck.MAX_SS_OVER_S_RATIO)
+row("META", "costMultInStage", Config.Balance.DamageUpgrade.COST_MULTIPLIER_IN_STAGE)
+row("META", "startingCoins", Config.Balance.NewPlayer.coins)
+row("META", "stageCount", Config.Balance.Stage.COUNT)
+row("META", "killDefenderBase", Config.Balance.Economy.KILL_DEFENDER_BASE)
+row("META", "killBossBase", Config.Balance.Economy.KILL_BOSS_BASE)
+row("META", "killDefenderMult", Config.Balance.Economy.KILL_DEFENDER_MULTIPLIER)
+row("META", "killBossMult", Config.Balance.Economy.KILL_BOSS_MULTIPLIER)
+row("META", "minUpgradeShare", Config.Balance.BalanceCheck.MIN_UPGRADE_SHARE)
+row("META", "maxUpgradeShare", Config.Balance.BalanceCheck.MAX_UPGRADE_SHARE)
 row("META", "eggsPerHour", Config.getEggsPerHour())
-row("META", "bossEggs", Config.Boss.EGGS_PER_SPAWN)
-row("META", "bossRespawn", Config.Boss.RESPAWN_SECONDS)
-row("META", "players", Config.BalanceCheck.PLAYERS_PER_SERVER)
-row("META", "maxFarmRatio", Config.BalanceCheck.MAX_FARM_TO_CLEAR_RATIO)
-row("META", "eggBagCapacity", Config.Hatchery.BAG_CAPACITY)
-row("META", "hatcherySlots", Config.Hatchery.MAX_SLOTS)
+row("META", "bossEggs", Config.Balance.Boss.EGGS_PER_SPAWN)
+row("META", "bossRespawn", Config.Balance.Boss.RESPAWN_SECONDS)
+row("META", "players", Config.Balance.BalanceCheck.PLAYERS_PER_SERVER)
+row("META", "maxFarmRatio", Config.Balance.BalanceCheck.MAX_FARM_TO_CLEAR_RATIO)
+row("META", "eggBagCapacity", Config.Balance.Hatchery.BAG_CAPACITY)
+row("META", "hatcherySlots", Config.Balance.Hatchery.MAX_SLOTS)
 
 for _, c in CLASSES do
 	local names = {}
@@ -87,7 +87,7 @@ for _, w in WEIGHTS do
 	row(table.unpack(v))
 end
 
-for _, t in Config.StageWeightTiers[1] do
+for _, t in Config.Balance.StageWeightTiers[1] do
 	row("TIER", t.min, t.max, t.weight, t.weight / 10000)
 end
 
@@ -116,10 +116,10 @@ for stage = 1, 9 do
 		Config.getArmyDamageMultiplier(Config.getMaxDamageLevel(stage)), Config.getVisibleUnitCount(stage))
 end
 
-for lvl = 1, Config.Pen.MAX_LEVEL do
+for lvl = 1, Config.Balance.Pen.MAX_LEVEL do
 	row("PEN", lvl, Config.getPenCapacity(lvl), Config.getPenUpgradeCost(lvl) or 0)
 end
-for lvl = 0, Config.Production.UPGRADE_MAX_LEVEL do
+for lvl = 0, Config.Balance.Production.UPGRADE_MAX_LEVEL do
 	row("PRODUP", lvl, Config.getProductionMultiplier(lvl), Config.getProductionUpgradeCost(lvl) or 0)
 end
 
@@ -145,7 +145,7 @@ local OLD_W = { 500, 2000, 8000, 30000, 120000, 500000, 2000000, 8000000, 300000
 local OLD_C = { "C", "C", "B", "B", "A", "A", "S", "S", "S" }
 local TIERP = { 0.90, 0.09, 0.009, 0.0009, 0.00009, 0.000009, 0.000001 }
 local function tierOf(weight)
-	for index, t in Config.Weight.TIERS do
+	for index, t in Config.Balance.Weight.TIERS do
 		if weight >= t.min and weight <= t.max then return index end
 	end
 	return 1
@@ -180,7 +180,7 @@ for stage = 2, 9 do
 	local hrs = Config.getReferenceClearHours(stage)
 	local penIncome = Config.getPenCapacity(stage) * Config.getCoinsPerMinute(w, stage) * 60
 	local killTotal = Config.getStageDefenderRewardTotal(stage)
-	local bossPerHour = (3600 / Config.Boss.RESPAWN_SECONDS) * Config.getBossKillReward(stage)
+	local bossPerHour = (3600 / Config.Balance.Boss.RESPAWN_SECONDS) * Config.getBossKillReward(stage)
 		/ check.PLAYERS_PER_SERVER
 	local total = (penIncome + bossPerHour) * hrs + killTotal
 	local need = (Config.getPenUpgradeCost(stage) or 0)
@@ -211,7 +211,7 @@ end
 -- ย่อหน้าคำอธิบายหัวข้อ 3 ต้องยกตัวอย่างว่าคลาสชดเชยน้ำหนักได้แค่ไหน
 -- ถ้าไม่พ่นออกมาตรงนี้ ฝั่ง Python จะต้องเดาสูตรเอง แล้วก็จะเพี้ยนอีก
 do
-	local last = Config.Stage.COUNT
+	local last = Config.Balance.Stage.COUNT
 	local function hoursAt(w: number, cls: string): number
 		local hp = Config.getStageTotalHp(last)
 		if hp <= 0 then return -1 end
@@ -233,10 +233,10 @@ for _, w in WEIGHTS do
 	local off0 = Config.getProductionPerMinute(w, nil, 0, false)
 	local on3 = Config.getProductionPerMinute(w, nil, 3, true)
 	row("FILL", w, on0, off0, on3,
-		Config.Production.STACK_CAP / 2 / on0 / 60,
-		Config.Production.STACK_CAP / on0 / 60,
-		Config.Production.STACK_CAP / off0 / 60,
-		Config.Production.STACK_CAP / on3 / 60)
+		Config.Balance.Production.STACK_CAP / 2 / on0 / 60,
+		Config.Balance.Production.STACK_CAP / on0 / 60,
+		Config.Balance.Production.STACK_CAP / off0 / 60,
+		Config.Balance.Production.STACK_CAP / on3 / 60)
 end
 
 -- ── turret ──
@@ -247,7 +247,7 @@ for stage = 2, 9 do
 	local power = Config.computeBattlePower(Config.getChildWeight(w), classChar(check.REFERENCE_CLASS[stage]), nil, Config.getMaxDamageLevel(stage))
 	local ourDps = eff * power
 	local t = Config.getStageTurretDps(stage)
-	local onField = math.min(Config.getReleaseRate(stage) * Config.Combat.WALK_SECONDS_TO_WALL, 1e9)
+	local onField = math.min(Config.getReleaseRate(stage) * Config.Balance.Combat.WALK_SECONDS_TO_WALL, 1e9)
 	row("TURRET", stage, ourDps, t, t / ourDps, 0.1 * ourDps, onField, onField * power / t,
 		Config.getStageTotalHp(stage) / ourDps)
 end
@@ -255,7 +255,7 @@ end
 -- ── ตาราง upgrade damage ต่อด่าน ──
 for stage = 1, 9 do
 	local cap = Config.getMaxDamageLevel(stage)
-	local first = (stage - 1) * Config.DamageUpgrade.STEPS_PER_STAGE + 1
+	local first = (stage - 1) * Config.Balance.DamageUpgrade.STEPS_PER_STAGE + 1
 	row("UPG", stage, cap, Config.getArmyDamageMultiplier(cap),
 		Config.getDamageUpgradeCost(first), Config.getDamageUpgradeCost(cap),
 		Config.getStageDamageUpgradeTotal(stage), Config.getReferenceStageIncome(stage))
@@ -277,7 +277,7 @@ end
 
 -- ── ตารางอัปเกรดความเร็ว ──
 -- ขั้น · ราคา · ตัวคูณ · ความเร็ว · เร็วขึ้นกี่ % จากขั้นก่อน
-for level = 0, Config.SpeedUpgrade.MAX_LEVEL do
+for level = 0, Config.Balance.SpeedUpgrade.MAX_LEVEL do
 	local gain = if level > 0
 		then Config.getSpeedMultiplier(level) / Config.getSpeedMultiplier(level - 1) - 1
 		else 0
@@ -285,17 +285,17 @@ for level = 0, Config.SpeedUpgrade.MAX_LEVEL do
 		Config.getSpeedMultiplier(level), Config.getWalkSpeed(level), gain)
 end
 
-row("META", "speedMaxLevel", Config.SpeedUpgrade.MAX_LEVEL)
+row("META", "speedMaxLevel", Config.Balance.SpeedUpgrade.MAX_LEVEL)
 row("META", "speedTotalCost", Config.getSpeedUpgradeTotalCost())
-row("META", "speedCurveExponent", Config.SpeedUpgrade.CURVE_EXPONENT)
-row("META", "speedMaxMultiplier", Config.SpeedUpgrade.MAX_MULTIPLIER)
-row("META", "speedCeiling", Config.SpeedUpgrade.SPEED_CEILING)
+row("META", "speedCurveExponent", Config.Balance.SpeedUpgrade.CURVE_EXPONENT)
+row("META", "speedMaxMultiplier", Config.Balance.SpeedUpgrade.MAX_MULTIPLIER)
+row("META", "speedCeiling", Config.Balance.SpeedUpgrade.SPEED_CEILING)
 row("META", "maxWalkSpeed", Config.getMaxWalkSpeed())
 row("META", "minWallThickness", Config.getMinWallThickness())
-row("META", "physicsFps", Config.SpeedUpgrade.PHYSICS_FPS)
-row("META", "thicknessSafety", Config.SpeedUpgrade.THICKNESS_SAFETY)
-row("META", "speedCostMultiplier", Config.SpeedUpgrade.COST_MULTIPLIER)
-row("META", "bossRespawn", Config.Boss.RESPAWN_SECONDS)
+row("META", "physicsFps", Config.Balance.SpeedUpgrade.PHYSICS_FPS)
+row("META", "thicknessSafety", Config.Balance.SpeedUpgrade.THICKNESS_SAFETY)
+row("META", "speedCostMultiplier", Config.Balance.SpeedUpgrade.COST_MULTIPLIER)
+row("META", "bossRespawn", Config.Balance.Boss.RESPAWN_SECONDS)
 
 -- ── ความหนากำแพงทุกชนิด ──
 for _, entry in
@@ -313,10 +313,10 @@ end
 -- ต้นเลน→รังบอส 9 · ไป-กลับ · %ของรอบบอส · คอก→รังบอส 1
 local nest9 = Config.getBossNestCenter(9).X - Config.getLaneStartX()
 local nest1 = Config.getBossNestCenter(1).X - Config.getPenPlotCenter(1).X
-for level = 0, Config.SpeedUpgrade.MAX_LEVEL do
+for level = 0, Config.Balance.SpeedUpgrade.MAX_LEVEL do
 	local v = Config.getWalkSpeed(level)
 	row("TRAVEL", level, v, nest9 / v, nest9 * 2 / v,
-		(nest9 * 2 / v) / Config.Boss.RESPAWN_SECONDS * 100, nest1 / v)
+		(nest9 * 2 / v) / Config.Balance.Boss.RESPAWN_SECONDS * 100, nest1 / v)
 end
 
 -- ── รายได้ vs รายจ่ายรวมต่อด่าน (แยกทุกบ่อ) ──
@@ -328,7 +328,7 @@ for stage = 1, 9 do
 	local weapon = Config.getWeaponUpgradeCost(stage) or 0
 	local pen = Config.getPenUpgradeCost(stage) or 0
 	local prod = Config.getProductionUpgradeCost(stage - 1) or 0
-	local speed = if stage <= Config.SpeedUpgrade.MAX_LEVEL
+	local speed = if stage <= Config.Balance.SpeedUpgrade.MAX_LEVEL
 		then Config.getSpeedUpgradeCost(stage - 1) or 0
 		else 0
 	local without = dmg + weapon + pen + prod
@@ -348,7 +348,7 @@ do
 			+ (Config.getPenUpgradeCost(stage) or 0)
 			+ (Config.getProductionUpgradeCost(stage - 1) or 0)
 		bank += income - spend
-		while tier <= Config.SpeedUpgrade.MAX_LEVEL do
+		while tier <= Config.Balance.SpeedUpgrade.MAX_LEVEL do
 			local price = Config.getSpeedUpgradeCost(tier - 1) or 0
 			if bank < price then
 				break
@@ -359,7 +359,7 @@ do
 			tier += 1
 		end
 	end
-	for level = 1, Config.SpeedUpgrade.MAX_LEVEL do
+	for level = 1, Config.Balance.SpeedUpgrade.MAX_LEVEL do
 		row("SPEEDBUY", level, Config.getSpeedUpgradeCost(level - 1) or 0,
 			boughtAt[level] or 0, leftover[level] or 0)
 	end
@@ -369,7 +369,7 @@ end
 do
 	local w = check.REFERENCE_WEIGHT[1]
 	local perHour = Config.getPenCapacity(1) * Config.getCoinsPerMinute(w, 1) * 60
-		+ (3600 / Config.Boss.RESPAWN_SECONDS) * Config.getBossKillReward(1) / check.PLAYERS_PER_SERVER
+		+ (3600 / Config.Balance.Boss.RESPAWN_SECONDS) * Config.getBossKillReward(1) / check.PLAYERS_PER_SERVER
 	local needed = Config.getSpeedUpgradeCost(0) or 0
 	local others = Config.getStageDamageUpgradeTotal(1)
 		+ (Config.getWeaponUpgradeCost(1) or 0)
@@ -389,11 +389,11 @@ do
 		end
 		local w = check.REFERENCE_WEIGHT[stage]
 		local incomePerHour = Config.getPenCapacity(stage) * Config.getCoinsPerMinute(w, stage) * 60
-			+ (3600 / Config.Boss.RESPAWN_SECONDS) * Config.getBossKillReward(stage) / check.PLAYERS_PER_SERVER
+			+ (3600 / Config.Balance.Boss.RESPAWN_SECONDS) * Config.getBossKillReward(stage) / check.PLAYERS_PER_SERVER
 		local capDps = Config.getReferenceDps(stage)
 		local capLevel = Config.getMaxDamageLevel(stage)
 		local level = Config.getMaxDamageLevel(stage - 1)
-		local speedPrice = if stage <= Config.SpeedUpgrade.MAX_LEVEL
+		local speedPrice = if stage <= Config.Balance.SpeedUpgrade.MAX_LEVEL
 			then Config.getSpeedUpgradeCost(stage - 1) or 0
 			else 0
 		local speedPending = speedFirst and speedPrice > 0
@@ -414,7 +414,7 @@ do
 					level += 1
 				end
 			end
-			hp -= capDps * Config.DamageUpgrade.STEP_MULTIPLIER ^ (level - capLevel) * 3600 * dt
+			hp -= capDps * Config.Balance.DamageUpgrade.STEP_MULTIPLIER ^ (level - capLevel) * 3600 * dt
 			cash += incomePerHour * dt
 			elapsed += dt
 		end
@@ -426,7 +426,7 @@ do
 		local hoursA, nextA = simulate(stage, false, cashA)
 		local hoursB, nextB = simulate(stage, true, cashB)
 		-- เส้นทาง A ซื้อความเร็วหลังตีด่านจบ (ถ้าเงินพอ) เพื่อให้จบด่านด้วยของเท่ากัน
-		local price = if stage <= Config.SpeedUpgrade.MAX_LEVEL
+		local price = if stage <= Config.Balance.SpeedUpgrade.MAX_LEVEL
 			then Config.getSpeedUpgradeCost(stage - 1) or 0
 			else 0
 		if price > 0 and nextA >= price then

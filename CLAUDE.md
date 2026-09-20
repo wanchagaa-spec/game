@@ -131,7 +131,7 @@ Core loop:
 - **เงินที่เคยล้น 10–299 เท่า ถูกดูดด้วย upgrade ตัวคูณ damage แล้ว** เหลือ 1.6–2.5 เท่า
 
 ### ซื้อความเร็ววิ่ง — บ่อเงินบ่อที่สอง
-`Config.SpeedUpgrade` · `speedLevel` ใน PlayerData · รายละเอียดเต็มใน `docs/data-schema.md` §8.8
+`Config.Balance.SpeedUpgrade` · `speedLevel` ใน PlayerData · รายละเอียดเต็มใน `docs/data-schema.md` §8.8
 
 - ความเร็วฐาน 32 · **5 ขั้น** ราคา 10K → ×10 ทุกขั้น (10K · 100K · 1M · 10M · 100M รวม 111.11M)
 - ตัวคูณ **ถดถอย** สูงสุด ×4 → `1 + 3 × (ขั้น ÷ 5)^0.75` · ขั้น 1 เร็วขึ้น 90% · ขั้น 5 แค่ 13%
@@ -243,7 +243,7 @@ Core loop:
 ⚠️ ระบบเดิม "กดส่งกองทัพทีเดียวแล้วรอผล" **ยกเลิกทั้งหมดแล้ว**
 
 - มีจุดสปอนที่ต้นด่านของแต่ละคน ปล่อยลูกทีละตัวเรียงแถวเดินไปทางกำแพง
-- **อัตราปล่อยเป็นเพดาน damage/วินาที** `Config.Combat.RELEASE_PER_SECOND`
+- **อัตราปล่อยเป็นเพดาน damage/วินาที** `Config.Balance.Combat.RELEASE_PER_SECOND`
   = `{1, 1, 1, 2, 3, 4, 6, 8, 10}` ตัว/วินาที ตามด่าน
 - `damage/วินาที = min(อัตราผลิต, อัตราปล่อย) × damage ต่อตัว × ตัวคูณด่าน`
   ⚠️ **พอชนเพดานปล่อย upgrade อัตราผลิตหลุดออกจากสมการ damage ทันที**
@@ -271,7 +271,7 @@ Core loop:
   ไม่งั้นผู้เล่นใหม่ตันตั้งแต่ด่านแรก · `validate()` assert ข้อนี้ตรง ๆ
   **ตัวคูณเป็นของบัญชีผู้เล่น ไม่ใช่ของแม่รายตัว** → แม่ตายก็ไม่เสียการลงทุน
   ราคาคิดจาก "40% ของรายได้ทั้งด่าน" ไม่ได้เดา (`docs/data-schema.md` §8.6)
-- **turret เก็บเป็น "สัดส่วน" ไม่ใช่ตัวเลข damage** — `Config.Combat.TURRET_TOLL`
+- **turret เก็บเป็น "สัดส่วน" ไม่ใช่ตัวเลข damage** — `Config.Balance.Combat.TURRET_TOLL`
   ไล่ 10% (ด่าน 2) → 20% (ด่าน 9) · `turretDps(N) = TOLL[N] × getReferenceDps(N)`
   ⚠️ **ตาราง `Stages` ไม่มีฟิลด์ `turretDps` แล้ว ห้ามเอากลับมา**
   เคยเก็บเป็นตัวเลขดิบแล้วต้องคำนวณมือใหม่ **5 รอบ** ทุกครั้งที่แก้ตัวคูณคลาส /
@@ -301,7 +301,7 @@ Core loop:
   ขั้นบน ๆ เป็นของตายที่ไม่มีใครไปถึง (คอก Lv15 ราคา 1e17 แต่รายได้ทั้งด่าน 9 มี 1.28e14)
   ⚠️ ตัดลึกกว่านี้ไม่ได้ — `validate()` บังคับว่าด่าน 3–9 ต้องยัง **ผลิตได้ ≥ ปล่อยได้**
   ไม่งั้นคอขวดย้อนกลับไปเป็นการผลิตแล้วเวลาตีจะเปลี่ยนโดยไม่ตั้งใจ
-- **`Config.DamageUpgrade` — 8 ขั้น/ด่าน ×1.1 รวม 72 ขั้น** (สั่งมา 9 ขั้น/ด่าน แต่ขัดกับ "72 ขั้น" ที่สั่งมาเอง)
+- **`Config.Balance.DamageUpgrade` — 8 ขั้น/ด่าน ×1.1 รวม 72 ขั้น** (สั่งมา 9 ขั้น/ด่าน แต่ขัดกับ "72 ขั้น" ที่สั่งมาเอง)
   9 ขั้น/ด่าน = 81 ขั้น และทำให้ด่าน 4 จบใน 0.502 ชม. เฉียดพื้น 0.5 ชม. แบบไม่มีระยะเผื่อ
   (เพดานจริงคือ ×1.10014 ต่อขั้น) · **8 ขั้นตรงกับ 72 พอดีและมีระยะเผื่อทั้งสองด้าน**
   ด่าน 2 = 0.9 ชม. ไต่ถึงด่าน 9 = 54 ชม. · ซิกแซกตามขั้นคลาส หลุมลึกสุด 2.6 เท่า
@@ -416,7 +416,7 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   ลดค่าลงเมื่อไหร่ = ลูกที่ผู้เล่นสะสมเกินเพดานหายทันที
 - **โครงของไข่** — `heldEggs` / `hatching` เก็บ **รายฟองพร้อมน้ำหนัก** ไม่ใช่ตัวนับ
   และไข่รายด่าน `egg_stage1..9` ที่ทุกด่านต้องมีครบ (ขาดด่านไหน = ด่านนั้นตันถาวร)
-- **`Config.BalanceCheck`** — ผู้เล่นอ้างอิงที่ยามทั้งสามตัวใช้วัด
+- **`Config.Balance.BalanceCheck`** — ผู้เล่นอ้างอิงที่ยามทั้งสามตัวใช้วัด
   ตั้งผิด = ยามผ่านทั้งที่เกมเล่นไม่ไหว (เคยเกิดมาแล้ว)
 - **สูตรเงินจากการฆ่า** (`KILL_DEFENDER_*` / `KILL_BOSS_*`) — ต้องโตไม่ช้ากว่าราคาของ
 - **สูตรอัตราผลิต** (`WEIGHT_EXPONENT` / `ONLINE_PER_MINUTE` / `OFFLINE_RATE_RATIO`)
@@ -424,11 +424,11 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 - **ตัวคูณคลาส** (`CharacterClasses[x].multiplier`) — เป็นแกนไต่ของทั้งเกม
   แก้เมื่อไหร่ต้องคำนวณราคา `DamageUpgrade` และ `turretDps` ใหม่ทั้งชุด
   และห้ามดัน SS ให้ห่างจาก S เกิน 2.5 เท่า (pay-to-win)
-- **`Config.DamageUpgrade`** — ตัวคูณต่อขั้น, ขั้นต่อด่าน, `MAX_LEVEL`,
+- **`Config.Balance.DamageUpgrade`** — ตัวคูณต่อขั้น, ขั้นต่อด่าน, `MAX_LEVEL`,
   **ตาราง `STAGE_COST_BASE`** และสูตรเพดาน `wallProgress × 8`
   ราคาคิดมาจากรายได้ต่อด่าน แก้ข้างเดียวแล้วเงินจะล้นหรือผู้เล่นจะตัน
   · `damageLevel` ใน PlayerData ฝังอยู่ในข้อมูลที่เซฟไปแล้ว
-- **`Config.Combat`** — อัตราปล่อย, `TURRET_TOLL`, เกณฑ์ auto-pause
+- **`Config.Balance.Combat`** — อัตราปล่อย, `TURRET_TOLL`, เกณฑ์ auto-pause
   และธง `ALLOW_AUTO_RELEASE_MOTHERS` / `MOTHERS_SELECTABLE_FROM_PEN` ที่ `validate()` ตรึงไว้ว่าต้องเป็น false
 - **การแบ่งข้อมูล per-player vs per-server** — อะไรเซฟลง DataStore อะไรอยู่ใน memory
   (ตารางใน `docs/data-schema.md` §2 — สลับผิดข้างแล้วผู้เล่นเสียของหรือได้ของฟรี)
@@ -436,9 +436,22 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   ห้ามเปลี่ยนชื่อ ห้าม reuse (เลิกใช้ให้ตั้ง `enabled = false` แทนการลบ)
 - **config กลางใน `src/shared`** — ตัวละคร/คลาส, tier น้ำหนัก, ตารางคลาสของไข่,
   `CHILD_RATIO`, อัตราผลิต, สูตร damage/เงิน, ราคาทุกอย่าง, เพดานคลัง
+- **`Config.Balance` — ลูกบิดสมดุลทั้งหมดอยู่ใต้ชื่อเดียว** 17 กลุ่ม:
+  `Weight` · `StageWeightTiers` · `Production` · `Damage` · `NewPlayer` · `Economy` ·
+  `Pen` · `Bag` · `Hatchery` · `Stages` · `Stage` · `Boss` · `DamageUpgrade` ·
+  `SpeedUpgrade` · `Combat` · `BalanceCheck` · `Weapon`
+  **ชื่อคีย์ข้างในคงเดิมทั้งหมด** ย้ายแค่ที่อยู่
+  ⚠️ `validate()` บังคับสองทาง: ต้องมีครบทุกกลุ่มใน `Config.Balance`
+  **และต้องไม่มีชื่อเดียวกันที่ `Config` ชั้นบนสุด** — เติมกลับเข้าไปเมื่อไหร่ เซิร์ฟไม่บูต
+  (เพิ่มกลุ่มสมดุลใหม่ต้องเติมชื่อใน `BALANCE_GROUPS` ด้วย ไม่งั้นยามมองไม่เห็น)
+  ของที่ **ห้าม** ย้ายเข้ามา: `MapDimensions` · `RemoteNames` · `DataStore` · `Stack` ·
+  `Uid` · `World` · `Inventory` · ตารางที่เป็น id (`Characters` · `EggTypes` · `Statuses`)
+- **เวลาฟักไข่** — `hatchTime` ในตาราง `EggTypes` **คำนวณจาก
+  `Config.Balance.Hatchery.SECONDS_PER_STAGE` ห้ามใส่ตัวเลขดิบ** · `validate()` บังคับว่าต้องตรงสูตร
+  (ไข่ที่ `enabled = false` ยกเว้น — แช่แข็งไปแล้ว)
 - **`productId` ของ Developer Product และการจัดการ `ProcessReceipt`** — พลาดแล้ว
   ผู้เล่นจ่ายเงินจริงแล้วไม่ได้ของ หรือได้ของซ้ำจากการจ่ายครั้งเดียว
-- **`Config.SpeedUpgrade`** — ราคา/จำนวนขั้น/`CURVE_EXPONENT`/`MAX_MULTIPLIER`/`SPEED_CEILING`
+- **`Config.Balance.SpeedUpgrade`** — ราคา/จำนวนขั้น/`CURVE_EXPONENT`/`MAX_MULTIPLIER`/`SPEED_CEILING`
   · `speedLevel` ฝังอยู่ในข้อมูลที่เซฟไปแล้ว · **ห้ามขยายเป็น 10 ขั้น** (เหตุผลข้างบน)
   · แก้ความเร็วเมื่อไหร่ **ต้องคำนวณความหนากำแพงใหม่ทั้งชุด** (`getMinWallThickness`)
 - **ความหนากำแพงทุกชนิด** (`StageWall.Thickness` · `Lane.WallThickness` · `Boundary.Thickness`)

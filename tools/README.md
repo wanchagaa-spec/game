@@ -95,4 +95,4 @@ python3 tools/check-hardcoded-numbers.py
 
 จำเป็นเพราะ `{...}` ใน Luau ที่มีค่า `nil` จะกลายเป็นอาเรย์มีรู แล้ววนหยุดกลางทาง →
 คอลัมน์หายเงียบ ๆ โดยไม่มี error เกิดขึ้นจริงมาแล้วตอนเปลี่ยนชื่อค่าใน Config
-(`Config.Hatchery.MAX_EGGS` → `MAX_SLOTS`) ตอนนี้เจอแบบนั้นจะดังทันทีพร้อมบอกว่าแถวไหน
+(`Config.Balance.Hatchery.MAX_EGGS` → `MAX_SLOTS`) ตอนนี้เจอแบบนั้นจะดังทันทีพร้อมบอกว่าแถวไหน

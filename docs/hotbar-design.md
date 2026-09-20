@@ -39,7 +39,7 @@
 
 ### แยกจากกระเป๋าเดิมทั้งสองใบ
 
-`Config.Bag.CAPACITY` (แม่ 100) กับ `Config.Hatchery.BAG_CAPACITY` (ไข่)
+`Config.Balance.Bag.CAPACITY` (แม่ 100) กับ `Config.Balance.Hatchery.BAG_CAPACITY` (ไข่)
 **เป็นคนละเรื่องกับ hotbar** · hotbar ไม่มีเพดานของตัวเอง เพราะไม่ได้เก็บของ
 
 ---

@@ -36,8 +36,8 @@ local WORLD = Config.World
 -- BAG_SLOTS   = ความยาวของ state.heldEggs — ไข่ที่ถือไว้ ยังไม่เข้าสวน
 -- HATCH_SLOTS = ความยาวของ state.hatching — ไข่ที่กำลังฟัก
 -- ใช้สลับกันเมื่อไหร่ = index หลุดขอบอาเรย์ทันทีที่ปรับค่าใดค่าหนึ่ง
-local BAG_SLOTS = Config.Hatchery.BAG_CAPACITY
-local HATCH_SLOTS = Config.Hatchery.MAX_SLOTS
+local BAG_SLOTS = Config.Balance.Hatchery.BAG_CAPACITY
+local HATCH_SLOTS = Config.Balance.Hatchery.MAX_SLOTS
 
 -- ไข่ 1 ฟองที่ถืออยู่ (ยังไม่เข้าสวนฟัก)
 -- ⚠️ มีน้ำหนักของตัวเองตั้งแต่วินาทีที่เกิด
@@ -248,7 +248,7 @@ local function buildSyncPayload(state: PlayerState)
 		mothersInPen = pen,
 		mothersInBag = bag,
 		penCapacity = Config.getPenCapacity(state.penLevel),
-		bagCapacity = Config.Bag.CAPACITY,
+		bagCapacity = Config.Balance.Bag.CAPACITY,
 	}
 end
 
@@ -302,7 +302,7 @@ local function hatch(player: Player, slotIndex: number, slot: HatchSlot)
 		mother.lastProducedAt = os.time()
 		table.insert(state.mothersInPen, mother)
 		placedIn = "pen"
-	elseif #state.mothersInBag < Config.Bag.CAPACITY then
+	elseif #state.mothersInBag < Config.Balance.Bag.CAPACITY then
 		table.insert(state.mothersInBag, mother)
 		placedIn = "bag"
 	else
@@ -446,7 +446,7 @@ function EggService.moveMother(player: Player, rawUid: unknown, rawTarget: unkno
 		mother.lastProducedAt = os.time()
 		table.insert(state.mothersInPen, mother)
 	else
-		if #state.mothersInBag >= Config.Bag.CAPACITY then
+		if #state.mothersInBag >= Config.Balance.Bag.CAPACITY then
 			return false, "กระเป๋าเต็มแล้ว"
 		end
 		local mother = takeMother(state.mothersInPen, rawUid)
@@ -493,7 +493,7 @@ function EggService.onPlayerAdded(player: Player)
 
 	-- ⚠️ แจกไข่เริ่มต้นทีละฟองผ่าน grantEgg เพื่อให้แต่ละฟองได้สุ่มน้ำหนักของตัวเอง
 	-- startingEggs เป็นแค่ "คำสั่งแจก" ไม่ใช่รูปแบบที่เก็บ
-	for eggId, amount in Config.NewPlayer.startingEggs do
+	for eggId, amount in Config.Balance.NewPlayer.startingEggs do
 		for _ = 1, amount do
 			EggService.grantEgg(player, eggId)
 		end

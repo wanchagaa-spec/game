@@ -48,7 +48,7 @@ code{background:var(--head);padding:1px 5px;border-radius:3px;font-size:12.5px}
 <h1>ตารางสมดุล — เกมไข่ทหาร</h1>
 <div class="meta">ระบบรบใหม่: ปล่อยทหารต่อเนื่องแบบ Age of War ·
 ตัวเลขทุกตัวดึงจาก <code>src/shared/Config.lua</code> โดยตรง <b>ทั้งในตารางและในคำอธิบาย</b> ไม่ได้พิมพ์มือ ·
-สร้างเมื่อ 2026-09-15 · ตรวจด้วย <code>luau tests/run.luau</code></div>
+สร้างเมื่อ 2026-09-20 · ตรวจด้วย <code>luau tests/run.luau</code></div>
 </header>
 
 <div class="toc">
@@ -75,7 +75,7 @@ code{background:var(--head);padding:1px 5px;border-radius:3px;font-size:12.5px}
 ระบบเดิม "กดส่งทีเดียวแล้วรอผล" ยกเลิกทั้งหมดแล้ว<br>
 และตัวคูณ damage ก็ไม่ได้มาฟรีตามด่านอีกแล้ว — <b>ต้องซื้อด้วยเงิน</b> (หัวข้อ 6)</div>
 <div class="scroll"><table class=""><thead><tr><th>ด่าน</th><th>แม่อ้างอิง (kg)</th><th>คลาส</th><th>คอก</th><th>ผลิต/นาที ต่อแม่</th><th>ผลิตได้/นาที รวม</th><th>ปล่อยได้/นาที</th><th>คอขวด</th><th>damage ต่อตัว</th><th>damage/วิ</th><th>HP ด่าน</th><th>เวลาพัง</th></tr></thead><tbody><tr><td>ด่าน 1</td><td>500</td><td>C</td><td>5</td><td>1.50</td><td>7.48</td><td>60</td><td class="bad"><b>ผลิต</b></td><td>4.79</td><td>0.597</td><td>—</td><td>—</td></tr><tr><td>ด่าน 2</td><td>500</td><td>C</td><td>6</td><td>4.49</td><td>26.9</td><td>60</td><td class="bad"><b>ผลิต</b></td><td>10.3</td><td>4.61</td><td>15K</td><td><b>54 น.</b></td></tr><tr class="hi"><td>ด่าน 3</td><td>500</td><td>C</td><td>7</td><td>13.5</td><td>94.2</td><td>60</td><td>ปล่อย</td><td>22.0</td><td>22.0</td><td>150K</td><td><b>1.9 ชม.</b></td></tr><tr><td>ด่าน 4</td><td>500</td><td>B</td><td>8</td><td>40.4</td><td>323</td><td>120</td><td>ปล่อย</td><td>283</td><td>567</td><td>1.5M</td><td><b>44 น.</b></td></tr><tr><td>ด่าน 5</td><td>500</td><td>B</td><td>9</td><td>121</td><td>1.1K</td><td>180</td><td>ปล่อย</td><td>607</td><td>1.8K</td><td>15M</td><td><b>2.3 ชม.</b></td></tr><tr><td>ด่าน 6</td><td>500</td><td>B</td><td>10</td><td>363</td><td>3.6K</td><td>240</td><td>ปล่อย</td><td>1.3K</td><td>5.2K</td><td>150M</td><td><b>8.0 ชม.</b></td></tr><tr><td>ด่าน 7</td><td>500</td><td>A</td><td>11</td><td>363</td><td>4K</td><td>360</td><td>ปล่อย</td><td>16.7K</td><td>100.4K</td><td>1.5B</td><td><b>4.1 ชม.</b></td></tr><tr><td>ด่าน 8</td><td>500</td><td>A</td><td>12</td><td>363</td><td>4.4K</td><td>480</td><td>ปล่อย</td><td>35.9K</td><td>287.1K</td><td>15B</td><td><b>14.5 ชม.</b></td></tr><tr><td>ด่าน 9</td><td>500</td><td>A</td><td>13</td><td>363</td><td>4.7K</td><td>600</td><td>ปล่อย</td><td>76.9K</td><td>769.2K</td><td>150B</td><td><b>2 วัน</b></td></tr></tbody></table></div>
-<div class="note">"แม่อ้างอิง" = ผู้เล่นชั้นกลางที่ด่านนั้น (คอกเลเวล N · upgrade อัตราผลิตขั้น N−1) ตาม <code>Config.BalanceCheck</code>
+<div class="note">"แม่อ้างอิง" = ผู้เล่นชั้นกลางที่ด่านนั้น (คอกเลเวล N · upgrade อัตราผลิตขั้น N−1) ตาม <code>Config.Balance.BalanceCheck</code>
 — ค่าชุดเดียวกับที่ <code>assertProgressionIsSane()</code> ใช้กันไม่ให้เซิร์ฟบูตตอนสมดุลพัง</div>
 <div class="key"><b>ด่าน 1 ไม่มีกำแพงและไม่มีทหารฝ่ายรับ</b> — ผู้เล่นใหม่เดินไปสู้บอสตัวเล็กเอาไข่ได้เลย
 แก้ปัญหาไก่กับไข่ (ต้องมีแม่ถึงจะมีกองทัพ ต้องมีไข่ถึงจะมีแม่) · <code>validate()</code> บังคับข้อนี้ไว้</div>
@@ -222,7 +222,7 @@ code{background:var(--head);padding:1px 5px;border-radius:3px;font-size:12.5px}
 <tr><td>5</td><td>ย้ายตัวคูณ damage มาเป็นระบบซื้อ → คำนวณใหม่อีก</td><td>150,000</td></tr>
 <tr class="hi"><td><b>✅</b></td><td><b>เก็บเป็นสัดส่วน ให้โค้ดคำนวณเอง</b></td><td><b>ไม่ต้องแก้มืออีกแล้ว</b></td></tr>
 </tbody></table></div>
-<div class="formula">Config.Combat.TURRET_TOLL = {{ {', '.join(f'{float(r[3]):.2f}' for r in TUR)} }}<br>
+<div class="formula">Config.Balance.Combat.TURRET_TOLL = {{ {', '.join(f'{float(r[3]):.2f}' for r in TUR)} }}<br>
 turretDps(N) = TURRET_TOLL[N] × getReferenceDps(N)</div>
 <div class="scroll"><table class=""><thead><tr><th>ด่าน</th><th>damage/วิ ของเรา</th><th>turretDps ที่คำนวณได้</th><th>กินกำลังพล</th><th>ทหารบนสนาม</th><th>เวลารบทั้งด่าน</th><th>turret ล้างสนามใน</th></tr></thead><tbody><tr><td>ด่าน 2</td><td>4.61</td><td><b>0.461</b></td><td class="good">10.0%</td><td>30 ตัว</td><td>54 น.</td><td class="dim">669 วิ</td></tr><tr><td>ด่าน 3</td><td>22.0</td><td><b>2.42</b></td><td class="good">11.0%</td><td>30 ตัว</td><td>1.9 ชม.</td><td class="dim">273 วิ</td></tr><tr><td>ด่าน 4</td><td>567</td><td><b>73.7</b></td><td class="good">13.0%</td><td>60 ตัว</td><td>44 น.</td><td class="dim">231 วิ</td></tr><tr><td>ด่าน 5</td><td>1.8K</td><td><b>255</b></td><td class="good">14.0%</td><td>90 ตัว</td><td>2.3 ชม.</td><td class="dim">214 วิ</td></tr><tr><td>ด่าน 6</td><td>5.2K</td><td><b>833</b></td><td class="good">16.0%</td><td>120 ตัว</td><td>8.0 ชม.</td><td class="dim">187 วิ</td></tr><tr><td>ด่าน 7</td><td>100.4K</td><td><b>17.1K</b></td><td class="good">17.0%</td><td>180 ตัว</td><td>4.1 ชม.</td><td class="dim">176 วิ</td></tr><tr><td>ด่าน 8</td><td>287.1K</td><td><b>54.5K</b></td><td class="good">19.0%</td><td>240 ตัว</td><td>14.5 ชม.</td><td class="dim">158 วิ</td></tr><tr><td>ด่าน 9</td><td>769.2K</td><td><b>153.8K</b></td><td class="good">20.0%</td><td>300 ตัว</td><td>2 วัน</td><td class="dim">150 วิ</td></tr></tbody></table></div>
 <div class="key"><b>ตาราง <code>Stages</code> ไม่มีฟิลด์ <code>turretDps</code> แล้ว</b> —
@@ -329,7 +329,7 @@ HP กำแพง = 50% ของ HP ทหารรวมในด่านน
 <div class="key"><b>ตัวคูณถดถอย — ขั้นแรกคุ้มที่สุดต่างกัน 6.9 เท่า</b>
 (ขั้น 1 เร็วขึ้น 90% · ขั้น 5 เร็วขึ้น 13%)<br>
 สูตร: <code>ตัวคูณ = 1 + 3 × (ขั้น ÷ 5)<sup>0.75</sup></code>
-— เลขชี้กำลังปรับได้ที่ <code>Config.SpeedUpgrade.CURVE_EXPONENT</code></div>
+— เลขชี้กำลังปรับได้ที่ <code>Config.Balance.SpeedUpgrade.CURVE_EXPONENT</code></div>
 <div class="key warn"><b>ทำไม 5 ขั้น ไม่ใช่ 10 — เป็นการตัดสินใจถาวร</b><br>
 ราคาไล่ ×10 ต่อขั้น ถ้าทำ 10 ขั้น ขั้นสุดท้ายจะแพงกว่าขั้นแรก <b>1,000,000,000 เท่า</b>
 แต่ตัวคูณชนเพดาน ×4.00 แล้ว จึงให้ความเร็วเพิ่มแค่ไม่กี่ %<br>
@@ -380,7 +380,7 @@ HP กำแพง = 50% ของ HP ทหารรวมในด่านน
 และความเร็วสูงสุดถูกตรึงไม่ให้เกิน 200 ซึ่งเป็นจุดที่ Roblox เริ่มทะลุของจนเล่นไม่ได้</div>
 <footer>
 สร้างจาก <code>src/shared/Config.lua</code> · ตัวเลขทุกตัวคำนวณจากฟังก์ชันจริงใน Config ไม่ได้พิมพ์มือ<br>
-"ผู้เล่นชั้นกลาง" ใช้ค่าอ้างอิงจาก <code>Config.BalanceCheck</code> ชุดเดียวกับที่ <code>assertProgressionIsSane()</code> ใช้<br>
+"ผู้เล่นชั้นกลาง" ใช้ค่าอ้างอิงจาก <code>Config.Balance.BalanceCheck</code> ชุดเดียวกับที่ <code>assertProgressionIsSane()</code> ใช้<br>
 รายละเอียดที่มาของทุกค่าอยู่ใน <code>docs/data-schema.md</code>
 </footer>
 </div></body></html>

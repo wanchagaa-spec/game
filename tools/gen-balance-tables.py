@@ -209,7 +209,7 @@ for r in STAGE:
         cell('<b>' + fhours(hours) + '</b>' if float(hp) > 0 else '—'),
     ], hi))
 W(table(['ด่าน','แม่อ้างอิง (kg)','คลาส','คอก','ผลิต/นาที ต่อแม่','ผลิตได้/นาที รวม','ปล่อยได้/นาที','คอขวด','damage ต่อตัว','damage/วิ','HP ด่าน','เวลาพัง'], rows))
-W(f'''<div class="note">"แม่อ้างอิง" = ผู้เล่นชั้นกลางที่ด่านนั้น (คอกเลเวล N · upgrade อัตราผลิตขั้น N−1) ตาม <code>Config.BalanceCheck</code>
+W(f'''<div class="note">"แม่อ้างอิง" = ผู้เล่นชั้นกลางที่ด่านนั้น (คอกเลเวล N · upgrade อัตราผลิตขั้น N−1) ตาม <code>Config.Balance.BalanceCheck</code>
 — ค่าชุดเดียวกับที่ <code>assertProgressionIsSane()</code> ใช้กันไม่ให้เซิร์ฟบูตตอนสมดุลพัง</div>
 <div class="key"><b>ด่าน 1 ไม่มีกำแพงและไม่มีทหารฝ่ายรับ</b> — ผู้เล่นใหม่เดินไปสู้บอสตัวเล็กเอาไข่ได้เลย
 แก้ปัญหาไก่กับไข่ (ต้องมีแม่ถึงจะมีกองทัพ ต้องมีไข่ถึงจะมีแม่) · <code>validate()</code> บังคับข้อนี้ไว้</div>''')
@@ -502,7 +502,7 @@ W('''<div class="note">ค่านี้พลาดมาแล้ว <b>ส�
 <tr><td>5</td><td>ย้ายตัวคูณ damage มาเป็นระบบซื้อ → คำนวณใหม่อีก</td><td>150,000</td></tr>
 <tr class="hi"><td><b>✅</b></td><td><b>เก็บเป็นสัดส่วน ให้โค้ดคำนวณเอง</b></td><td><b>ไม่ต้องแก้มืออีกแล้ว</b></td></tr>
 </tbody></table></div>
-<div class="formula">Config.Combat.TURRET_TOLL = {{ {', '.join(f'{float(r[3]):.2f}' for r in TUR)} }}<br>
+<div class="formula">Config.Balance.Combat.TURRET_TOLL = {{ {', '.join(f'{float(r[3]):.2f}' for r in TUR)} }}<br>
 turretDps(N) = TURRET_TOLL[N] × getReferenceDps(N)</div>''')
 rows = []
 for r in TUR:
@@ -713,7 +713,7 @@ _gl = float(SPEED[-1][4]) * 100
 W(f'''<div class="key"><b>ตัวคูณถดถอย — ขั้นแรกคุ้มที่สุดต่างกัน {_g1/_gl:.1f} เท่า</b>
 (ขั้น 1 เร็วขึ้น {_g1:.0f}% · ขั้น {int(META['speedMaxLevel'])} เร็วขึ้น {_gl:.0f}%)<br>
 สูตร: <code>ตัวคูณ = 1 + {float(META['speedMaxMultiplier'])-1:.0f} × (ขั้น ÷ {int(META['speedMaxLevel'])})<sup>{fnum(META['speedCurveExponent'])}</sup></code>
-— เลขชี้กำลังปรับได้ที่ <code>Config.SpeedUpgrade.CURVE_EXPONENT</code></div>''')
+— เลขชี้กำลังปรับได้ที่ <code>Config.Balance.SpeedUpgrade.CURVE_EXPONENT</code></div>''')
 
 W(f'''<div class="key warn"><b>ทำไม {int(META['speedMaxLevel'])} ขั้น ไม่ใช่ 10 — เป็นการตัดสินใจถาวร</b><br>
 ราคาไล่ ×{_cm:.0f} ต่อขั้น ถ้าทำ 10 ขั้น ขั้นสุดท้ายจะแพงกว่าขั้นแรก <b>{_cm**9:,.0f} เท่า</b>
@@ -823,7 +823,7 @@ W(f'''<div class="key"><b>ขั้นต่ำเป็นสูตร ไม�
 
 W(f'''<footer>
 สร้างจาก <code>src/shared/Config.lua</code> · ตัวเลขทุกตัวคำนวณจากฟังก์ชันจริงใน Config ไม่ได้พิมพ์มือ<br>
-"ผู้เล่นชั้นกลาง" ใช้ค่าอ้างอิงจาก <code>Config.BalanceCheck</code> ชุดเดียวกับที่ <code>assertProgressionIsSane()</code> ใช้<br>
+"ผู้เล่นชั้นกลาง" ใช้ค่าอ้างอิงจาก <code>Config.Balance.BalanceCheck</code> ชุดเดียวกับที่ <code>assertProgressionIsSane()</code> ใช้<br>
 รายละเอียดที่มาของทุกค่าอยู่ใน <code>docs/data-schema.md</code>
 </footer>
 </div></body></html>''')

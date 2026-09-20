@@ -136,7 +136,7 @@ export type StatusType = {
 	coinMultiplier: number, -- คูณรายได้เงิน
 	productionMultiplier: number, -- คูณความเร็วในการผลิตลูก
 
-	-- บวกเข้ากับ Config.Weight.CHILD_RATIO (0.01)
+	-- บวกเข้ากับ Config.Balance.Weight.CHILD_RATIO (0.01)
 	-- เช่น +0.01 → ลูกหนัก 2% ของแม่แทนที่จะเป็น 1%
 	childRatioBonus: number,
 }
@@ -154,7 +154,7 @@ export type WeightTier = {
 	id: number,
 	min: number, -- น้ำหนักต่ำสุดในชั้นนี้ (kg, จำนวนเต็ม)
 	max: number, -- น้ำหนักสูงสุดในชั้นนี้ (kg, จำนวนเต็ม) — ชั้นบนสุด min = max
-	weight: number, -- น้ำหนักการสุ่ม ต่อ Config.Weight.TIER_ROLL_MAX
+	weight: number, -- น้ำหนักการสุ่ม ต่อ Config.Balance.Weight.TIER_ROLL_MAX
 }
 
 -- ค่าประจำด่าน 1 ด่าน
@@ -214,7 +214,7 @@ export type DamageFormula = {
 
 -- ⚠️ เปลี่ยนชื่อจาก Config.Farm ตอน Phase 1.5 — ดีไซน์ใหม่เรียกพื้นที่ของผู้เล่นว่า "คอก"
 -- ตรงนี้เก็บ "กติกาของเซิร์ฟเวอร์" ส่วน **รูปทรงของโลกอยู่ที่ Config.MapDimensions**
--- และความจุคอก (กี่ตัว) อยู่ที่ Config.Pen ซึ่งโตตามเลเวล
+-- และความจุคอก (กี่ตัว) อยู่ที่ Config.Balance.Pen ซึ่งโตตามเลเวล
 Config.World = {
 	-- จำนวนคอกสูงสุดในเซิร์ฟเวอร์ = จำนวนผู้เล่นสูงสุดที่มีคอกได้พร้อมกัน
 	-- ⚠️ ต้องเท่ากับ BalanceCheck.PLAYERS_PER_SERVER เสมอ (validate() บังคับแบบเท่ากันเป๊ะ)
@@ -282,7 +282,7 @@ Config.MapDimensions = {
 		-- ⚠️ ×2 จากค่าปกติของ Roblox (16) — แมพใหญ่ขึ้นมาก ถ้าเดินเท่าเดิมจะน่าเบื่อ
 		-- ตั้งจริงที่ StarterPlayer.CharacterWalkSpeed ใน default.project.json
 		-- และ Main.server.lua เช็คซ้ำตอนบูตว่าตรงกับค่านี้
-		-- ⚠️ ซื้อเพิ่มได้ถึง ×4 ด้วย Config.SpeedUpgrade — ค่านี้เป็นแค่ "ขั้น 0"
+		-- ⚠️ ซื้อเพิ่มได้ถึง ×4 ด้วย Config.Balance.SpeedUpgrade — ค่านี้เป็นแค่ "ขั้น 0"
 		WalkSpeed = 32,
 
 		-- ความสูงที่กระโดดได้ (studs) — ใช้เป็นเกณฑ์ว่ากำแพงใสต้องสูงกว่านี้ (validate() บังคับ)
@@ -497,6 +497,32 @@ Config.DataStore = {
 }
 
 --------------------------------------------------------------------------------
+-- Config.Balance — ลูกบิดสมดุลทั้งหมดอยู่ใต้ชื่อเดียว
+--------------------------------------------------------------------------------
+-- ⚠️ **ค่าที่ปรับแล้วเกมยากขึ้น/ง่ายขึ้น ต้องอยู่ใน Config.Balance เท่านั้น**
+-- ส่วนที่อยู่นอก Balance คือของที่ปรับแล้วเกม "ไม่เหมือนเดิม" คนละแบบ:
+-- id · schema · ชื่อ RemoteEvent · รูปทรงแมพ · รูปแบบ key — พวกนั้นแก้แล้วต้องเขียน migration
+--
+-- ที่ต้องแยกเพราะก่อนหน้านี้ลูกบิดสมดุลกับของที่ห้ามแตะนั่งปนกันอยู่ชั้นเดียวกัน
+-- ใครเปิดไฟล์มาแล้วเห็น `Config.Pen` กับ `Config.Stack` เรียงติดกัน ไม่มีอะไรบอกเลยว่า
+-- อันหนึ่งปรับได้ทุกวัน อีกอันแก้แล้วข้อมูลผู้เล่นอ่านไม่ออก
+--
+-- ⚠️ `validate()` บังคับสองทาง: ทุกกลุ่มใน BALANCE_GROUPS ต้องมีอยู่ใน Config.Balance
+-- **และต้องไม่มีชื่อเดียวกันโผล่ที่ Config ชั้นบนสุด** — กันไม่ให้ใครเผลอเติมกลับเข้าไป
+--
+-- ⚠️ ชื่อคีย์ข้างในทุกตัว **คงเดิมทั้งหมด** (ONLINE_PER_MINUTE · STEPS_PER_STAGE ฯลฯ)
+-- ย้ายแค่ที่อยู่ ไม่ได้เปลี่ยนชื่อ เพราะคีย์พวกนี้อยู่ในเอกสารสมดุลและในหัวคนทำงานแล้ว
+local Balance = {}
+
+-- ⚠️ รายชื่อกลุ่มที่ต้องอยู่ใน Balance — `validate()` เดินตามรายการนี้
+-- เพิ่มกลุ่มสมดุลใหม่เมื่อไหร่ **ต้องเติมชื่อตรงนี้ด้วย** ไม่งั้นยามมองไม่เห็น
+local BALANCE_GROUPS: { string } = {
+	"StageWeightTiers", "Weight", "Production", "Damage", "NewPlayer",
+	"Economy", "Pen", "Bag", "Hatchery", "Stages", "Stage", "Boss",
+	"DamageUpgrade", "SpeedUpgrade", "Combat", "BalanceCheck", "Weapon",
+}
+
+--------------------------------------------------------------------------------
 -- น้ำหนักตัวแม่
 --------------------------------------------------------------------------------
 -- ⚠️ โครงหลัก: น้ำหนักแม่เป็นส่วนหนึ่งของ stack key ของลูก เปลี่ยนวิธีสุ่มหรือ
@@ -541,9 +567,9 @@ local StageWeightTiers: { [number]: { WeightTier } } = {
 	[1] = WeightTiers,
 }
 
-Config.StageWeightTiers = StageWeightTiers
+Balance.StageWeightTiers = StageWeightTiers
 
-Config.Weight = {
+Balance.Weight = {
 	-- ลูกหนัก 1% ของแม่เสมอ
 	-- ⚠️ ค่านี้ทำให้น้ำหนักลูกเป็นทศนิยมได้ (แม่ 999 → ลูก 9.99)
 	-- จึงห้ามเอาน้ำหนักลูกไปสร้าง stack key ให้ใช้น้ำหนัก "แม่" ซึ่งเป็นจำนวนเต็มเสมอ
@@ -568,7 +594,7 @@ Config.Weight = {
 -- ทั้งออนไลน์และออฟไลน์คำนวณจาก timestamp ไม่ใช่ loop นับสด
 -- เพื่อให้ผลลัพธ์เหมือนกันไม่ว่าเซิร์ฟเวอร์จะกระตุกหรือผู้เล่นจะออกไปนานแค่ไหน
 
-Config.Production = {
+Balance.Production = {
 	-- อัตราผลิต = ONLINE_PER_MINUTE × (น้ำหนักแม่ ÷ WEIGHT_REFERENCE)^WEIGHT_EXPONENT
 	--
 	-- ⚠️ ทำไม exponent = 0.25 ไม่ใช่ 0.5
@@ -751,7 +777,7 @@ local Damage: { ACTIVE_FORMULA: string?, FORMULAS: { [string]: DamageFormula } }
 	FORMULAS = DamageFormulas,
 }
 
-Config.Damage = Damage
+Balance.Damage = Damage
 
 --------------------------------------------------------------------------------
 -- เพดานคลัง
@@ -760,7 +786,7 @@ Config.Damage = Damage
 -- ต้องมีตั้งแต่วันแรก เพราะ "เพิ่ม" เพดานทีหลังง่าย แต่ "ลด" ทีหลังแปลว่าต้องยึดของผู้เล่น
 
 Config.Inventory = {
-	-- จำนวนแม่ทั้งหมดที่ถือได้ = Config.Bag.CAPACITY + ความจุคอกตามเลเวล
+	-- จำนวนแม่ทั้งหมดที่ถือได้ = Config.Balance.Bag.CAPACITY + ความจุคอกตามเลเวล
 	-- (ค่าสองตัวนั้นเป็นแหล่งความจริง ตัวนี้เป็นเพดานกันพลาดอีกชั้น)
 	MAX_MOTHERS = 200,
 
@@ -794,7 +820,7 @@ local startingEggs: { [string]: number } = {
 	egg_stage1 = 1,
 }
 
-Config.NewPlayer = {
+Balance.NewPlayer = {
 	coins = 500, -- ซื้อไข่ธรรมดาได้ 5 ฟอง
 	gems = 0,
 	startingEggs = startingEggs,
@@ -881,7 +907,7 @@ Config.Characters = Characters
 --------------------------------------------------------------------------------
 -- ไข่ชนิดไหนออกตัวละครคลาสไหนได้
 --------------------------------------------------------------------------------
--- ไข่ทุกชนิดใช้ "ตาราง tier น้ำหนักชุดเดียวกัน" (Config.Weight.TIERS)
+-- ไข่ทุกชนิดใช้ "ตาราง tier น้ำหนักชุดเดียวกัน" (Config.Balance.Weight.TIERS)
 -- ความต่างของไข่อยู่ที่คลาสตัวละครที่ออกได้ ซึ่งเป็นตัวคูณ damage/HP โดยตรง
 --
 -- กติกา:
@@ -981,7 +1007,7 @@ Config.EggCharacterPools = EggCharacterPools
 -- ถ้าไม่มีตัวคูณตามด่าน ผู้เล่นจะซื้อของขั้นกลาง ๆ ขึ้นไปไม่ได้เลย
 -- ไม่ว่าจะดันค่าเริ่มต้นขึ้นเท่าไหร่ก็ตาม (คูณค่าเริ่มต้นแค่ "เลื่อน" กำแพง ไม่ได้ลบกำแพง)
 
-Config.Economy = {
+Balance.Economy = {
 	BASE_PER_MINUTE = 1, -- แม่น้ำหนัก REFERENCE_WEIGHT ที่ด่าน 1 ได้กี่ coins/นาที
 	REFERENCE_WEIGHT = 100,
 	EXPONENT = 0.5, -- ถดถอยแบบรากที่สอง (ชุดเดียวกับสูตร damage)
@@ -1035,7 +1061,7 @@ Config.Economy = {
 -- ความจุ = BASE_CAPACITY + (level - 1)   →  Lv1 = 5 ตัว, Lv15 = 19 ตัว
 -- ค่าอัปเกรด Lv N → N+1 = UPGRADE_BASE_COST × UPGRADE_COST_MULTIPLIER ^ (N-1)
 
-Config.Pen = {
+Balance.Pen = {
 	BASE_CAPACITY = 5,
 	CAPACITY_PER_LEVEL = 1,
 
@@ -1054,7 +1080,7 @@ Config.Pen = {
 --------------------------------------------------------------------------------
 -- นับแยกจากคอก: ถือได้รวมสูงสุด CAPACITY + ความจุคอก
 
-Config.Bag = {
+Balance.Bag = {
 	CAPACITY = 100,
 }
 
@@ -1075,12 +1101,22 @@ Config.Bag = {
 --
 -- ทั้งสองเต็มแล้วหยิบไข่เพิ่มไม่ได้ ต้องแจ้งเตือนผู้เล่น
 
-Config.Hatchery = {
+Balance.Hatchery = {
 	-- จำนวนไข่ที่ถือติดตัวได้ ยังไม่เข้าสวนฟัก (PlayerData.heldEggs)
 	BAG_CAPACITY = 50,
 
 	-- จำนวนไข่ที่ฟักพร้อมกันได้ = จำนวนแท่นในสวนฟัก (PlayerData.hatching)
 	MAX_SLOTS = 50,
+
+	-- ⚠️ เวลาฟักของไข่รายด่าน = SECONDS_PER_STAGE × เลขด่าน (ด่าน 1 = 30 วิ · ด่าน 9 = 270 วิ)
+	-- `hatchTime` ในตาราง EggTypes **คำนวณจากค่านี้ ไม่ใช่ตัวเลขดิบ**
+	-- เคยเป็นตัวเลขดิบ 9 ตัวเรียงกัน แล้วต้องไล่แก้มือทุกครั้งที่ปรับจังหวะเกม
+	-- (ความผิดแบบเดียวกับ turretDps ที่ย้ายไปเป็นสัดส่วนแล้ว) · `validate()` บังคับว่าต้องตรงสูตร
+	SECONDS_PER_STAGE = 30,
+
+	-- ไข่ตำนานไม่ผูกด่าน จึงมีเวลาฟักของตัวเอง
+	-- ⚠️ ยาวกว่าด่าน 9 (270) อยู่เล็กน้อย โดยตั้งใจ — จ่าย Robux แล้วไม่ได้ฟักเร็วกว่าด้วย
+	LEGENDARY_SECONDS = 300,
 }
 
 --------------------------------------------------------------------------------
@@ -1100,7 +1136,7 @@ Config.Hatchery = {
 -- จำนวนทหารมาจากกติกา ×10 ต่อด่าน แต่เก็บเป็นตารางไม่ใช่สูตร
 -- เพื่อให้ปรับด่านใดด่านหนึ่งตอน balance ได้โดยไม่ต้องรื้อทั้งแถว
 --
--- ⚠️ ตารางนี้ **ไม่มี turretDps แล้ว** — ดูเหตุผลที่ Config.Combat.TURRET_TOLL
+-- ⚠️ ตารางนี้ **ไม่มี turretDps แล้ว** — ดูเหตุผลที่ Config.Balance.Combat.TURRET_TOLL
 local Stages: { StageDef } = {
 	-- ⚠️ ด่าน 1 ไม่มีกำแพงและไม่มีทหารฝ่ายรับ
 	-- เป็นด่านเริ่มต้น ผู้เล่นเดินไปสู้บอสตัวเล็กเอาไข่ได้เลยตั้งแต่เข้าเกมครั้งแรก
@@ -1116,9 +1152,9 @@ local Stages: { StageDef } = {
 	{ id = 9, defenders = 1000000000 },
 }
 
-Config.Stages = Stages
+Balance.Stages = Stages
 
-Config.Stage = {
+Balance.Stage = {
 	COUNT = 9,
 
 	DEFENDER_HP = 100, -- HP ต่อทหารฝ่ายรับ 1 ตัว
@@ -1141,7 +1177,7 @@ Config.Stage = {
 --
 -- ⚠️ server เป็นคนตัดสินเจ้าของไข่เท่านั้น ห้าม client ตัดสินเด็ดขาด
 
-Config.Boss = {
+Balance.Boss = {
 	RESPAWN_SECONDS = 300, -- รีเกิดทุก 5 นาที
 	EGGS_PER_SPAWN = 5, -- ไข่ที่วางในรังตอนบอสเกิด
 	EGG_GRAB_HOLD_SECONDS = 3, -- กดค้างกี่วินาทีถึงจะได้ไข่ (โดนตีแล้วนับใหม่)
@@ -1199,7 +1235,7 @@ Config.Boss = {
 -- ใช้กับทั้งตัวแม่และตัวลูกที่ส่งไปรบ · แม่ตายไปก็ไม่เสียการลงทุน
 -- และลูกที่สะสมไว้ตั้งแต่ด่านต้นแรงขึ้นตามผู้เล่น ไม่มีกองที่ตกยุค
 
-Config.DamageUpgrade = {
+Balance.DamageUpgrade = {
 	STEP_MULTIPLIER = 1.1, -- ตัวคูณ damage ต่อ 1 ขั้น
 	STEPS_PER_STAGE = 8, -- ปลดล็อกกี่ขั้นต่อ 1 กำแพงที่พังได้
 	MAX_LEVEL = 72, -- = STEPS_PER_STAGE × Stage.COUNT (validate() เช็คให้)
@@ -1252,7 +1288,7 @@ Config.DamageUpgrade = {
 -- แต่ให้ความเร็วเพิ่มแค่ 3-4% (เพราะตัวคูณถดถอยและชนเพดาน ×4)
 -- = ขั้นที่ไม่มีใครซื้อ เป็นตัวเลขหลอกตาในตารางเฉย ๆ แบบเดียวกับคอก Lv11-15 ที่ตัดทิ้งไปแล้ว
 -- 5 ขั้นจบที่ 100M ยังคุ้มทุกขั้น และครอบคลุมช่วงเกมพอแล้ว (ดู docs/data-schema.md §8.8)
-Config.SpeedUpgrade = {
+Balance.SpeedUpgrade = {
 	MAX_LEVEL = 5, -- ⚠️ ห้ามขยายเป็น 10 (เหตุผลข้างบน)
 
 	-- ราคา: ขั้นแรก 10,000 แล้ว ×10 ทุกขั้น → 10K · 100K · 1M · 10M · 100M (รวม 111.11M)
@@ -1282,7 +1318,7 @@ Config.SpeedUpgrade = {
 	THICKNESS_SAFETY = 2,
 }
 
-Config.Combat = {
+Balance.Combat = {
 	--------------------------------------------------------------------------
 	-- อาวุธป้องกันของกำแพง — เก็บเป็น "สัดส่วน" ไม่ใช่ตัวเลข damage
 	--------------------------------------------------------------------------
@@ -1347,7 +1383,7 @@ Config.Combat = {
 -- ค่าอ้างอิงของ "ผู้เล่นชั้นกลาง" ที่แต่ละด่าน ใช้เป็นไม้บรรทัดวัดว่าเกมยังเล่นจบได้
 -- ไม่ใช่ข้อมูลเกม — ไม่มีใครอ่านค่านี้ตอนเล่นจริง มีไว้ให้ validate() ใช้อย่างเดียว
 
-Config.BalanceCheck = {
+Balance.BalanceCheck = {
 	-- เวลาสะสมกองทัพต่อ 1 ด่านต้องอยู่ในช่วงนี้
 	MIN_HOURS_PER_STAGE = 0.5, -- เร็วกว่านี้ = ด่านไม่มีความหมาย
 	MAX_HOURS_PER_STAGE = 72, -- ช้ากว่านี้ = ผู้เล่นเลิกเล่น
@@ -1432,13 +1468,16 @@ Config.PurchaseLog = {
 -- (HP บอส 100×10^(N-1) ÷ damage 10×10^(N-1) = 10 เสมอ)
 -- ห้ามแก้ DAMAGE_BASE หรือ HP_BASE ของบอสข้างเดียว ไม่งั้นความรู้สึกจะเพี้ยนทั้งเกม
 
-Config.Weapon = {
+Balance.Weapon = {
 	MAX_LEVEL = 10,
 	DAMAGE_BASE = 10,
 	DAMAGE_MULTIPLIER = 10,
 	UPGRADE_BASE_COST = 1000,
 	UPGRADE_COST_MULTIPLIER = 10,
 }
+
+-- ปิดชุด Balance — ตั้งแต่บรรทัดนี้ลงไปอ่านผ่าน `Config.Balance.<กลุ่ม>` ได้แล้ว
+Config.Balance = Balance
 
 --------------------------------------------------------------------------------
 -- ทหาร
@@ -1541,7 +1580,7 @@ local EggTypes: { [string]: EggType } = {
 		name = "ไข่ด่าน 1",
 		source = "boss",
 		stage = 1,
-		hatchTime = 30,
+		hatchTime = Balance.Hatchery.SECONDS_PER_STAGE * 1,
 		color = rgb(235, 235, 225),
 	},
 	egg_stage2 = {
@@ -1551,7 +1590,7 @@ local EggTypes: { [string]: EggType } = {
 		name = "ไข่ด่าน 2",
 		source = "boss",
 		stage = 2,
-		hatchTime = 60,
+		hatchTime = Balance.Hatchery.SECONDS_PER_STAGE * 2,
 		color = rgb(200, 225, 235),
 	},
 	egg_stage3 = {
@@ -1561,7 +1600,7 @@ local EggTypes: { [string]: EggType } = {
 		name = "ไข่ด่าน 3",
 		source = "boss",
 		stage = 3,
-		hatchTime = 90,
+		hatchTime = Balance.Hatchery.SECONDS_PER_STAGE * 3,
 		color = rgb(150, 200, 235),
 	},
 	egg_stage4 = {
@@ -1571,7 +1610,7 @@ local EggTypes: { [string]: EggType } = {
 		name = "ไข่ด่าน 4",
 		source = "boss",
 		stage = 4,
-		hatchTime = 120,
+		hatchTime = Balance.Hatchery.SECONDS_PER_STAGE * 4,
 		color = rgb(120, 215, 180),
 	},
 	egg_stage5 = {
@@ -1581,7 +1620,7 @@ local EggTypes: { [string]: EggType } = {
 		name = "ไข่ด่าน 5",
 		source = "boss",
 		stage = 5,
-		hatchTime = 150,
+		hatchTime = Balance.Hatchery.SECONDS_PER_STAGE * 5,
 		color = rgb(150, 220, 120),
 	},
 	egg_stage6 = {
@@ -1591,7 +1630,7 @@ local EggTypes: { [string]: EggType } = {
 		name = "ไข่ด่าน 6",
 		source = "boss",
 		stage = 6,
-		hatchTime = 180,
+		hatchTime = Balance.Hatchery.SECONDS_PER_STAGE * 6,
 		color = rgb(235, 215, 110),
 	},
 	egg_stage7 = {
@@ -1601,7 +1640,7 @@ local EggTypes: { [string]: EggType } = {
 		name = "ไข่ด่าน 7",
 		source = "boss",
 		stage = 7,
-		hatchTime = 210,
+		hatchTime = Balance.Hatchery.SECONDS_PER_STAGE * 7,
 		color = rgb(240, 170, 80),
 	},
 	egg_stage8 = {
@@ -1611,7 +1650,7 @@ local EggTypes: { [string]: EggType } = {
 		name = "ไข่ด่าน 8",
 		source = "boss",
 		stage = 8,
-		hatchTime = 240,
+		hatchTime = Balance.Hatchery.SECONDS_PER_STAGE * 8,
 		color = rgb(230, 110, 90),
 	},
 	egg_stage9 = {
@@ -1621,7 +1660,7 @@ local EggTypes: { [string]: EggType } = {
 		name = "ไข่ด่าน 9",
 		source = "boss",
 		stage = 9,
-		hatchTime = 270,
+		hatchTime = Balance.Hatchery.SECONDS_PER_STAGE * 9,
 		color = rgb(190, 110, 235),
 	},
 	egg_legendary = {
@@ -1631,7 +1670,7 @@ local EggTypes: { [string]: EggType } = {
 		name = "ไข่ตำนาน",
 		source = "robux",
 		stage = nil, -- ไม่ผูกด่าน — ใช้ด่านที่ผู้ซื้ออยู่ตอนกด
-		hatchTime = 300,
+		hatchTime = Balance.Hatchery.LEGENDARY_SECONDS,
 		color = rgb(240, 185, 60),
 	},
 }
@@ -1695,7 +1734,7 @@ function Config.getStatusEffects(statuses: { string }?): StatusEffects
 		damageMultiplier = 1,
 		coinMultiplier = 1,
 		productionMultiplier = 1,
-		childRatio = Config.Weight.CHILD_RATIO,
+		childRatio = Config.Balance.Weight.CHILD_RATIO,
 	}
 
 	if not statuses then
@@ -1717,7 +1756,7 @@ function Config.getStatusEffects(statuses: { string }?): StatusEffects
 	end
 
 	-- กันลูกหนักเกินแม่
-	effects.childRatio = math.min(effects.childRatio, Config.Weight.MAX_CHILD_RATIO)
+	effects.childRatio = math.min(effects.childRatio, Config.Balance.Weight.MAX_CHILD_RATIO)
 
 	return effects
 end
@@ -1737,7 +1776,7 @@ end
 -- ตอนนี้ทุกด่านถอยมาใช้ตารางด่าน 1 ซึ่งเป็น **พฤติกรรมที่ต้องการ ไม่ใช่ของค้าง**
 -- (ด่าน 1 กำหนดไว้แล้วเสมอ จึงมีของให้ถอยไปใช้แน่นอน)
 function Config.getWeightTiers(stage: number): { WeightTier }
-	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
+	local clamped = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
 	for index = clamped, 1, -1 do
 		local tiers = StageWeightTiers[index]
 		if tiers then
@@ -1752,7 +1791,7 @@ function Config.rollMotherWeight(rng: Random, stage: number?, guaranteedTier: nu
 	local tiers = Config.getWeightTiers(stage or 1)
 
 	-- ขั้น 1: สุ่ม tier — ใช้จำนวนเต็มล้วน ไม่มี float เข้ามาเกี่ยวเลย
-	local roll = rng:NextInteger(1, Config.Weight.TIER_ROLL_MAX)
+	local roll = rng:NextInteger(1, Config.Balance.Weight.TIER_ROLL_MAX)
 	local acc = 0
 	local chosenIndex = #tiers -- ตกมาถึงค่านี้ไม่ได้ถ้า validate() ผ่าน แต่กันไว้
 
@@ -1797,7 +1836,7 @@ end
 
 -- ไข่ที่บอสของด่านนั้นวางในรัง (ด่านนอกช่วงถูก clamp)
 function Config.getBossEggId(stage: number): string
-	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
+	local clamped = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
 	return `egg_stage{clamped}`
 end
 
@@ -1989,20 +2028,20 @@ end
 
 -- ตัวคูณ damage ของกองทัพจากขั้น upgrade ที่ซื้อไว้ (ขั้น 0 = ยังไม่ซื้อ = ×1)
 function Config.getArmyDamageMultiplier(damageLevel: number): number
-	local clamped = math.clamp(math.floor(damageLevel or 0), 0, Config.DamageUpgrade.MAX_LEVEL)
-	return Config.DamageUpgrade.STEP_MULTIPLIER ^ clamped
+	local clamped = math.clamp(math.floor(damageLevel or 0), 0, Config.Balance.DamageUpgrade.MAX_LEVEL)
+	return Config.Balance.DamageUpgrade.STEP_MULTIPLIER ^ clamped
 end
 
 -- เพดานขั้นที่ซื้อได้ตอนนี้ — ⚠️ off-by-one อยู่ตรงนี้ ดูคำอธิบายข้างบน
 -- wallProgress = ด่านที่ผู้เล่นอยู่ (= กำแพงที่พังแล้ว + 1) → ด่าน 1 ได้ 8 ขั้น ไม่ใช่ 0
 function Config.getMaxDamageLevel(wallProgress: number): number
-	local clamped = math.clamp(math.floor(wallProgress), 1, Config.Stage.COUNT)
-	return clamped * Config.DamageUpgrade.STEPS_PER_STAGE
+	local clamped = math.clamp(math.floor(wallProgress), 1, Config.Balance.Stage.COUNT)
+	return clamped * Config.Balance.DamageUpgrade.STEPS_PER_STAGE
 end
 
 -- ราคาของขั้นที่ `level` (1 = ขั้นแรกของเกม) · คืน nil ถ้าเกิน MAX_LEVEL
 function Config.getDamageUpgradeCost(level: number): number?
-	local upgrade = Config.DamageUpgrade
+	local upgrade = Config.Balance.DamageUpgrade
 	local target = math.floor(level)
 	if target < 1 or target > upgrade.MAX_LEVEL then
 		return nil
@@ -2015,8 +2054,8 @@ end
 
 -- ราคารวมของทุกขั้นที่ปลดล็อกในด่านนั้น (8 ขั้น)
 function Config.getStageDamageUpgradeTotal(stage: number): number
-	local upgrade = Config.DamageUpgrade
-	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
+	local upgrade = Config.Balance.DamageUpgrade
+	local clamped = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
 	local total = 0
 	for index = 1, upgrade.STEPS_PER_STAGE do
 		total += Config.getDamageUpgradeCost((clamped - 1) * upgrade.STEPS_PER_STAGE + index) or 0
@@ -2030,7 +2069,7 @@ end
 
 -- ตัวคูณความเร็วที่ขั้นนั้น (ขั้น 0 = ×1) — ถดถอย ขั้นแรกให้เยอะสุด
 function Config.getSpeedMultiplier(level: number): number
-	local upgrade = Config.SpeedUpgrade
+	local upgrade = Config.Balance.SpeedUpgrade
 	local clamped = math.clamp(math.floor(level), 0, upgrade.MAX_LEVEL)
 	if clamped <= 0 then
 		return 1
@@ -2046,13 +2085,13 @@ end
 
 -- ความเร็วสูงสุดที่เป็นไปได้ในเกม — ตัวตั้งของกฎความหนากำแพง
 function Config.getMaxWalkSpeed(): number
-	return Config.getWalkSpeed(Config.SpeedUpgrade.MAX_LEVEL)
+	return Config.getWalkSpeed(Config.Balance.SpeedUpgrade.MAX_LEVEL)
 end
 
 -- ราคาอัปจากขั้น level ไปขั้นถัดไป · nil = เต็มเพดานแล้ว
 -- ⚠️ level เป็น "ขั้นที่มีอยู่ตอนนี้" (0 = ยังไม่ได้ซื้ออะไร) ไม่ใช่ขั้นที่จะซื้อ
 function Config.getSpeedUpgradeCost(level: number): number?
-	local upgrade = Config.SpeedUpgrade
+	local upgrade = Config.Balance.SpeedUpgrade
 	local current = math.floor(level)
 	if current < 0 or current >= upgrade.MAX_LEVEL then
 		return nil
@@ -2063,7 +2102,7 @@ end
 -- ราคารวมของทุกขั้นความเร็ว (ซื้อครบตั้งแต่ 0 ถึงเพดาน)
 function Config.getSpeedUpgradeTotalCost(): number
 	local total = 0
-	for level = 0, Config.SpeedUpgrade.MAX_LEVEL - 1 do
+	for level = 0, Config.Balance.SpeedUpgrade.MAX_LEVEL - 1 do
 		total += Config.getSpeedUpgradeCost(level) or 0
 	end
 	return total
@@ -2078,14 +2117,14 @@ end
 -- เขียนเป็นสูตรเพราะถ้าวันไหนขึ้นความเร็วแล้วลืมเพิ่มความหนา **เซิร์ฟจะไม่บูต**
 -- แทนที่จะปล่อยให้ผู้เล่นไปเจอเองว่าวิ่งทะลุกำแพงได้
 function Config.getMinWallThickness(): number
-	local upgrade = Config.SpeedUpgrade
+	local upgrade = Config.Balance.SpeedUpgrade
 	return Config.getMaxWalkSpeed() / upgrade.PHYSICS_FPS * upgrade.THICKNESS_SAFETY
 end
 
 -- อัตราปล่อยทหารของด่านนั้น (ตัว/วินาที)
 function Config.getReleaseRate(stage: number): number
-	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
-	return Config.Combat.RELEASE_PER_SECOND[clamped]
+	local clamped = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
+	return Config.Balance.Combat.RELEASE_PER_SECOND[clamped]
 end
 
 -- อัตราผลิตลูกของแม่ 1 ตัว (ตัว/นาที)
@@ -2097,7 +2136,7 @@ function Config.getProductionPerMinute(
 	productionLevel: number,
 	online: boolean?
 ): number
-	local production = Config.Production
+	local production = Config.Balance.Production
 
 	local rate = production.ONLINE_PER_MINUTE
 		* (motherWeight / production.WEIGHT_REFERENCE) ^ production.WEIGHT_EXPONENT
@@ -2116,15 +2155,15 @@ end
 
 -- ความจุคลังต่อกอง — แยกเป็นฟังก์ชันไว้เผื่อทำเป็น upgrade ทีหลัง
 function Config.getStackCap(): number
-	return Config.Production.STACK_CAP
+	return Config.Balance.Production.STACK_CAP
 end
 
 -- ประมาณจำนวนโมเดลทหารฝ่ายเราที่มีชีวิตพร้อมกันบนจอ
 -- = อัตราปล่อย × เวลาเดินถึงกำแพง แล้วตัดที่ MAX_VISIBLE_UNITS
 -- ส่วนเกินไม่ spawn โมเดล ให้รวมเป็นตัวเลขแทน (วิธีเดียวกับทหารฝ่ายรับ)
 function Config.getVisibleUnitCount(stage: number): number
-	local alive = Config.getReleaseRate(stage) * Config.Combat.WALK_SECONDS_TO_WALL
-	return math.min(math.ceil(alive), Config.Combat.MAX_VISIBLE_UNITS)
+	local alive = Config.getReleaseRate(stage) * Config.Balance.Combat.WALK_SECONDS_TO_WALL
+	return math.min(math.ceil(alive), Config.Balance.Combat.MAX_VISIBLE_UNITS)
 end
 
 -- damage/HP ของหน่วย 1 ตัวตอนเข้ารบ = พลังพื้นฐาน × ตัวคูณตามด่าน
@@ -2199,7 +2238,7 @@ end
 
 -- ความยาวเลนทั้งเส้น
 function Config.getLaneLength(): number
-	return Config.MapDimensions.Lane.LengthPerStage * Config.Stage.COUNT
+	return Config.MapDimensions.Lane.LengthPerStage * Config.Balance.Stage.COUNT
 end
 
 function Config.getLaneEndX(): number
@@ -2208,7 +2247,7 @@ end
 
 -- X ที่ช่วงของด่านนั้นเริ่ม
 function Config.getStageStartX(stage: number): number
-	local clamped = math.clamp(stage, 1, Config.Stage.COUNT)
+	local clamped = math.clamp(stage, 1, Config.Balance.Stage.COUNT)
 	return Config.getLaneStartX() + (clamped - 1) * Config.MapDimensions.Lane.LengthPerStage
 end
 
@@ -2237,7 +2276,7 @@ end
 function Config.getBossEggSpot(stage: number, index: number): Vector3
 	local room = Config.MapDimensions.BossRoom
 	local radius = room.Size.Y * room.EggRadiusRatio
-	local total = Config.Boss.EGGS_PER_SPAWN
+	local total = Config.Balance.Boss.EGGS_PER_SPAWN
 	local center = Config.getBossNestCenter(stage)
 	local angle = (index - 1) / total * math.pi * 2
 	return vec3(
@@ -2295,7 +2334,7 @@ function Config.getLaneHalfWidthAt(x: number): number
 	local map = Config.MapDimensions
 	local half = map.Lane.Width / 2
 	local roomHalfX = map.BossRoom.Size.X / 2
-	for stage = 1, Config.Stage.COUNT do
+	for stage = 1, Config.Balance.Stage.COUNT do
 		local center = Config.getBossNestCenter(stage)
 		if x >= center.X - roomHalfX and x <= center.X + roomHalfX then
 			return math.max(half, map.BossRoom.Size.Y / 2)
@@ -2347,16 +2386,16 @@ function Config.getSpawnPoint(): Vector3
 end
 
 function Config.getPenCapacity(level: number): number
-	local clamped = math.clamp(math.floor(level), 1, Config.Pen.MAX_LEVEL)
-	return Config.Pen.BASE_CAPACITY + (clamped - 1) * Config.Pen.CAPACITY_PER_LEVEL
+	local clamped = math.clamp(math.floor(level), 1, Config.Balance.Pen.MAX_LEVEL)
+	return Config.Balance.Pen.BASE_CAPACITY + (clamped - 1) * Config.Balance.Pen.CAPACITY_PER_LEVEL
 end
 
 -- ราคาอัปเกรดจาก level → level+1 คืน nil ถ้าเต็มเลเวลแล้ว
 function Config.getPenUpgradeCost(level: number): number?
-	if level >= Config.Pen.MAX_LEVEL then
+	if level >= Config.Balance.Pen.MAX_LEVEL then
 		return nil
 	end
-	return Config.Pen.UPGRADE_BASE_COST * Config.Pen.UPGRADE_COST_MULTIPLIER ^ (level - 1)
+	return Config.Balance.Pen.UPGRADE_BASE_COST * Config.Balance.Pen.UPGRADE_COST_MULTIPLIER ^ (level - 1)
 end
 
 --------------------------------------------------------------------------------
@@ -2364,15 +2403,15 @@ end
 --------------------------------------------------------------------------------
 
 function Config.getWeaponDamage(level: number): number
-	local clamped = math.clamp(math.floor(level), 1, Config.Weapon.MAX_LEVEL)
-	return Config.Weapon.DAMAGE_BASE * Config.Weapon.DAMAGE_MULTIPLIER ^ (clamped - 1)
+	local clamped = math.clamp(math.floor(level), 1, Config.Balance.Weapon.MAX_LEVEL)
+	return Config.Balance.Weapon.DAMAGE_BASE * Config.Balance.Weapon.DAMAGE_MULTIPLIER ^ (clamped - 1)
 end
 
 function Config.getWeaponUpgradeCost(level: number): number?
-	if level >= Config.Weapon.MAX_LEVEL then
+	if level >= Config.Balance.Weapon.MAX_LEVEL then
 		return nil
 	end
-	return Config.Weapon.UPGRADE_BASE_COST * Config.Weapon.UPGRADE_COST_MULTIPLIER ^ (level - 1)
+	return Config.Balance.Weapon.UPGRADE_BASE_COST * Config.Balance.Weapon.UPGRADE_COST_MULTIPLIER ^ (level - 1)
 end
 
 --------------------------------------------------------------------------------
@@ -2381,15 +2420,15 @@ end
 -- level 0 = ยังไม่อัป (×1) ถึง UPGRADE_MAX_LEVEL
 
 function Config.getProductionMultiplier(level: number): number
-	local clamped = math.clamp(math.floor(level), 0, Config.Production.UPGRADE_MAX_LEVEL)
-	return Config.Production.UPGRADE_RATE_MULTIPLIER ^ clamped
+	local clamped = math.clamp(math.floor(level), 0, Config.Balance.Production.UPGRADE_MAX_LEVEL)
+	return Config.Balance.Production.UPGRADE_RATE_MULTIPLIER ^ clamped
 end
 
 function Config.getProductionUpgradeCost(level: number): number?
-	if level >= Config.Production.UPGRADE_MAX_LEVEL then
+	if level >= Config.Balance.Production.UPGRADE_MAX_LEVEL then
 		return nil
 	end
-	return Config.Production.UPGRADE_BASE_COST * Config.Production.UPGRADE_COST_MULTIPLIER ^ level
+	return Config.Balance.Production.UPGRADE_BASE_COST * Config.Balance.Production.UPGRADE_COST_MULTIPLIER ^ level
 end
 
 --------------------------------------------------------------------------------
@@ -2397,7 +2436,7 @@ end
 --------------------------------------------------------------------------------
 
 function Config.getStage(stage: number): StageDef
-	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
+	local clamped = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
 	return Stages[clamped]
 end
 
@@ -2407,8 +2446,8 @@ end
 
 -- damage/วินาที ที่อาวุธป้องกันของกำแพงยิงใส่กองทัพเรา
 function Config.getStageTurretDps(stage: number): number
-	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
-	local toll = Config.Combat.TURRET_TOLL[clamped]
+	local clamped = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
+	local toll = Config.Balance.Combat.TURRET_TOLL[clamped]
 	if toll <= 0 then
 		return 0
 	end
@@ -2416,11 +2455,11 @@ function Config.getStageTurretDps(stage: number): number
 end
 
 function Config.getStageDefenderHp(stage: number): number
-	return Config.getStageDefenderCount(stage) * Config.Stage.DEFENDER_HP
+	return Config.getStageDefenderCount(stage) * Config.Balance.Stage.DEFENDER_HP
 end
 
 function Config.getStageWallHp(stage: number): number
-	return Config.getStageDefenderHp(stage) * Config.Stage.WALL_HP_RATIO
+	return Config.getStageDefenderHp(stage) * Config.Balance.Stage.WALL_HP_RATIO
 end
 
 -- damage ที่กองทัพต้องทำรวมทั้งหมดเพื่อผ่านด่านนี้ (ทหาร + กำแพง)
@@ -2429,8 +2468,8 @@ function Config.getStageTotalHp(stage: number): number
 end
 
 function Config.getBossHp(stage: number): number
-	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
-	return Config.Boss.HP_BASE * Config.Boss.HP_MULTIPLIER ^ (clamped - 1)
+	local clamped = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
+	return Config.Balance.Boss.HP_BASE * Config.Balance.Boss.HP_MULTIPLIER ^ (clamped - 1)
 end
 
 -- แปลงสัดส่วน HP ที่เหลือ → จำนวนโมเดลทหารที่ควรแสดงในแมพ
@@ -2444,8 +2483,8 @@ function Config.getDisplayModelCount(hpRatio: number): number
 		return 0
 	end
 
-	local min = Config.Stage.DISPLAY_MODELS_MIN
-	local max = Config.Stage.DISPLAY_MODELS_MAX
+	local min = Config.Balance.Stage.DISPLAY_MODELS_MIN
+	local max = Config.Balance.Stage.DISPLAY_MODELS_MAX
 	return math.max(min, math.ceil(max * ratio))
 end
 
@@ -2456,8 +2495,8 @@ end
 -- แม่ในกระเป๋าไม่ผลิตเงิน ผู้เรียกต้องกรองเอาเฉพาะแม่ในคอกก่อนเรียกฟังก์ชันนี้
 
 function Config.getCoinsPerMinute(motherWeight: number, stage: number, statuses: { string }?): number
-	local economy = Config.Economy
-	local clampedStage = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
+	local economy = Config.Balance.Economy
+	local clampedStage = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
 
 	local byWeight = economy.BASE_PER_MINUTE * (motherWeight / economy.REFERENCE_WEIGHT) ^ economy.EXPONENT
 	local byStage = economy.STAGE_MULTIPLIER ^ (clampedStage - 1)
@@ -2469,7 +2508,7 @@ end
 -- ราคาขายแม่ = รายได้ของแม่ตัวนั้น × SELL_MOTHER_MINUTES
 function Config.getMotherSellPrice(motherWeight: number, stage: number, statuses: { string }?): number
 	return math.floor(
-		Config.getCoinsPerMinute(motherWeight, stage, statuses) * Config.Economy.SELL_MOTHER_MINUTES
+		Config.getCoinsPerMinute(motherWeight, stage, statuses) * Config.Balance.Economy.SELL_MOTHER_MINUTES
 	)
 end
 
@@ -2483,8 +2522,8 @@ end
 
 -- เงินที่ได้จากการฆ่าทหารฝ่ายรับ 1 ตัวในด่านนั้น
 function Config.getDefenderKillReward(stage: number): number
-	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
-	return Config.Economy.KILL_DEFENDER_BASE * Config.Economy.KILL_DEFENDER_MULTIPLIER ^ (clamped - 1)
+	local clamped = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
+	return Config.Balance.Economy.KILL_DEFENDER_BASE * Config.Balance.Economy.KILL_DEFENDER_MULTIPLIER ^ (clamped - 1)
 end
 
 -- เงินรวมที่ได้จากการกวาดทหารฝ่ายรับทั้งด่านจนหมด (ได้ครั้งเดียวต่อผู้เล่น)
@@ -2494,12 +2533,12 @@ end
 
 -- เงินที่ได้จากการฆ่าบอสของด่านนั้น 1 ครั้ง (ก่อนแบ่งให้ผู้เล่นที่ร่วมตี)
 function Config.getBossKillReward(stage: number): number
-	local clamped = math.clamp(math.floor(stage), 1, Config.Stage.COUNT)
-	return Config.Economy.KILL_BOSS_BASE * Config.Economy.KILL_BOSS_MULTIPLIER ^ (clamped - 1)
+	local clamped = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
+	return Config.Balance.Economy.KILL_BOSS_BASE * Config.Balance.Economy.KILL_BOSS_MULTIPLIER ^ (clamped - 1)
 end
 
 -- ส่วนแบ่งของผู้เล่น 1 คน เมื่อมี participantCount คนร่วมตีบอสตัวนั้น
--- ⚠️ แบ่งเท่ากันทุกคน ไม่ดูสัดส่วน damage (ดูเหตุผลใน Config.Economy)
+-- ⚠️ แบ่งเท่ากันทุกคน ไม่ดูสัดส่วน damage (ดูเหตุผลใน Config.Balance.Economy)
 -- server เป็นคนนับว่าใครร่วมตีบ้าง (ทำ damage ≥ BOSS_REWARD_MIN_DAMAGE) ห้าม client แจ้ง
 function Config.getBossKillShare(stage: number, participantCount: number): number
 	local participants = math.max(1, math.floor(participantCount))
@@ -2553,7 +2592,7 @@ end
 -- ⚠️ ระบบปล่อยต่อเนื่อง: อัตราจริง = min(ผลิตได้, ปล่อยได้)
 -- พอชนเพดานปล่อยแล้ว upgrade อัตราผลิตหยุดเพิ่ม damage ทันที
 function Config.getReferenceDps(stage: number): number
-	local check = Config.BalanceCheck
+	local check = Config.Balance.BalanceCheck
 	local weight = check.REFERENCE_WEIGHT[stage]
 	local charId = referenceCharForClass(check.REFERENCE_CLASS[stage])
 
@@ -2575,7 +2614,7 @@ end
 -- = (เงินจากคอก + เงินจากบอส) × เวลาตี + เงินจากการกวาดทหารทั้งด่าน
 -- ด่านที่ไม่มีกำแพง (ด่าน 1) ใช้รายได้ 1 ชั่วโมงแรกเป็นฐานแทน เพราะไม่มี "เวลาตี"
 function Config.getReferenceStageIncome(stage: number): number
-	local check = Config.BalanceCheck
+	local check = Config.Balance.BalanceCheck
 	local weight = check.REFERENCE_WEIGHT[stage]
 
 	local hours = Config.getReferenceClearHours(stage)
@@ -2584,7 +2623,7 @@ function Config.getReferenceStageIncome(stage: number): number
 	end
 
 	local penPerHour = Config.getPenCapacity(stage) * Config.getCoinsPerMinute(weight, stage) * 60
-	local bossPerHour = (3600 / Config.Boss.RESPAWN_SECONDS)
+	local bossPerHour = (3600 / Config.Balance.Boss.RESPAWN_SECONDS)
 		* Config.getBossKillReward(stage)
 		/ check.PLAYERS_PER_SERVER
 
@@ -2602,15 +2641,15 @@ end
 
 -- ไข่ที่ผู้เล่น 1 คนได้ต่อชั่วโมง (บอสรีเกิดเรื่อย ๆ หารกันทั้งเซิร์ฟ)
 function Config.getEggsPerHour(): number
-	local boss = Config.Boss
+	local boss = Config.Balance.Boss
 	local spawnsPerHour = 3600 / boss.RESPAWN_SECONDS
-	return spawnsPerHour * boss.EGGS_PER_SPAWN / Config.BalanceCheck.PLAYERS_PER_SERVER
+	return spawnsPerHour * boss.EGGS_PER_SPAWN / Config.Balance.BalanceCheck.PLAYERS_PER_SERVER
 end
 
 -- ชั่วโมงที่ใช้ฟาร์มไข่จนเติมคอกเต็มด้วยแม่คลาสอ้างอิงของด่านนั้น (หรือดีกว่า)
 -- ⚠️ น้ำหนักอ้างอิงอยู่ใน tier 1 ซึ่ง 90% ของไข่ให้อยู่แล้ว จึงคิดเฉพาะโอกาสของคลาส
 function Config.getReferenceFarmHours(stage: number): number
-	local check = Config.BalanceCheck
+	local check = Config.Balance.BalanceCheck
 	local wanted = check.REFERENCE_CLASS[stage]
 	local wantedOrder = CharacterClasses[wanted].order
 
@@ -2634,12 +2673,12 @@ function Config.getReferenceFarmHours(stage: number): number
 end
 
 local function assertProgressionIsSane()
-	local check = Config.BalanceCheck
+	local check = Config.Balance.BalanceCheck
 
 	local firstGuarded: number? = nil
 	local lastGuarded: number? = nil
 
-	for stage = 1, Config.Stage.COUNT do
+	for stage = 1, Config.Balance.Stage.COUNT do
 		assert(
 			check.REFERENCE_WEIGHT[stage] ~= nil and check.REFERENCE_CLASS[stage] ~= nil,
 			`Config: BalanceCheck ขาดค่าอ้างอิงของด่าน {stage}`
@@ -2685,7 +2724,7 @@ local function assertProgressionIsSane()
 		(lastGuarded :: number) >= (firstGuarded :: number),
 		`Config: ด่านที่มีกำแพงด่านสุดท้ายใช้เวลา {string.format("%.2f", lastGuarded :: number)} ชม. `
 			.. `น้อยกว่าด่านแรก {string.format("%.2f", firstGuarded :: number)} ชม. `
-			.. `— เกมง่ายลงเรื่อย ๆ แทนที่จะไต่ระดับ ตรวจ Config.DamageUpgrade กับตารางอัตราปล่อย`
+			.. `— เกมง่ายลงเรื่อย ๆ แทนที่จะไต่ระดับ ตรวจ Config.Balance.DamageUpgrade กับตารางอัตราปล่อย`
 	)
 end
 
@@ -2699,17 +2738,17 @@ end
 -- สูตรที่ใช้ตรวจ (ระยะเวลารบตัดกันออก เพราะ HP ของตัวเรา = damage ของตัวเรา):
 --     สัดส่วนกำลังพลที่เสีย = turretDps ÷ (damage/วินาทีของเรา)
 local function assertTurretIsSurvivable()
-	local check = Config.BalanceCheck
-	local tolls = Config.Combat.TURRET_TOLL
+	local check = Config.Balance.BalanceCheck
+	local tolls = Config.Balance.Combat.TURRET_TOLL
 
 	assert(
-		#tolls == Config.Stage.COUNT,
-		`Config: TURRET_TOLL มี {#tolls} ด่าน แต่เกมมี {Config.Stage.COUNT} ด่าน`
+		#tolls == Config.Balance.Stage.COUNT,
+		`Config: TURRET_TOLL มี {#tolls} ด่าน แต่เกมมี {Config.Balance.Stage.COUNT} ด่าน`
 	)
 	assert(tolls[1] == 0, "Config: ด่าน 1 ไม่มีกำแพง TURRET_TOLL[1] ต้องเป็น 0")
 
 	local previous = 0
-	for stage = 1, Config.Stage.COUNT do
+	for stage = 1, Config.Balance.Stage.COUNT do
 		local toll = tolls[stage]
 		assert(toll >= 0, `Config: TURRET_TOLL ด่าน {stage} ติดลบ`)
 		assert(
@@ -2746,9 +2785,38 @@ end
 -- เช็คความถูกต้องของตารางตอนเซิร์ฟเวอร์บูต
 -- ถ้าพิมพ์ unitId ผิดในตารางสุ่ม จะได้รู้ทันทีตอนเปิดเกม ไม่ใช่ตอนผู้เล่นฟักไข่
 function Config.validate()
+	-- ══ ลูกบิดสมดุลต้องอยู่ใน Config.Balance ที่เดียว ══
+	-- ⚠️ เช็คสองทาง ทางเดียวไม่พอ:
+	--   1. มีอยู่ใน Balance จริง — กันคนลบกลุ่มทิ้งแล้วโค้ดที่อ่านมันพังตอน runtime
+	--   2. **ไม่มีชื่อเดียวกันที่ Config ชั้นบนสุด** — กันคนเผลอเติม `Config.Pen = {...}` กลับเข้าไป
+	--      แล้วเกิดของสองชุดที่ค่าไม่ตรงกัน ซึ่งเป็นความผิดที่มองด้วยตาเปล่าไม่เห็นเลย
+	--      (เคยเจอมาแล้วกับ `Config.Map` ที่เป็น alias ของ `Config.MapDimensions`)
+	for _, groupName in BALANCE_GROUPS do
+		assert(
+			(Config.Balance :: any)[groupName] ~= nil,
+			`Config: ไม่มี Config.Balance.{groupName} — ลูกบิดสมดุลกลุ่มนี้หายไป`
+		)
+		assert(
+			rawget(Config :: any, groupName) == nil,
+			`Config: "{groupName}" โผล่ที่ Config ชั้นบนสุด ทั้งที่ต้องอยู่ใน Config.Balance เท่านั้น — `
+				.. `มีสองที่แล้วค่าจะไม่ตรงกันโดยไม่มีใครรู้`
+		)
+	end
+
 	for eggId, egg in EggTypes do
 		assert(egg.id == eggId, `Config: EggTypes["{eggId}"].id ไม่ตรงกับคีย์ ({egg.id})`)
 		assert(egg.hatchTime > 0, `Config: ไข่ "{eggId}" มี hatchTime <= 0`)
+
+		-- ⚠️ เวลาฟักของไข่รายด่านต้องมาจาก SECONDS_PER_STAGE เท่านั้น
+		-- ใครใส่ตัวเลขดิบกลับเข้าไป ปรับจังหวะเกมรอบหน้าจะลืมแก้ใบนี้
+		if egg.enabled and egg.stage ~= nil then
+			local expected = Balance.Hatchery.SECONDS_PER_STAGE * egg.stage
+			assert(
+				egg.hatchTime == expected,
+				`Config: ไข่ "{eggId}" มี hatchTime {egg.hatchTime} แต่สูตรให้ {expected} `
+					.. `(SECONDS_PER_STAGE × ด่าน {egg.stage})`
+			)
+		end
 	end
 
 	for unitId, unit in UnitTypes do
@@ -2761,9 +2829,9 @@ function Config.validate()
 	-- ⚠️ เคยตั้งไม่ตรงกัน (คอก 6 ช่อง แต่โมเดลสมดุลคิดที่ 7 คน)
 	-- ทำให้อัตราได้ไข่ที่ยามใช้คำนวณไม่ตรงกับเกมจริง
 	assert(
-		Config.World.MAX_PENS == Config.BalanceCheck.PLAYERS_PER_SERVER,
+		Config.World.MAX_PENS == Config.Balance.BalanceCheck.PLAYERS_PER_SERVER,
 		`Config: จำนวนคอก ({Config.World.MAX_PENS}) ไม่ตรงกับ PLAYERS_PER_SERVER `
-			.. `({Config.BalanceCheck.PLAYERS_PER_SERVER}) — อัตราได้ไข่ที่ยามคำนวณจะเพี้ยน`
+			.. `({Config.Balance.BalanceCheck.PLAYERS_PER_SERVER}) — อัตราได้ไข่ที่ยามคำนวณจะเพี้ยน`
 	)
 
 	----------------------------------------------------------------------------
@@ -2842,7 +2910,7 @@ function Config.validate()
 		dim.BossRoom.Size.Y <= dim.Lane.Width * 3,
 		"Config: รังบอสกว้างเกินเลนไปมาก ผู้เล่นจะเดินอ้อมกำแพงได้"
 	)
-	for nestStage = 1, Config.Stage.COUNT do
+	for nestStage = 1, Config.Balance.Stage.COUNT do
 		local center = Config.getBossNestCenter(nestStage)
 		local startX = Config.getStageStartX(nestStage)
 		local endX = startX + dim.Lane.LengthPerStage
@@ -2923,7 +2991,7 @@ function Config.validate()
 	----------------------------------------------------------------------------
 	-- อัปเกรดความเร็ว + กฎความหนากำแพงที่ผูกกับความเร็ว
 	----------------------------------------------------------------------------
-	local speed = Config.SpeedUpgrade
+	local speed = Config.Balance.SpeedUpgrade
 	assert(
 		speed.MAX_LEVEL >= 1 and speed.MAX_LEVEL % 1 == 0,
 		"Config: SpeedUpgrade.MAX_LEVEL ต้องเป็นจำนวนเต็มบวก"
@@ -3074,16 +3142,16 @@ function Config.validate()
 	assert(StageWeightTiers[1] ~= nil, "Config: ต้องมีตาราง tier ของด่าน 1 เสมอ (ใช้เป็นค่าถอยกลับ)")
 	for stageId, tiers in StageWeightTiers do
 		assert(
-			stageId >= 1 and stageId <= Config.Stage.COUNT and stageId % 1 == 0,
-			`Config: StageWeightTiers มีด่าน {stageId} ที่อยู่นอกช่วง 1..{Config.Stage.COUNT}`
+			stageId >= 1 and stageId <= Config.Balance.Stage.COUNT and stageId % 1 == 0,
+			`Config: StageWeightTiers มีด่าน {stageId} ที่อยู่นอกช่วง 1..{Config.Balance.Stage.COUNT}`
 		)
 		local total = 0
 		for _, tier in tiers do
 			total += tier.weight
 		end
 		assert(
-			total == Config.Weight.TIER_ROLL_MAX,
-			`Config: ตาราง tier ของด่าน {stageId} มีผลรวม weight = {total} แต่ต้องเป็น {Config.Weight.TIER_ROLL_MAX}`
+			total == Config.Balance.Weight.TIER_ROLL_MAX,
+			`Config: ตาราง tier ของด่าน {stageId} มีผลรวม weight = {total} แต่ต้องเป็น {Config.Balance.Weight.TIER_ROLL_MAX}`
 		)
 	end
 
@@ -3102,19 +3170,19 @@ function Config.validate()
 	end
 
 	assert(
-		tierTotal == Config.Weight.TIER_ROLL_MAX,
-		`Config: ผลรวม weight ของ tier = {tierTotal} แต่ TIER_ROLL_MAX = {Config.Weight.TIER_ROLL_MAX} (ต้องเท่ากันพอดี)`
+		tierTotal == Config.Balance.Weight.TIER_ROLL_MAX,
+		`Config: ผลรวม weight ของ tier = {tierTotal} แต่ TIER_ROLL_MAX = {Config.Balance.Weight.TIER_ROLL_MAX} (ต้องเท่ากันพอดี)`
 	)
-	assert(Config.Weight.CHILD_RATIO > 0 and Config.Weight.CHILD_RATIO < 1, "Config: CHILD_RATIO ต้องอยู่ระหว่าง 0 กับ 1")
+	assert(Config.Balance.Weight.CHILD_RATIO > 0 and Config.Balance.Weight.CHILD_RATIO < 1, "Config: CHILD_RATIO ต้องอยู่ระหว่าง 0 กับ 1")
 	assert(
-		Config.Weight.MAX_CHILD_RATIO >= Config.Weight.CHILD_RATIO and Config.Weight.MAX_CHILD_RATIO <= 1,
+		Config.Balance.Weight.MAX_CHILD_RATIO >= Config.Balance.Weight.CHILD_RATIO and Config.Balance.Weight.MAX_CHILD_RATIO <= 1,
 		"Config: MAX_CHILD_RATIO ต้องอยู่ระหว่าง CHILD_RATIO กับ 1"
 	)
 
 	----------------------------------------------------------------------------
 	-- อัตราผลิต
 	----------------------------------------------------------------------------
-	local production = Config.Production
+	local production = Config.Balance.Production
 	assert(production.ONLINE_PER_MINUTE > 0, "Config: ONLINE_PER_MINUTE ต้องมากกว่า 0")
 	assert(production.WEIGHT_REFERENCE > 0, "Config: WEIGHT_REFERENCE ต้องมากกว่า 0")
 	assert(
@@ -3162,13 +3230,13 @@ function Config.validate()
 	end
 
 	-- ถ้าเปิดทุกสถานะพร้อมกัน น้ำหนักลูกต้องยังไม่เกินแม่
-	local maxChildRatio = Config.Weight.CHILD_RATIO
+	local maxChildRatio = Config.Balance.Weight.CHILD_RATIO
 	for _, status in Statuses do
 		maxChildRatio += status.childRatioBonus
 	end
 	assert(
-		maxChildRatio <= Config.Weight.MAX_CHILD_RATIO,
-		`Config: ติดทุกสถานะพร้อมกันแล้วลูกหนัก {maxChildRatio * 100}% ของแม่ ซึ่งเกินเพดาน {Config.Weight.MAX_CHILD_RATIO * 100}%`
+		maxChildRatio <= Config.Balance.Weight.MAX_CHILD_RATIO,
+		`Config: ติดทุกสถานะพร้อมกันแล้วลูกหนัก {maxChildRatio * 100}% ของแม่ ซึ่งเกินเพดาน {Config.Balance.Weight.MAX_CHILD_RATIO * 100}%`
 	)
 
 	-- ตัวคั่นของ uid ต้องไม่ชนกับตัวคั่นของ stack key
@@ -3212,23 +3280,23 @@ function Config.validate()
 		"Config: MAX_TEAM_MOTHERS มากกว่าจำนวนแม่ที่ถือได้ทั้งหมด"
 	)
 
-	for eggId, amount in Config.NewPlayer.startingEggs do
+	for eggId, amount in Config.Balance.NewPlayer.startingEggs do
 		assert(EggTypes[eggId] ~= nil, `Config: NewPlayer.startingEggs อ้างถึงไข่ "{eggId}" ที่ไม่มีอยู่`)
 		assert(amount > 0, `Config: NewPlayer.startingEggs["{eggId}"] ต้องมากกว่า 0`)
 	end
-	assert(Config.NewPlayer.coins >= 0 and Config.NewPlayer.gems >= 0, "Config: ของเริ่มต้นติดลบไม่ได้")
+	assert(Config.Balance.NewPlayer.coins >= 0 and Config.Balance.NewPlayer.gems >= 0, "Config: ของเริ่มต้นติดลบไม่ได้")
 	assert(
-		Config.NewPlayer.speedLevel >= 0 and Config.NewPlayer.speedLevel <= Config.SpeedUpgrade.MAX_LEVEL,
+		Config.Balance.NewPlayer.speedLevel >= 0 and Config.Balance.NewPlayer.speedLevel <= Config.Balance.SpeedUpgrade.MAX_LEVEL,
 		"Config: NewPlayer.speedLevel ต้องอยู่ในช่วง 0 ถึงเพดาน"
 	)
 	-- ⚠️ off-by-one ที่เคยพลาด: wallProgress = 0 ทำให้เพดาน upgrade damage เป็น 0
 	-- ผู้เล่นใหม่จะซื้ออะไรไม่ได้เลยและตันตั้งแต่ด่านแรก
 	assert(
-		Config.NewPlayer.wallProgress >= 1 and Config.NewPlayer.wallProgress <= Config.Stage.COUNT,
-		`Config: NewPlayer.wallProgress ({Config.NewPlayer.wallProgress}) ต้องอยู่ระหว่าง 1 ถึง {Config.Stage.COUNT}`
+		Config.Balance.NewPlayer.wallProgress >= 1 and Config.Balance.NewPlayer.wallProgress <= Config.Balance.Stage.COUNT,
+		`Config: NewPlayer.wallProgress ({Config.Balance.NewPlayer.wallProgress}) ต้องอยู่ระหว่าง 1 ถึง {Config.Balance.Stage.COUNT}`
 	)
 	assert(
-		Config.getMaxDamageLevel(Config.NewPlayer.wallProgress) > 0,
+		Config.getMaxDamageLevel(Config.Balance.NewPlayer.wallProgress) > 0,
 		"Config: ผู้เล่นใหม่ซื้อ upgrade damage ไม่ได้เลย — เช็ค wallProgress เริ่มต้น"
 	)
 
@@ -3321,8 +3389,8 @@ function Config.validate()
 		if egg.stage ~= nil then
 			local stageId = egg.stage :: number
 			assert(
-				stageId % 1 == 0 and stageId >= 1 and stageId <= Config.Stage.COUNT,
-				`Config: ไข่ "{eggId}" ผูกกับด่าน {stageId} ที่อยู่นอกช่วง 1..{Config.Stage.COUNT}`
+				stageId % 1 == 0 and stageId >= 1 and stageId <= Config.Balance.Stage.COUNT,
+				`Config: ไข่ "{eggId}" ผูกกับด่าน {stageId} ที่อยู่นอกช่วง 1..{Config.Balance.Stage.COUNT}`
 			)
 			assert(
 				egg.source == "boss",
@@ -3336,7 +3404,7 @@ function Config.validate()
 		end
 	end
 
-	for stageId = 1, Config.Stage.COUNT do
+	for stageId = 1, Config.Balance.Stage.COUNT do
 		local eggId = Config.getBossEggId(stageId)
 		local egg = EggTypes[eggId]
 		assert(egg ~= nil, `Config: ด่าน {stageId} ไม่มีไข่ "{eggId}" — ผู้เล่นที่ไปถึงด่านนี้จะแย่งไข่ไม่ได้`)
@@ -3355,7 +3423,7 @@ function Config.validate()
 		(EggTypes[Config.DEFAULT_EGG_ID] :: EggType).enabled,
 		`Config: DEFAULT_EGG_ID ชี้ไปที่ไข่ "{Config.DEFAULT_EGG_ID}" ที่ถูกปิดอยู่`
 	)
-	for eggId in Config.NewPlayer.startingEggs do
+	for eggId in Config.Balance.NewPlayer.startingEggs do
 		assert(
 			(EggTypes[eggId] :: EggType).enabled,
 			`Config: NewPlayer.startingEggs แจกไข่ "{eggId}" ที่ถูกปิดอยู่`
@@ -3365,7 +3433,7 @@ function Config.validate()
 	----------------------------------------------------------------------------
 	-- เศรษฐกิจ คอก กระเป๋า สวนฟัก
 	----------------------------------------------------------------------------
-	local economy = Config.Economy
+	local economy = Config.Balance.Economy
 	assert(economy.BASE_PER_MINUTE > 0, "Config: BASE_PER_MINUTE ต้องมากกว่า 0")
 	assert(economy.REFERENCE_WEIGHT > 0, "Config: REFERENCE_WEIGHT ต้องมากกว่า 0")
 	assert(economy.EXPONENT > 0 and economy.EXPONENT < 1, "Config: EXPONENT ของเงินต้องอยู่ระหว่าง 0 กับ 1 (ต้องถดถอย)")
@@ -3389,29 +3457,29 @@ function Config.validate()
 	)
 	assert(economy.SELL_MOTHER_MINUTES > 0, "Config: SELL_MOTHER_MINUTES ต้องมากกว่า 0")
 
-	assert(Config.Pen.BASE_CAPACITY > 0, "Config: BASE_CAPACITY ของคอกต้องมากกว่า 0")
-	assert(Config.Pen.MAX_LEVEL >= 1, "Config: MAX_LEVEL ของคอกต้องอย่างน้อย 1")
-	assert(Config.Pen.UPGRADE_COST_MULTIPLIER > 1, "Config: ตัวคูณราคาคอกต้องมากกว่า 1")
-	assert(Config.Bag.CAPACITY > 0, "Config: ความจุกระเป๋าต้องมากกว่า 0")
+	assert(Config.Balance.Pen.BASE_CAPACITY > 0, "Config: BASE_CAPACITY ของคอกต้องมากกว่า 0")
+	assert(Config.Balance.Pen.MAX_LEVEL >= 1, "Config: MAX_LEVEL ของคอกต้องอย่างน้อย 1")
+	assert(Config.Balance.Pen.UPGRADE_COST_MULTIPLIER > 1, "Config: ตัวคูณราคาคอกต้องมากกว่า 1")
+	assert(Config.Balance.Bag.CAPACITY > 0, "Config: ความจุกระเป๋าต้องมากกว่า 0")
 	-- ⚠️ สองค่านี้แยกกันโดยตั้งใจ ไม่ต้องเท่ากัน แต่ต้องมีจริงทั้งคู่
 	-- ค่าใดค่าหนึ่งเป็น 0 = ไข่เดินทางต่อไม่ได้ ผู้เล่นตันถาวรตั้งแต่ฟองแรก
 	assert(
-		Config.Hatchery.BAG_CAPACITY > 0 and Config.Hatchery.BAG_CAPACITY % 1 == 0,
+		Config.Balance.Hatchery.BAG_CAPACITY > 0 and Config.Balance.Hatchery.BAG_CAPACITY % 1 == 0,
 		"Config: Hatchery.BAG_CAPACITY (กระเป๋าไข่) ต้องเป็นจำนวนเต็มบวก"
 	)
 	assert(
-		Config.Hatchery.MAX_SLOTS > 0 and Config.Hatchery.MAX_SLOTS % 1 == 0,
+		Config.Balance.Hatchery.MAX_SLOTS > 0 and Config.Balance.Hatchery.MAX_SLOTS % 1 == 0,
 		"Config: Hatchery.MAX_SLOTS (ช่องฟัก) ต้องเป็นจำนวนเต็มบวก"
 	)
 	assert(
-		Config.Inventory.MAX_MOTHERS >= Config.Bag.CAPACITY + Config.getPenCapacity(Config.Pen.MAX_LEVEL),
+		Config.Inventory.MAX_MOTHERS >= Config.Balance.Bag.CAPACITY + Config.getPenCapacity(Config.Balance.Pen.MAX_LEVEL),
 		"Config: MAX_MOTHERS น้อยกว่ากระเป๋า + คอกเต็มเลเวล ผู้เล่นจะเก็บของที่ควรเก็บได้ไม่ครบ"
 	)
 
 	----------------------------------------------------------------------------
 	-- ด่าน บอส อาวุธ
 	----------------------------------------------------------------------------
-	local stage = Config.Stage
+	local stage = Config.Balance.Stage
 	assert(stage.COUNT > 0, "Config: จำนวนด่านต้องมากกว่า 0")
 	assert(stage.DEFENDER_HP > 0 and stage.DEFENDER_DAMAGE > 0, "Config: HP/damage ของทหารฝ่ายรับต้องมากกว่า 0")
 
@@ -3438,17 +3506,17 @@ function Config.validate()
 		"Config: ช่วงจำนวนโมเดลที่แสดงไม่ถูกต้อง"
 	)
 
-	assert(Config.Boss.RESPAWN_SECONDS > 0, "Config: เวลารีเกิดบอสต้องมากกว่า 0")
-	assert(Config.Boss.EGGS_PER_SPAWN > 0, "Config: จำนวนไข่ต่อรอบต้องมากกว่า 0")
-	assert(Config.Boss.EGG_GRAB_HOLD_SECONDS > 0, "Config: เวลากดค้างหยิบไข่ต้องมากกว่า 0")
+	assert(Config.Balance.Boss.RESPAWN_SECONDS > 0, "Config: เวลารีเกิดบอสต้องมากกว่า 0")
+	assert(Config.Balance.Boss.EGGS_PER_SPAWN > 0, "Config: จำนวนไข่ต่อรอบต้องมากกว่า 0")
+	assert(Config.Balance.Boss.EGG_GRAB_HOLD_SECONDS > 0, "Config: เวลากดค้างหยิบไข่ต้องมากกว่า 0")
 
 	-- สเกลที่ทำให้ "อาวุธขั้น N ตีบอสด่าน N ตายในจำนวนครั้งเท่ากันทุกด่าน"
 	-- ถ้าตัวคูณสองตัวนี้ไม่เท่ากัน ความรู้สึกตอนสู้บอสจะเพี้ยนไปเรื่อย ๆ ตามด่าน
 	assert(
-		Config.Weapon.DAMAGE_MULTIPLIER == Config.Boss.HP_MULTIPLIER,
+		Config.Balance.Weapon.DAMAGE_MULTIPLIER == Config.Balance.Boss.HP_MULTIPLIER,
 		"Config: ตัวคูณ damage อาวุธกับตัวคูณ HP บอสต้องเท่ากัน ไม่งั้นจำนวนครั้งที่ตีบอสจะเพี้ยนตามด่าน"
 	)
-	assert(Config.Weapon.MAX_LEVEL >= stage.COUNT, "Config: ขั้นอาวุธต้องมีอย่างน้อยเท่าจำนวนด่าน")
+	assert(Config.Balance.Weapon.MAX_LEVEL >= stage.COUNT, "Config: ขั้นอาวุธต้องมีอย่างน้อยเท่าจำนวนด่าน")
 
 	----------------------------------------------------------------------------
 	-- แหล่งที่มาของไข่ + Developer Product
@@ -3514,16 +3582,16 @@ function Config.validate()
 
 	-- ⚠️ ตัดขั้นบนของคอก/upgrade ผลิตแล้ว ต้องไม่ตัดจนผู้เล่นอ้างอิงใช้ไม่พอ
 	assert(
-		Config.Pen.MAX_LEVEL >= Config.Stage.COUNT,
-		`Config: เพดานคอก ({Config.Pen.MAX_LEVEL}) ต่ำกว่าจำนวนด่าน ({Config.Stage.COUNT}) `
+		Config.Balance.Pen.MAX_LEVEL >= Config.Balance.Stage.COUNT,
+		`Config: เพดานคอก ({Config.Balance.Pen.MAX_LEVEL}) ต่ำกว่าจำนวนด่าน ({Config.Balance.Stage.COUNT}) `
 			.. `— ผู้เล่นอ้างอิงที่ด่าน N ใช้คอกเลเวล N จะขยายไม่พอ`
 	)
 	-- upgrade อัตราผลิตตัดได้ลึกกว่า เพราะตั้งแต่ด่าน 3 คอขวดเป็นการปล่อยอยู่แล้ว
 	-- แต่ต้องยังผลิตได้ "ไม่ต่ำกว่าอัตราปล่อย" ทุกด่านที่คอขวดเป็นการปล่อย
 	-- ไม่งั้นการตัดขั้นจะไปเปลี่ยนเวลาตีโดยไม่ตั้งใจ
-	for capStage = 1, Config.Stage.COUNT do
+	for capStage = 1, Config.Balance.Stage.COUNT do
 		local produced = Config.getPenCapacity(capStage)
-			* Config.getProductionPerMinute(Config.BalanceCheck.REFERENCE_WEIGHT[capStage], nil, capStage - 1, true)
+			* Config.getProductionPerMinute(Config.Balance.BalanceCheck.REFERENCE_WEIGHT[capStage], nil, capStage - 1, true)
 			/ 60
 		local release = Config.getReleaseRate(capStage)
 		assert(
@@ -3550,10 +3618,10 @@ function Config.validate()
 	----------------------------------------------------------------------------
 
 	-- อัตราปล่อยทหาร
-	local combat = Config.Combat
+	local combat = Config.Balance.Combat
 	assert(
-		#combat.RELEASE_PER_SECOND == Config.Stage.COUNT,
-		`Config: ตารางอัตราปล่อยมี {#combat.RELEASE_PER_SECOND} แถว แต่มี {Config.Stage.COUNT} ด่าน`
+		#combat.RELEASE_PER_SECOND == Config.Balance.Stage.COUNT,
+		`Config: ตารางอัตราปล่อยมี {#combat.RELEASE_PER_SECOND} แถว แต่มี {Config.Balance.Stage.COUNT} ด่าน`
 	)
 	local previousRate = 0
 	for index, rate in combat.RELEASE_PER_SECOND do
@@ -3576,22 +3644,22 @@ function Config.validate()
 	----------------------------------------------------------------------------
 	-- ตัวคูณ damage ที่ซื้อด้วยเงิน
 	----------------------------------------------------------------------------
-	local check = Config.BalanceCheck
-	local upgrade = Config.DamageUpgrade
+	local check = Config.Balance.BalanceCheck
+	local upgrade = Config.Balance.DamageUpgrade
 	assert(upgrade.STEP_MULTIPLIER > 1, "Config: STEP_MULTIPLIER ของ upgrade damage ต้องมากกว่า 1")
 	assert(
 		upgrade.STEPS_PER_STAGE >= 1 and upgrade.STEPS_PER_STAGE % 1 == 0,
 		"Config: STEPS_PER_STAGE ต้องเป็นจำนวนเต็มบวก"
 	)
 	assert(
-		upgrade.MAX_LEVEL == upgrade.STEPS_PER_STAGE * Config.Stage.COUNT,
+		upgrade.MAX_LEVEL == upgrade.STEPS_PER_STAGE * Config.Balance.Stage.COUNT,
 		`Config: MAX_LEVEL ({upgrade.MAX_LEVEL}) ต้องเท่ากับ STEPS_PER_STAGE × จำนวนด่าน `
-			.. `({upgrade.STEPS_PER_STAGE} × {Config.Stage.COUNT} = {upgrade.STEPS_PER_STAGE * Config.Stage.COUNT})`
+			.. `({upgrade.STEPS_PER_STAGE} × {Config.Balance.Stage.COUNT} = {upgrade.STEPS_PER_STAGE * Config.Balance.Stage.COUNT})`
 	)
 	assert(upgrade.COST_MULTIPLIER_IN_STAGE >= 1, "Config: COST_MULTIPLIER_IN_STAGE ต้องไม่น้อยกว่า 1")
 	assert(
-		#upgrade.STAGE_COST_BASE == Config.Stage.COUNT,
-		`Config: STAGE_COST_BASE มี {#upgrade.STAGE_COST_BASE} ด่าน แต่เกมมี {Config.Stage.COUNT} ด่าน`
+		#upgrade.STAGE_COST_BASE == Config.Balance.Stage.COUNT,
+		`Config: STAGE_COST_BASE มี {#upgrade.STAGE_COST_BASE} ด่าน แต่เกมมี {Config.Balance.Stage.COUNT} ด่าน`
 	)
 
 	-- ⚠️ off-by-one: ผู้เล่นใหม่ที่ด่าน 1 ต้องซื้อได้ทันที ไม่ใช่ตันตั้งแต่ต้นเกม
@@ -3601,7 +3669,7 @@ function Config.validate()
 			.. `— น่าจะพลาด off-by-one (ใช้ wallProgress - 1 แทน wallProgress) ผู้เล่นใหม่จะซื้ออะไรไม่ได้เลย`
 	)
 	assert(
-		Config.getMaxDamageLevel(Config.Stage.COUNT) == upgrade.MAX_LEVEL,
+		Config.getMaxDamageLevel(Config.Balance.Stage.COUNT) == upgrade.MAX_LEVEL,
 		"Config: เพดานที่ด่านสุดท้ายต้องพอดีกับ MAX_LEVEL"
 	)
 	assert(Config.getArmyDamageMultiplier(0) == 1, "Config: ยังไม่ซื้อ upgrade ต้องได้ตัวคูณ 1 พอดี")
@@ -3626,7 +3694,7 @@ function Config.validate()
 	-- ⚠️ ยามที่เป็นหัวใจของรอบนี้: ราคาต้องดูดเงินส่วนเกินให้หมดจริง
 	-- ถูกเกินไป = เงินยังล้นเหมือนเดิม upgrade ไม่ได้เป็นบ่อเงินจริง
 	-- แพงเกินไป = ผู้เล่นซื้อไม่ไหว แล้วตันเพราะ damage ไม่พอ
-	for upgradeStage = 1, Config.Stage.COUNT do
+	for upgradeStage = 1, Config.Balance.Stage.COUNT do
 		local stageTotal = Config.getStageDamageUpgradeTotal(upgradeStage)
 		local stageIncome = Config.getReferenceStageIncome(upgradeStage)
 		assert(stageIncome > 0, `Config: คำนวณรายได้ของด่าน {upgradeStage} ได้ 0`)
@@ -3641,24 +3709,24 @@ function Config.validate()
 	end
 
 	assert(
-		#Config.BalanceCheck.REFERENCE_WEIGHT == Config.Stage.COUNT
-			and #Config.BalanceCheck.REFERENCE_CLASS == Config.Stage.COUNT,
+		#Config.Balance.BalanceCheck.REFERENCE_WEIGHT == Config.Balance.Stage.COUNT
+			and #Config.Balance.BalanceCheck.REFERENCE_CLASS == Config.Balance.Stage.COUNT,
 		"Config: ตารางอ้างอิงของ BalanceCheck ต้องมีครบทุกด่าน"
 	)
 	assert(
-		Config.BalanceCheck.MIN_HOURS_PER_STAGE < Config.BalanceCheck.MAX_HOURS_PER_STAGE,
+		Config.Balance.BalanceCheck.MIN_HOURS_PER_STAGE < Config.Balance.BalanceCheck.MAX_HOURS_PER_STAGE,
 		"Config: ช่วงเวลาที่ยอมรับได้ของ BalanceCheck กลับหัว"
 	)
 	assert(
-		Config.BalanceCheck.TURRET_TOLL_CEILING > 0 and Config.BalanceCheck.TURRET_TOLL_CEILING < 1,
+		Config.Balance.BalanceCheck.TURRET_TOLL_CEILING > 0 and Config.Balance.BalanceCheck.TURRET_TOLL_CEILING < 1,
 		"Config: TURRET_TOLL_CEILING ต้องอยู่ระหว่าง 0 กับ 1 (เป็นสัดส่วนของกำลังพล)"
 	)
 	assert(
-		Config.BalanceCheck.MAX_FARM_TO_CLEAR_RATIO > 0,
+		Config.Balance.BalanceCheck.MAX_FARM_TO_CLEAR_RATIO > 0,
 		"Config: MAX_FARM_TO_CLEAR_RATIO ต้องมากกว่า 0"
 	)
 	assert(
-		Config.BalanceCheck.PLAYERS_PER_SERVER > 0,
+		Config.Balance.BalanceCheck.PLAYERS_PER_SERVER > 0,
 		"Config: PLAYERS_PER_SERVER ต้องมากกว่า 0"
 	)
 
@@ -3671,9 +3739,9 @@ function Config.validate()
 	local sMultiplier = CharacterClasses.S.multiplier
 	assert(sMultiplier > 0, "Config: ตัวคูณคลาส S ต้องมากกว่า 0")
 	assert(
-		ssMultiplier / sMultiplier <= Config.BalanceCheck.MAX_SS_OVER_S_RATIO,
+		ssMultiplier / sMultiplier <= Config.Balance.BalanceCheck.MAX_SS_OVER_S_RATIO,
 		`Config: คลาส SS แรงกว่า S อยู่ {string.format("%.2f", ssMultiplier / sMultiplier)} เท่า `
-			.. `(เพดาน {Config.BalanceCheck.MAX_SS_OVER_S_RATIO}) — SS ออกจากไข่ Robux เท่านั้น `
+			.. `(เพดาน {Config.Balance.BalanceCheck.MAX_SS_OVER_S_RATIO}) — SS ออกจากไข่ Robux เท่านั้น `
 			.. `ปล่อยให้ห่างกว่านี้ = pay-to-win`
 	)
 
@@ -3698,9 +3766,9 @@ function Config.validate()
 	-- ราคาของทุกอย่างโต ×10 ต่อขั้น ถ้าบ่อเงินโตช้ากว่านั้น มันจะกลายเป็นเศษเงิน
 	-- กลางเกม แล้วผู้เล่นจะกลับไปติดปัญหาเดิม: มีบ่อเงินแต่ซื้ออะไรไม่ได้
 	local priceGrowth = math.max(
-		Config.Pen.UPGRADE_COST_MULTIPLIER,
-		Config.Production.UPGRADE_COST_MULTIPLIER,
-		Config.Weapon.UPGRADE_COST_MULTIPLIER
+		Config.Balance.Pen.UPGRADE_COST_MULTIPLIER,
+		Config.Balance.Production.UPGRADE_COST_MULTIPLIER,
+		Config.Balance.Weapon.UPGRADE_COST_MULTIPLIER
 	)
 
 	assert(economy.KILL_DEFENDER_BASE > 0, "Config: KILL_DEFENDER_BASE ต้องมากกว่า 0")
@@ -3716,8 +3784,8 @@ function Config.validate()
 	)
 	assert(
 		math.abs(
-			Config.getBossKillShare(5, Config.BalanceCheck.PLAYERS_PER_SERVER)
-				* Config.BalanceCheck.PLAYERS_PER_SERVER
+			Config.getBossKillShare(5, Config.Balance.BalanceCheck.PLAYERS_PER_SERVER)
+				* Config.Balance.BalanceCheck.PLAYERS_PER_SERVER
 				- Config.getBossKillReward(5)
 		) < 1e-6,
 		"Config: ส่วนแบ่งรวมของทุกคนต้องเท่ากับรางวัลเต็มพอดี"
@@ -3728,7 +3796,7 @@ function Config.validate()
 			.. `— บอสจะกลายเป็นเศษเงินตั้งแต่กลางเกม`
 	)
 
-	for rewardStage = 2, Config.Stage.COUNT do
+	for rewardStage = 2, Config.Balance.Stage.COUNT do
 		local previous = Config.getStageDefenderRewardTotal(rewardStage - 1)
 		if previous > 0 then
 			local growth = Config.getStageDefenderRewardTotal(rewardStage) / previous

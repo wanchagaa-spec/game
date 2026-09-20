@@ -63,7 +63,7 @@ print(string.format("  ลานหญ้ารวม    X = %7.1f .. %-7.1f   %
 	plazaMinX, plazaMaxX, plazaW, plazaD))
 print(string.format("  จุดเกิดกลาง   X = %7.1f", spawn.X))
 print(string.format("  เลนรบ         X = %7.1f .. %-7.1f   ยาว %.0f · กว้าง %.0f · %d ด่าน ด่านละ %.0f",
-	laneStart, laneEnd, laneLength, MAP.Lane.Width, Config.Stage.COUNT, MAP.Lane.LengthPerStage))
+	laneStart, laneEnd, laneLength, MAP.Lane.Width, Config.Balance.Stage.COUNT, MAP.Lane.LengthPerStage))
 
 --------------------------------------------------------------------------------
 -- ขนาดแมพทั้งใบ — กรอบที่กำแพงใสล้อมไว้
@@ -91,7 +91,7 @@ print("")
 print("── เวลาวิ่ง (วิ่งตรงไม่หยุด) ──")
 
 local nest1 = Config.getBossNestCenter(1).X
-local nestLast = Config.getBossNestCenter(Config.Stage.COUNT).X
+local nestLast = Config.getBossNestCenter(Config.Balance.Stage.COUNT).X
 
 local trips = {
 	{ "ต้นลาน (ขอบซ้าย) → รังบอสด่าน 1", nest1 - plazaMinX },
@@ -99,7 +99,7 @@ local trips = {
 	{ "จุดเกิด → ต้นเลนรบ", math.abs(laneStart - spawn.X) },
 	{ "ต้นเลน → รังบอสด่าน 1", math.abs(nest1 - laneStart) },
 	{ "ข้ามหนึ่งด่าน", MAP.Lane.LengthPerStage },
-	{ `ต้นเลน → รังบอสด่าน {Config.Stage.COUNT}`, math.abs(nestLast - laneStart) },
+	{ `ต้นเลน → รังบอสด่าน {Config.Balance.Stage.COUNT}`, math.abs(nestLast - laneStart) },
 	{ "ขอบซ้ายสุด → ขอบขวาสุด", mapMaxX - mapMinX },
 	{ "คอก 1 → คอก 3 (ข้ามลาน)", math.abs(Config.getPenPlotCenter(3).X - Config.getPenPlotCenter(1).X) },
 }
@@ -116,7 +116,7 @@ print("")
 print("── รายด่าน ──")
 print("  ด่าน │ ช่วง X            │ กำแพง  │ รังบอส │ วิ่งจากต้นเลนถึงรัง")
 line("─")
-for stage = 1, Config.Stage.COUNT do
+for stage = 1, Config.Balance.Stage.COUNT do
 	local startX = Config.getStageStartX(stage)
 	local endX = startX + MAP.Lane.LengthPerStage
 	local wallX = Config.getWallX(stage)

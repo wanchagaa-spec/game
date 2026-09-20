@@ -351,7 +351,7 @@ function MapBuilder.buildShop(parent: Folder)
 	end
 
 	-- ⚠️ **ไม่มีแท่นวาปแล้ว** (เอาออกรอบซื้อความเร็ว)
-	-- ผู้เล่นเดินไปเองทุกที่ · ปัญหาระยะทางแก้ด้วย Config.SpeedUpgrade แทน
+	-- ผู้เล่นเดินไปเองทุกที่ · ปัญหาระยะทางแก้ด้วย Config.Balance.SpeedUpgrade แทน
 	-- และไม่มีแท่นวาปไปรังบอสด้วย — วาปไปรังได้เมื่อไหร่ การแย่งไข่ก็หมดความหมาย
 	--
 	-- อัปเกรดทั้งสองอย่าง (damage 72 ขั้น · ความเร็ว 5 ขั้น) มี**ปุ่มติดตัว เปิดได้ทุกที่**
@@ -420,7 +420,7 @@ function MapBuilder.buildBattleLane(parent: Folder)
 		local side = if sign == 1 then "North" else "South"
 		local cursor = startX
 
-		for stage = 1, Config.Stage.COUNT do
+		for stage = 1, Config.Balance.Stage.COUNT do
 			local room = Config.getBossNestCenter(stage)
 			local roomStart = room.X - roomHalfX
 			local roomEnd = room.X + roomHalfX
@@ -471,7 +471,7 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	markers.Name = "StageMarkers"
 	markers.Parent = lane
 
-	for stage = 1, Config.Stage.COUNT do
+	for stage = 1, Config.Balance.Stage.COUNT do
 		local marker = makePart(
 			`StageMarker{stage}`,
 			Vector3.new(1.5, 0.3, MAP.Lane.Width),
@@ -493,7 +493,7 @@ function MapBuilder.buildBossRooms(parent: Folder)
 	rooms.Name = "BossRooms"
 	rooms.Parent = parent
 
-	for stage = 1, Config.Stage.COUNT do
+	for stage = 1, Config.Balance.Stage.COUNT do
 		local center = Config.getBossNestCenter(stage)
 
 		local model = Instance.new("Model")
@@ -517,7 +517,7 @@ function MapBuilder.buildBossRooms(parent: Folder)
 		makeLabel(`รังบอสด่าน {stage} · {gated}`, 280, base, 10)
 
 		local spots: { Part } = {}
-		for i = 1, Config.Boss.EGGS_PER_SPAWN do
+		for i = 1, Config.Balance.Boss.EGGS_PER_SPAWN do
 			local spot = makePart(
 				`EggSpot{i}`,
 				MAP.BossRoom.EggPadSize,
@@ -643,7 +643,7 @@ function MapBuilder.build()
 
 	print(
 		`[MapBuilder] สร้างแมพแล้ว — คอก {Config.World.MAX_PENS} แปลง ({MAP.Pen.Size.X}x{MAP.Pen.Size.Y}) · `
-			.. `เลนยาว {Config.getLaneLength()} studs · ห้องบอส {Config.Stage.COUNT} ห้อง · `
+			.. `เลนยาว {Config.getLaneLength()} studs · ห้องบอส {Config.Balance.Stage.COUNT} ห้อง · `
 			.. `วิ่ง {DIM.Player.WalkSpeed} studs/วิ`
 	)
 end

@@ -23,7 +23,7 @@ return function(t, Config)
 	if not ok then print(`     {err}`) end
 
 	print("── สูตร damage/HP (เลือก sqrt แล้ว) ──")
-	check("ACTIVE_FORMULA", Config.Damage.ACTIVE_FORMULA, "sqrt")
+	check("ACTIVE_FORMULA", Config.Balance.Damage.ACTIVE_FORMULA, "sqrt")
 	near("แม่ 100kg คลาส C = 10", Config.computePower(100,"monkey"), 10, 0.01)
 	near("แม่ 10,000kg คลาส C = 100", Config.computePower(10000,"monkey"), 100, 0.01)
 	near("แม่ 100kg คลาส SS = 4,320", Config.computePower(100,"yulai"), 4320, 0.01)
@@ -70,11 +70,11 @@ return function(t, Config)
 	check("ค่าอัป Lv1→2", Config.getPenUpgradeCost(1), 1000)
 	check("ค่าอัป Lv5→6", Config.getPenUpgradeCost(5), 10000000)
 	check("เต็มเลเวลแล้วอัปไม่ได้", Config.getPenUpgradeCost(10), nil)
-	check("ตัดขั้น 11-15 ทิ้งแล้ว", Config.Pen.MAX_LEVEL, 10)
-	check("เพดานยังคลุมทุกด่าน", Config.Pen.MAX_LEVEL >= Config.Stage.COUNT, true)
+	check("ตัดขั้น 11-15 ทิ้งแล้ว", Config.Balance.Pen.MAX_LEVEL, 10)
+	check("เพดานยังคลุมทุกด่าน", Config.Balance.Pen.MAX_LEVEL >= Config.Balance.Stage.COUNT, true)
 	check("ราคารวมทั้งสายลดจาก 1e17", (function()
 		local total = 0
-		for lvl = 1, Config.Pen.MAX_LEVEL - 1 do total += Config.getPenUpgradeCost(lvl) end
+		for lvl = 1, Config.Balance.Pen.MAX_LEVEL - 1 do total += Config.getPenUpgradeCost(lvl) end
 		return total < 2e12
 	end)(), true)
 
@@ -92,11 +92,11 @@ return function(t, Config)
 	check("เกินเพดานถูก clamp", Config.getProductionMultiplier(10), 243)
 	check("ราคาขั้นแรก", Config.getProductionUpgradeCost(0), 1000)
 	check("เต็มแล้วอัปไม่ได้", Config.getProductionUpgradeCost(5), nil)
-	check("ตัดขั้น 6-10 ทิ้งแล้ว", Config.Production.UPGRADE_MAX_LEVEL, 5)
+	check("ตัดขั้น 6-10 ทิ้งแล้ว", Config.Balance.Production.UPGRADE_MAX_LEVEL, 5)
 	-- ตัดแล้วต้องไม่ทำให้คอขวดย้อนกลับไปเป็นการผลิต (ไม่งั้นเวลาตีจะเปลี่ยน)
 	local stillReleaseBound = true
 	for st = 3, 9 do
-		local w = Config.BalanceCheck.REFERENCE_WEIGHT[st]
+		local w = Config.Balance.BalanceCheck.REFERENCE_WEIGHT[st]
 		local produced = Config.getPenCapacity(st) * Config.getProductionPerMinute(w, nil, st - 1, true) / 60
 		if produced < Config.getReleaseRate(st) then stillReleaseBound = false end
 	end
@@ -108,8 +108,8 @@ return function(t, Config)
 	near("รวมกันแล้วได้เต็มพอดี ไม่มีเงินงอก",
 	     Config.getBossKillShare(9, 7) * 7, Config.getBossKillReward(9), 1)
 	check("จำนวนคน 0 ไม่ทำให้หารด้วยศูนย์", Config.getBossKillShare(5, 0), Config.getBossKillReward(5))
-	check("ไม่แบ่งตามสัดส่วน damage", Config.Economy.BOSS_REWARD_SPLIT_EQUALLY, true)
-	check("ต้องทำ damage ถึงจะนับว่าร่วมตี", Config.Economy.BOSS_REWARD_MIN_DAMAGE > 0, true)
+	check("ไม่แบ่งตามสัดส่วน damage", Config.Balance.Economy.BOSS_REWARD_SPLIT_EQUALLY, true)
+	check("ต้องทำ damage ถึงจะนับว่าร่วมตี", Config.Balance.Economy.BOSS_REWARD_MIN_DAMAGE > 0, true)
 
 	print("── ด่าน ──")
 	check("ด่าน 1 ไม่มีทหารฝ่ายรับ", Config.getStageDefenderCount(1), 0)
@@ -201,10 +201,10 @@ return function(t, Config)
 	      Config.getStatusEffects({"gold","gold"}).childRatio, Config.getStatusEffects({"gold"}).childRatio)
 	check("สถานะที่ไม่มีจริงไม่ทำให้พัง", Config.getStatusEffects({"ไม่มี"}).damageMultiplier, 1)
 	check("ติดทุกสถานะแล้วลูกไม่เกินแม่",
-	      Config.Weight.CHILD_RATIO + Config.Statuses.gold.childRatioBonus
-	      + Config.Statuses.silver.childRatioBonus <= Config.Weight.MAX_CHILD_RATIO, true)
+	      Config.Balance.Weight.CHILD_RATIO + Config.Statuses.gold.childRatioBonus
+	      + Config.Statuses.silver.childRatioBonus <= Config.Balance.Weight.MAX_CHILD_RATIO, true)
 	check("gold ตั้งไว้ให้ลูกเป็น 2%",
-	      Config.Weight.CHILD_RATIO + Config.Statuses.gold.childRatioBonus, 0.02)
+	      Config.Balance.Weight.CHILD_RATIO + Config.Statuses.gold.childRatioBonus, 0.02)
 
 
 	print("── แหล่งที่มาของไข่ (ไม่มี price แล้ว) ──")
@@ -226,23 +226,23 @@ return function(t, Config)
 	check("productId ที่ไม่มีจริงคืน nil", Config.findProductByRobloxId(999999), nil)
 
 	print("── ตารางสุ่มน้ำหนักแยกตามด่าน ──")
-	check("ด่าน 1 มีตาราง", Config.StageWeightTiers[1] ~= nil, true)
-	check("ด่าน 5 ยังไม่กำหนด", Config.StageWeightTiers[5], nil)
-	check("ด่าน 5 ถอยไปใช้ด่าน 1", Config.getWeightTiers(5), Config.StageWeightTiers[1])
-	check("ด่าน 9 ถอยไปใช้ด่าน 1", Config.getWeightTiers(9), Config.StageWeightTiers[1])
+	check("ด่าน 1 มีตาราง", Config.Balance.StageWeightTiers[1] ~= nil, true)
+	check("ด่าน 5 ยังไม่กำหนด", Config.Balance.StageWeightTiers[5], nil)
+	check("ด่าน 5 ถอยไปใช้ด่าน 1", Config.getWeightTiers(5), Config.Balance.StageWeightTiers[1])
+	check("ด่าน 9 ถอยไปใช้ด่าน 1", Config.getWeightTiers(9), Config.Balance.StageWeightTiers[1])
 	check("ด่านเกินช่วงก็ยังคืนตารางได้", Config.getWeightTiers(99) ~= nil, true)
 	check("สุ่มโดยไม่ส่ง stage ยังทำงาน", Config.rollMotherWeight(rng) >= 100, true)
 	check("สุ่มโดยส่ง stage ยังทำงาน", Config.rollMotherWeight(rng, 7) >= 100, true)
 
 	print("── ตารางด่าน + อาวุธป้องกันกำแพง ──")
-	check("มีครบ 9 ด่าน", #Config.Stages, 9)
+	check("มีครบ 9 ด่าน", #Config.Balance.Stages, 9)
 	check("ด่าน 1 ไม่มีทหารฝ่ายรับ", Config.getStageDefenderCount(1), 0)
 	check("ด่าน 9 ทหาร 1,000,000,000", Config.getStageDefenderCount(9), 1e9)
 	check("ด่าน 1 ไม่มี turret", Config.getStageTurretDps(1), 0)
 
 	-- turret ต้องเป็นสัดส่วนของ damage/วินาที ไม่ใช่ของ damage ทหารฝ่ายรับ
 	local function ourDpsAt(stage)
-		local chk = Config.BalanceCheck
+		local chk = Config.Balance.BalanceCheck
 		local w = chk.REFERENCE_WEIGHT[stage]
 		local cid
 		for id, ch in Config.Characters do if ch.class == chk.REFERENCE_CLASS[stage] then cid = id break end end
@@ -255,7 +255,7 @@ return function(t, Config)
 		local toll = Config.getStageTurretDps(st) / ourDpsAt(st)
 		if toll > tollMax then tollMax = toll end
 		if toll < tollMin then tollMin = toll end
-		if toll > Config.BalanceCheck.TURRET_TOLL_CEILING then tollOk = false end
+		if toll > Config.Balance.BalanceCheck.TURRET_TOLL_CEILING then tollOk = false end
 	end
 	near("ด่าน 9 turret = 20% ของ damage/วิ", Config.getStageTurretDps(9), 0.20 * ourDpsAt(9), 1e-6)
 	check("turret กินกำลังพลไม่เกินเพดานทุกด่าน", tollOk, true)
@@ -274,7 +274,7 @@ return function(t, Config)
 	print("── ไข่ตำนาน: รับประกัน tier ขั้นต่ำ ──")
 	check("ไข่ตำนานรับประกัน tier 3", Config.getEgg("egg_legendary").guaranteedTier, 3)
 	check("ไข่จากบอสไม่รับประกัน", Config.getEgg("egg_common").guaranteedTier, nil)
-	local minTier3 = Config.Weight.TIERS[3].min
+	local minTier3 = Config.Balance.Weight.TIERS[3].min
 	local low, lowest = 0, math.huge
 	for _ = 1, 200000 do
 		local w = Config.rollMotherWeightForEgg("egg_legendary", rng, 1)
@@ -285,7 +285,7 @@ return function(t, Config)
 	check("น้ำหนักต่ำสุดที่ได้ = ขอบล่างของ tier 3", lowest >= minTier3, true)
 	local anyHigher = false
 	for _ = 1, 200000 do
-		if Config.rollMotherWeightForEgg("egg_legendary", rng, 1) > Config.Weight.TIERS[3].max then anyHigher = true end
+		if Config.rollMotherWeightForEgg("egg_legendary", rng, 1) > Config.Balance.Weight.TIERS[3].max then anyHigher = true end
 	end
 	check("ยังลุ้น tier สูงกว่าที่รับประกันได้", anyHigher, true)
 	check("ไข่ที่ไม่มีจริงคืน nil", Config.rollMotherWeightForEgg("ไม่มี", rng, 1), nil)
@@ -311,7 +311,7 @@ return function(t, Config)
 
 
 	print("── ตัวคูณ damage ที่ซื้อด้วยเงิน ──")
-	local UP = Config.DamageUpgrade
+	local UP = Config.Balance.DamageUpgrade
 	local STEP = UP.STEP_MULTIPLIER
 	check("ยังไม่ซื้อ = ×1 พอดี", Config.getArmyDamageMultiplier(0), 1)
 	near("ขั้น 1 = ×1.1", Config.getArmyDamageMultiplier(1), 1.1, 1e-9)
@@ -328,13 +328,13 @@ return function(t, Config)
 	check("เพดานด่านท้าย = MAX_LEVEL", Config.getMaxDamageLevel(9), UP.MAX_LEVEL)
 	check("ด่าน 0 ถูก clamp เป็นด่าน 1", Config.getMaxDamageLevel(0), 8)
 	check("ด่านเกิน 9 ถูก clamp", Config.getMaxDamageLevel(99), 72)
-	check("8 ขั้น × 9 ด่าน = 72", UP.STEPS_PER_STAGE * Config.Stage.COUNT, UP.MAX_LEVEL)
+	check("8 ขั้น × 9 ด่าน = 72", UP.STEPS_PER_STAGE * Config.Balance.Stage.COUNT, UP.MAX_LEVEL)
 
 	print("── ราคา upgrade ──")
 	check("ขั้น 0 ไม่มีราคา", Config.getDamageUpgradeCost(0), nil)
 	check("เกินเพดานไม่มีราคา", Config.getDamageUpgradeCost(UP.MAX_LEVEL + 1), nil)
 	check("ขั้นแรกราคา 300 (ผู้เล่นใหม่มี 500 ซื้อได้ทันที)", Config.getDamageUpgradeCost(1), 300)
-	check("ผู้เล่นใหม่ซื้อขั้นแรกไหว", Config.NewPlayer.coins >= Config.getDamageUpgradeCost(1), true)
+	check("ผู้เล่นใหม่ซื้อขั้นแรกไหว", Config.Balance.NewPlayer.coins >= Config.getDamageUpgradeCost(1), true)
 	near("ขั้น 2 = ขั้น 1 × 1.3", Config.getDamageUpgradeCost(2), 300 * 1.3, 1e-9)
 	check("ขั้น 9 ขึ้นฐานราคาของด่าน 2", Config.getDamageUpgradeCost(9), UP.STAGE_COST_BASE[2])
 	local priceRises = true
@@ -349,7 +349,7 @@ return function(t, Config)
 		local share = Config.getStageDamageUpgradeTotal(st) / Config.getReferenceStageIncome(st)
 		if share < minShare then minShare = share end
 		if share > maxShare then maxShare = share end
-		if share < Config.BalanceCheck.MIN_UPGRADE_SHARE or share > Config.BalanceCheck.MAX_UPGRADE_SHARE then
+		if share < Config.Balance.BalanceCheck.MIN_UPGRADE_SHARE or share > Config.Balance.BalanceCheck.MAX_UPGRADE_SHARE then
 			shareOk = false
 		end
 	end
@@ -380,30 +380,30 @@ return function(t, Config)
 
 	print("── ไม่มีตัวคูณ damage อัตโนมัติตามด่านแล้ว ──")
 	check("getStageDamageMultiplier ถูกลบแล้ว", Config.getStageDamageMultiplier, nil)
-	check("STAGE_DAMAGE_BASE ถูกลบแล้ว", Config.Combat.STAGE_DAMAGE_BASE, nil)
+	check("STAGE_DAMAGE_BASE ถูกลบแล้ว", Config.Balance.Combat.STAGE_DAMAGE_BASE, nil)
 	check("สูตรเงินยังใช้ตัวคูณตามด่านเหมือนเดิม",
 	      Config.getCoinsPerMinute(100, 3) / Config.getCoinsPerMinute(100, 1), 100)
 
 	print("── ยามเฝ้าสมดุล ต้องจับค่าที่พังได้จริง ──")
-	local savedStep = Config.DamageUpgrade.STEP_MULTIPLIER
-	Config.DamageUpgrade.STEP_MULTIPLIER = 1.3
+	local savedStep = Config.Balance.DamageUpgrade.STEP_MULTIPLIER
+	Config.Balance.DamageUpgrade.STEP_MULTIPLIER = 1.3
 	check("ตัวคูณต่อขั้น 1.3 (แรงเกิน) ต้องทำให้ validate ไม่ผ่าน", pcall(Config.validate), false)
 	do
 		local _, err = pcall(Config.validate)
 		print("   ข้อความที่ได้: " .. string.sub(tostring(err), 1, 110))
 	end
-	Config.DamageUpgrade.STEP_MULTIPLIER = 1.01
+	Config.Balance.DamageUpgrade.STEP_MULTIPLIER = 1.01
 	check("ตัวคูณต่อขั้น 1.01 (อ่อนเกิน) ต้องไม่ผ่านเช่นกัน", pcall(Config.validate), false)
-	Config.DamageUpgrade.STEP_MULTIPLIER = savedStep
+	Config.Balance.DamageUpgrade.STEP_MULTIPLIER = savedStep
 	check("คืนค่าเดิมแล้ว validate ผ่าน", pcall(Config.validate), true)
 
 	-- ราคาที่ถูกเกินไปต้องถูกจับด้วย (เงินจะล้นเหมือนเดิม)
-	local savedCost = Config.DamageUpgrade.STAGE_COST_BASE[5]
-	Config.DamageUpgrade.STAGE_COST_BASE[5] = savedCost / 100
+	local savedCost = Config.Balance.DamageUpgrade.STAGE_COST_BASE[5]
+	Config.Balance.DamageUpgrade.STAGE_COST_BASE[5] = savedCost / 100
 	check("ราคาด่าน 5 ถูกลง 100 เท่า ต้องทำให้ validate ไม่ผ่าน", pcall(Config.validate), false)
-	Config.DamageUpgrade.STAGE_COST_BASE[5] = savedCost * 100
+	Config.Balance.DamageUpgrade.STAGE_COST_BASE[5] = savedCost * 100
 	check("ราคาด่าน 5 แพงขึ้น 100 เท่า ก็ไม่ผ่านเช่นกัน", pcall(Config.validate), false)
-	Config.DamageUpgrade.STAGE_COST_BASE[5] = savedCost
+	Config.Balance.DamageUpgrade.STAGE_COST_BASE[5] = savedCost
 	check("คืนราคาเดิมแล้ว validate ผ่าน", pcall(Config.validate), true)
 
 	print("── เกมต้องยากขึ้นเรื่อย ๆ ──")
@@ -411,8 +411,8 @@ return function(t, Config)
 	local function hoursAt(st)
 		local hp = Config.getStageTotalHp(st)
 		if hp <= 0 then return 0 end
-		local w = Config.BalanceCheck.REFERENCE_WEIGHT[st]
-		local cl = Config.BalanceCheck.REFERENCE_CLASS[st]
+		local w = Config.Balance.BalanceCheck.REFERENCE_WEIGHT[st]
+		local cl = Config.Balance.BalanceCheck.REFERENCE_CLASS[st]
 		local id
 		for cid, ch in Config.Characters do if ch.class == cl then id = cid break end end
 		local produced = Config.getPenCapacity(st) * Config.getProductionPerMinute(w, nil, st - 1, true) / 60
@@ -437,7 +437,7 @@ return function(t, Config)
 	check("ทุกด่านอยู่ในช่วงที่ยามยอมรับ", (function()
 		for st = 2, 9 do
 			local h = hoursAt(st)
-			if h < Config.BalanceCheck.MIN_HOURS_PER_STAGE or h > Config.BalanceCheck.MAX_HOURS_PER_STAGE then
+			if h < Config.Balance.BalanceCheck.MIN_HOURS_PER_STAGE or h > Config.Balance.BalanceCheck.MAX_HOURS_PER_STAGE then
 				return false
 			end
 		end
@@ -451,7 +451,7 @@ return function(t, Config)
 		hoursAt(2), hoursAt(9), hoursAt(9) / hoursAt(2)))
 
 	print("── ระบบรบใหม่: อัตราปล่อย ──")
-	check("ตารางอัตราปล่อยครบ 9 ด่าน", #Config.Combat.RELEASE_PER_SECOND, 9)
+	check("ตารางอัตราปล่อยครบ 9 ด่าน", #Config.Balance.Combat.RELEASE_PER_SECOND, 9)
 	check("ด่าน 1 ปล่อย 1 ตัว/วิ", Config.getReleaseRate(1), 1)
 	check("ด่าน 9 ปล่อย 10 ตัว/วิ", Config.getReleaseRate(9), 10)
 	check("ด่าน 3 ยังปล่อย 1 ตัว/วิ (รอยต่อคอขวด)", Config.getReleaseRate(3), 1)
@@ -460,7 +460,7 @@ return function(t, Config)
 	check("อัตราปล่อยไม่ลดลง", rising, true)
 
 	print("── อัตราผลิตแปรตามน้ำหนัก (exponent 0.25) ──")
-	check("exponent = 0.25", Config.Production.WEIGHT_EXPONENT, 0.25)
+	check("exponent = 0.25", Config.Balance.Production.WEIGHT_EXPONENT, 0.25)
 	near("แม่ 100 kg = 1.0/นาที", Config.getProductionPerMinute(100, nil, 0, true), 1, 0.001)
 	near("แม่ 10,000 kg = 3.16/นาที", Config.getProductionPerMinute(10000, nil, 0, true), 3.162, 0.01)
 	near("แม่ 1,000,000 kg = 10/นาที", Config.getProductionPerMinute(1000000, nil, 0, true), 10, 0.01)
@@ -476,7 +476,7 @@ return function(t, Config)
 
 	print("── คลังทหาร ──")
 	check("cap 500 ต่อกอง", Config.getStackCap(), 500)
-	check("ไม่มีระบบอัป cap แล้ว (ตายตัว 500)", Config.Production.STACK_CAP_START, nil)
+	check("ไม่มีระบบอัป cap แล้ว (ตายตัว 500)", Config.Balance.Production.STACK_CAP_START, nil)
 	near("แม่น้ำหนักฐานเติมเต็ม 500 ใช้ ~8 ชม.",
 	     500 / Config.getProductionPerMinute(100, nil, 0, true) / 60, 8.33, 0.1)
 
@@ -486,16 +486,16 @@ return function(t, Config)
 	check("ด่าน 2 มีทหาร 100", Config.getStageDefenderCount(2), 100)
 
 	print("── กติกาที่ห้ามพลิก ──")
-	check("ห้าม auto ปล่อยแม่", Config.Combat.ALLOW_AUTO_RELEASE_MOTHERS, false)
-	check("ห้ามเลือกแม่จากคอก", Config.Combat.MOTHERS_SELECTABLE_FROM_PEN, false)
-	local savedA = Config.Combat.ALLOW_AUTO_RELEASE_MOTHERS
-	Config.Combat.ALLOW_AUTO_RELEASE_MOTHERS = true
+	check("ห้าม auto ปล่อยแม่", Config.Balance.Combat.ALLOW_AUTO_RELEASE_MOTHERS, false)
+	check("ห้ามเลือกแม่จากคอก", Config.Balance.Combat.MOTHERS_SELECTABLE_FROM_PEN, false)
+	local savedA = Config.Balance.Combat.ALLOW_AUTO_RELEASE_MOTHERS
+	Config.Balance.Combat.ALLOW_AUTO_RELEASE_MOTHERS = true
 	check("เปิด auto ปล่อยแม่ → validate ไม่ผ่าน", pcall(Config.validate), false)
-	Config.Combat.ALLOW_AUTO_RELEASE_MOTHERS = savedA
-	local savedP = Config.Combat.MOTHERS_SELECTABLE_FROM_PEN
-	Config.Combat.MOTHERS_SELECTABLE_FROM_PEN = true
+	Config.Balance.Combat.ALLOW_AUTO_RELEASE_MOTHERS = savedA
+	local savedP = Config.Balance.Combat.MOTHERS_SELECTABLE_FROM_PEN
+	Config.Balance.Combat.MOTHERS_SELECTABLE_FROM_PEN = true
 	check("เลือกแม่จากคอกได้ → validate ไม่ผ่าน", pcall(Config.validate), false)
-	Config.Combat.MOTHERS_SELECTABLE_FROM_PEN = savedP
+	Config.Balance.Combat.MOTHERS_SELECTABLE_FROM_PEN = savedP
 
 	print("── โมเดลบนจอ ──")
 	check("ด่าน 1: 1/วิ × 30 วิ = 30 ตัว", Config.getVisibleUnitCount(1), 30)
@@ -516,7 +516,7 @@ return function(t, Config)
 	check("UnitTypes ปิดหมดแล้ว (ฟักได้ตัวแม่ ไม่ใช่ทหาร)", anyUnitEnabled, false)
 	check("hatchTable ถูกถอดออกแล้ว", Config.getEgg("egg_common").hatchTable, nil)
 	check("Config.Farm ถูกเปลี่ยนชื่อเป็น Config.World แล้ว", rawget(Config, "Farm"), nil)
-	check("Config.World.MAX_PENS = จำนวนผู้เล่นต่อเซิร์ฟ", Config.World.MAX_PENS, Config.BalanceCheck.PLAYERS_PER_SERVER)
+	check("Config.World.MAX_PENS = จำนวนผู้เล่นต่อเซิร์ฟ", Config.World.MAX_PENS, Config.Balance.BalanceCheck.PLAYERS_PER_SERVER)
 	check("formatWeight ยังทำงาน", Config.formatWeight(1200), "1.2K")
 	check("rollMotherWeight ยังทำงาน", Config.rollMotherWeight(rng) >= 100, true)
 
@@ -621,19 +621,19 @@ return function(t, Config)
 	check("egg_legendary ยังเปิดอยู่", Config.getEgg("egg_legendary").enabled, true)
 	check("ไข่ตำนานไม่ผูกด่าน", Config.getEgg("egg_legendary").stage, nil)
 	check("DEFAULT_EGG_ID เป็นไข่ด่าน 1", Config.DEFAULT_EGG_ID, "egg_stage1")
-	check("ผู้เล่นใหม่ได้ไข่ด่าน 1", Config.NewPlayer.startingEggs.egg_stage1, 1)
+	check("ผู้เล่นใหม่ได้ไข่ด่าน 1", Config.Balance.NewPlayer.startingEggs.egg_stage1, 1)
 
 	print("── ยาม turret ต้องจับค่าที่พังได้จริง ──")
 	-- ⚠️ turretDps ไม่ใช่ตัวเลขดิบแล้ว — คำนวณจาก TOLL × damage/วินาที
-	check("ตาราง Stages ไม่มีฟิลด์ turretDps แล้ว", Config.Stages[9].turretDps, nil)
+	check("ตาราง Stages ไม่มีฟิลด์ turretDps แล้ว", Config.Balance.Stages[9].turretDps, nil)
 	check("ด่าน 1 ไม่มีกำแพงจึงไม่มี turret", Config.getStageTurretDps(1), 0)
-	check("TOLL ไล่ขึ้นจาก 10% ถึง 20%", Config.Combat.TURRET_TOLL[2] == 0.10
-		and Config.Combat.TURRET_TOLL[9] == 0.20, true)
+	check("TOLL ไล่ขึ้นจาก 10% ถึง 20%", Config.Balance.Combat.TURRET_TOLL[2] == 0.10
+		and Config.Balance.Combat.TURRET_TOLL[9] == 0.20, true)
 
 	-- ค่าที่คำนวณต้องตรงกับ TOLL เป๊ะทุกด่าน ไม่ใช่แค่ใกล้เคียง
 	local exact = true
 	for st = 2, 9 do
-		if math.abs(Config.getStageTurretDps(st) / ourDpsAt(st) - Config.Combat.TURRET_TOLL[st]) > 1e-9 then
+		if math.abs(Config.getStageTurretDps(st) / ourDpsAt(st) - Config.Balance.Combat.TURRET_TOLL[st]) > 1e-9 then
 			exact = false
 		end
 	end
@@ -641,25 +641,25 @@ return function(t, Config)
 
 	-- หัวใจของการเปลี่ยนรอบนี้: ปรับอะไรก็ตามที่กระทบ damage แล้ว turret ต้องขยับตามเอง
 	local beforeDps = Config.getStageTurretDps(9)
-	local savedStepM = Config.DamageUpgrade.STEP_MULTIPLIER
-	Config.DamageUpgrade.STEP_MULTIPLIER = 1.05
+	local savedStepM = Config.Balance.DamageUpgrade.STEP_MULTIPLIER
+	Config.Balance.DamageUpgrade.STEP_MULTIPLIER = 1.05
 	local afterDps = Config.getStageTurretDps(9)
 	check("ลดตัวคูณ damage แล้ว turret ลดตามเอง (ไม่ต้องแก้มือ)", afterDps < beforeDps, true)
 	near("สัดส่วนยังเป็น 20% เท่าเดิม", afterDps / ourDpsAt(9), 0.20, 1e-9)
-	Config.DamageUpgrade.STEP_MULTIPLIER = savedStepM
+	Config.Balance.DamageUpgrade.STEP_MULTIPLIER = savedStepM
 	check("คืนค่าเดิมแล้ว turret กลับมาเท่าเดิม", Config.getStageTurretDps(9), beforeDps)
 
 	-- ยามต้องจับ TOLL ที่แรงเกินเพดาน
-	local savedToll = Config.Combat.TURRET_TOLL[9]
-	Config.Combat.TURRET_TOLL[9] = 0.9
+	local savedToll = Config.Balance.Combat.TURRET_TOLL[9]
+	Config.Balance.Combat.TURRET_TOLL[9] = 0.9
 	check("TOLL 90% ต้องทำให้ validate ไม่ผ่าน", pcall(Config.validate), false)
 	do
 		local _, err = pcall(Config.validate)
 		print("   ข้อความที่ได้: " .. string.sub(tostring(err), 1, 110))
 	end
-	Config.Combat.TURRET_TOLL[9] = 0.05
+	Config.Balance.Combat.TURRET_TOLL[9] = 0.05
 	check("TOLL ที่ต่ำกว่าด่านก่อนหน้าก็ไม่ผ่าน (กำแพงด่านสูงต้องไม่อ่อนลง)", pcall(Config.validate), false)
-	Config.Combat.TURRET_TOLL[9] = savedToll
+	Config.Balance.Combat.TURRET_TOLL[9] = savedToll
 	check("คืนค่าเดิมแล้ว validate ผ่าน", pcall(Config.validate), true)
 
 
@@ -678,8 +678,8 @@ return function(t, Config)
 		if math.abs(g - 20) > 1e-9 then killGrowthOk = false end
 	end
 	check("เงินจากการกวาดทหารโต ×20 ต่อด่านทุกด่าน", killGrowthOk, true)
-	check("โตเร็วกว่าราคาของที่โต ×10", 20 > Config.Pen.UPGRADE_COST_MULTIPLIER, true)
-	check("เงินบอสโตเท่าราคาของพอดี", Config.Economy.KILL_BOSS_MULTIPLIER, Config.Pen.UPGRADE_COST_MULTIPLIER)
+	check("โตเร็วกว่าราคาของที่โต ×10", 20 > Config.Balance.Pen.UPGRADE_COST_MULTIPLIER, true)
+	check("เงินบอสโตเท่าราคาของพอดี", Config.Balance.Economy.KILL_BOSS_MULTIPLIER, Config.Balance.Pen.UPGRADE_COST_MULTIPLIER)
 
 	print("── ตัวคูณคลาสชุดใหม่: กัน pay-to-win ──")
 	check("SS ÷ S = 2 เท่า", Config.getCharacterMultiplier("yulai") / Config.getCharacterMultiplier("guanyin"), 2)
@@ -702,56 +702,56 @@ return function(t, Config)
 	print("── ผู้เล่นอ้างอิง: น้ำหนักคงที่ คลาสไต่ตามด่าน ──")
 	check("น้ำหนักอ้างอิงคงที่ทุกด่าน", (function()
 		for st = 2, 9 do
-			if Config.BalanceCheck.REFERENCE_WEIGHT[st] ~= Config.BalanceCheck.REFERENCE_WEIGHT[1] then
+			if Config.Balance.BalanceCheck.REFERENCE_WEIGHT[st] ~= Config.Balance.BalanceCheck.REFERENCE_WEIGHT[1] then
 				return false
 			end
 		end
 		return true
 	end)(), true)
 	check("น้ำหนักอ้างอิงอยู่ใน tier 1 (ที่ 90% ของไข่ให้)",
-		Config.BalanceCheck.REFERENCE_WEIGHT[1] >= Config.Weight.TIERS[1].min
-			and Config.BalanceCheck.REFERENCE_WEIGHT[1] <= Config.Weight.TIERS[1].max, true)
+		Config.Balance.BalanceCheck.REFERENCE_WEIGHT[1] >= Config.Balance.Weight.TIERS[1].min
+			and Config.Balance.BalanceCheck.REFERENCE_WEIGHT[1] <= Config.Balance.Weight.TIERS[1].max, true)
 	check("คลาสอ้างอิงไม่ถอยหลัง", (function()
 		local prev = 99
 		for st = 1, 9 do
-			local o = Config.CharacterClasses[Config.BalanceCheck.REFERENCE_CLASS[st]].order
+			local o = Config.CharacterClasses[Config.Balance.BalanceCheck.REFERENCE_CLASS[st]].order
 			if o > prev then return false end
 			prev = o
 		end
 		return true
 	end)(), true)
-	check("คลาสอ้างอิงสูงสุดคือ A ไม่ใช่ S", Config.BalanceCheck.REFERENCE_CLASS[9], "A")
+	check("คลาสอ้างอิงสูงสุดคือ A ไม่ใช่ S", Config.Balance.BalanceCheck.REFERENCE_CLASS[9], "A")
 
 	print("── ยามเวลาฟาร์ม ──")
 	-- ⚠️ อย่า hardcode จำนวนผู้เล่น — ผูกกับ Config เพื่อให้เทสต์ตามไปเองเวลาปรับ
-	local expectedEggs = (3600 / Config.Boss.RESPAWN_SECONDS)
-		* Config.Boss.EGGS_PER_SPAWN
-		/ Config.BalanceCheck.PLAYERS_PER_SERVER
+	local expectedEggs = (3600 / Config.Balance.Boss.RESPAWN_SECONDS)
+		* Config.Balance.Boss.EGGS_PER_SPAWN
+		/ Config.Balance.BalanceCheck.PLAYERS_PER_SERVER
 	check("ไข่/ชม./คน ตรงสูตร บอสวาง ÷ จำนวนผู้เล่น",
 		math.abs(Config.getEggsPerHour() - expectedEggs) < 1e-9, true)
 	check("ที่ 6 คน ได้ 10 ฟอง/ชม./คน", math.abs(Config.getEggsPerHour() - 10) < 1e-9, true)
 	local farmOk = true
 	for st = 2, 9 do
 		local ratio = Config.getReferenceFarmHours(st) / Config.getReferenceClearHours(st)
-		if ratio > Config.BalanceCheck.MAX_FARM_TO_CLEAR_RATIO then farmOk = false end
+		if ratio > Config.Balance.BalanceCheck.MAX_FARM_TO_CLEAR_RATIO then farmOk = false end
 	end
 	check("ทุกด่าน: เวลาฟาร์มไม่เกิน 5 เท่าของเวลาตี", farmOk, true)
 
 	-- ยามต้องจับเคสที่เคยพลาด: บังคับให้ต้องใช้ S ที่ด่าน 7 (ออกแค่ 1%)
-	local savedClass = Config.BalanceCheck.REFERENCE_CLASS[7]
-	Config.BalanceCheck.REFERENCE_CLASS[7] = "S"
+	local savedClass = Config.Balance.BalanceCheck.REFERENCE_CLASS[7]
+	Config.Balance.BalanceCheck.REFERENCE_CLASS[7] = "S"
 	check("บังคับใช้ S ที่ด่าน 7 (ไข่ออก 1%) ต้องทำให้ validate ไม่ผ่าน", pcall(Config.validate), false)
 	do
 		local _, err = pcall(Config.validate)
 		print("   ข้อความที่ได้: " .. string.sub(tostring(err), 1, 130))
 	end
-	Config.BalanceCheck.REFERENCE_CLASS[7] = savedClass
+	Config.Balance.BalanceCheck.REFERENCE_CLASS[7] = savedClass
 	check("คืนค่าเดิมแล้ว validate ผ่าน", pcall(Config.validate), true)
 
 	print("── ตารางน้ำหนัก: ชุดเดียวทุกด่าน เป็นการตัดสินถาวร ──")
 	check("กำหนดไว้ด่านเดียว", (function()
 		local n = 0
-		for _ in Config.StageWeightTiers do n += 1 end
+		for _ in Config.Balance.StageWeightTiers do n += 1 end
 		return n
 	end)(), 1)
 
@@ -761,8 +761,8 @@ return function(t, Config)
 	local function hoursNoUpgrade(st)
 		local hp = Config.getStageTotalHp(st)
 		if hp <= 0 then return 0 end
-		local w = Config.BalanceCheck.REFERENCE_WEIGHT[st]
-		local cl = Config.BalanceCheck.REFERENCE_CLASS[st]
+		local w = Config.Balance.BalanceCheck.REFERENCE_WEIGHT[st]
+		local cl = Config.Balance.BalanceCheck.REFERENCE_CLASS[st]
 		local id
 		for cid, ch in Config.Characters do if ch.class == cl then id = cid break end end
 		local rate = math.min(Config.getPenCapacity(st) * Config.getProductionPerMinute(w, nil, st - 1, true) / 60,
@@ -771,12 +771,12 @@ return function(t, Config)
 	end
 	local firstBlocked
 	for st = 2, 9 do
-		if hoursNoUpgrade(st) > Config.BalanceCheck.MAX_HOURS_PER_STAGE and firstBlocked == nil then
+		if hoursNoUpgrade(st) > Config.Balance.BalanceCheck.MAX_HOURS_PER_STAGE and firstBlocked == nil then
 			firstBlocked = st
 		end
 	end
 	check("ไม่ซื้อแล้วตันจริง (มีด่านที่เกินเพดาน 72 ชม.)", firstBlocked ~= nil, true)
-	check("ด่านต้นยังผ่านได้โดยไม่ต้องซื้อ", hoursNoUpgrade(2) <= Config.BalanceCheck.MAX_HOURS_PER_STAGE, true)
+	check("ด่านต้นยังผ่านได้โดยไม่ต้องซื้อ", hoursNoUpgrade(2) <= Config.Balance.BalanceCheck.MAX_HOURS_PER_STAGE, true)
 	print(string.format("   ไม่ซื้อเลย: ด่าน 2 = %.1f ชม. · ตันที่ด่าน %d (%.0f ชม.) · ด่าน 9 = %.0f ชม.",
 		hoursNoUpgrade(2), firstBlocked, hoursNoUpgrade(firstBlocked), hoursNoUpgrade(9)))
 	local gain = Config.getReferenceClearHours(9) > 0
@@ -788,23 +788,23 @@ return function(t, Config)
 	-- เพดานไข่: กระเป๋าไข่ กับ ช่องฟัก เป็นคนละค่ากันแล้ว
 	--------------------------------------------------------------------------
 	print("── เพดานไข่: สองค่าแยกกัน ──")
-	check("กระเป๋าไข่มีค่าเป็นของตัวเอง", type(Config.Hatchery.BAG_CAPACITY), "number")
-	check("ช่องฟักมีค่าเป็นของตัวเอง", type(Config.Hatchery.MAX_SLOTS), "number")
-	check("MAX_EGGS เดิมถูกถอดออกแล้ว", Config.Hatchery.MAX_EGGS, nil)
+	check("กระเป๋าไข่มีค่าเป็นของตัวเอง", type(Config.Balance.Hatchery.BAG_CAPACITY), "number")
+	check("ช่องฟักมีค่าเป็นของตัวเอง", type(Config.Balance.Hatchery.MAX_SLOTS), "number")
+	check("MAX_EGGS เดิมถูกถอดออกแล้ว", Config.Balance.Hatchery.MAX_EGGS, nil)
 	-- ⚠️ เช็คค่าทีละตัว **ไม่ได้เช็คว่าเท่ากัน** เพราะไม่ได้บังคับว่าต้องเท่า
-	check("ค่าเริ่มต้นกระเป๋าไข่ = 50", Config.Hatchery.BAG_CAPACITY, 50)
-	check("ค่าเริ่มต้นช่องฟัก = 50", Config.Hatchery.MAX_SLOTS, 50)
+	check("ค่าเริ่มต้นกระเป๋าไข่ = 50", Config.Balance.Hatchery.BAG_CAPACITY, 50)
+	check("ค่าเริ่มต้นช่องฟัก = 50", Config.Balance.Hatchery.MAX_SLOTS, 50)
 
 	-- ยามต้องจับค่าที่ทำให้ไข่เดินทางต่อไม่ได้
-	local savedBag = Config.Hatchery.BAG_CAPACITY
-	Config.Hatchery.BAG_CAPACITY = 0
+	local savedBag = Config.Balance.Hatchery.BAG_CAPACITY
+	Config.Balance.Hatchery.BAG_CAPACITY = 0
 	check("กระเป๋าไข่ = 0 แล้ว validate ต้องล้ม", (pcall(Config.validate)), false)
-	Config.Hatchery.BAG_CAPACITY = savedBag
+	Config.Balance.Hatchery.BAG_CAPACITY = savedBag
 
-	local savedSlots = Config.Hatchery.MAX_SLOTS
-	Config.Hatchery.MAX_SLOTS = 2.5
+	local savedSlots = Config.Balance.Hatchery.MAX_SLOTS
+	Config.Balance.Hatchery.MAX_SLOTS = 2.5
 	check("ช่องฟักเป็นทศนิยมแล้ว validate ต้องล้ม", (pcall(Config.validate)), false)
-	Config.Hatchery.MAX_SLOTS = savedSlots
+	Config.Balance.Hatchery.MAX_SLOTS = savedSlots
 	check("คืนค่าเดิมแล้ว validate กลับมาผ่าน", (pcall(Config.validate)), true)
 
 	--------------------------------------------------------------------------
@@ -824,8 +824,8 @@ return function(t, Config)
 
 	-- ผังคอกต้องพอดีจำนวนผู้เล่นเป๊ะ ไม่ขาดไม่เกิน
 	check("คอก = แถว × ต่อแถว", map.Pen.Rows * map.Pen.PerRow, Config.World.MAX_PENS)
-	check("คอก = จำนวนผู้เล่นต่อเซิร์ฟ", Config.World.MAX_PENS, Config.BalanceCheck.PLAYERS_PER_SERVER)
-	check("ผู้เล่นต่อเซิร์ฟ = 6", Config.BalanceCheck.PLAYERS_PER_SERVER, 6)
+	check("คอก = จำนวนผู้เล่นต่อเซิร์ฟ", Config.World.MAX_PENS, Config.Balance.BalanceCheck.PLAYERS_PER_SERVER)
+	check("ผู้เล่นต่อเซิร์ฟ = 6", Config.Balance.BalanceCheck.PLAYERS_PER_SERVER, 6)
 
 	-- เรียงจากซ้ายไปขวา: แผงร้านค้า → ลานคอก → เลนรบ
 	local shopRight = Config.getShopCenter().X + map.Shop.StallSize.X / 2
@@ -862,7 +862,7 @@ return function(t, Config)
 	-- ══ เลนรบกับกำแพง ══
 	check("ด่าน 1 ไม่มีกำแพง", Config.getWallX(1), nil)
 	local wallsOk, wallsAscending = true, true
-	for st = 2, Config.Stage.COUNT do
+	for st = 2, Config.Balance.Stage.COUNT do
 		local w = Config.getWallX(st)
 		if w == nil then
 			wallsOk = false
@@ -878,11 +878,11 @@ return function(t, Config)
 	check("ด่าน 2 ขึ้นไปมีกำแพงครบ", wallsOk, true)
 	check("กำแพงเรียงไปทางขวาเรื่อย ๆ", wallsAscending, true)
 	check("เลนยาว = ยาวต่อด่าน × จำนวนด่าน",
-		Config.getLaneLength(), map.Lane.LengthPerStage * Config.Stage.COUNT)
+		Config.getLaneLength(), map.Lane.LengthPerStage * Config.Balance.Stage.COUNT)
 
 	-- ══ รังบอส ══ ต้องอยู่ในช่วงของด่านตัวเอง และหลังกำแพงเสมอ
 	local nestInRange, nestBehindWall = true, true
-	for st = 1, Config.Stage.COUNT do
+	for st = 1, Config.Balance.Stage.COUNT do
 		local center = Config.getBossNestCenter(st)
 		local startX = Config.getStageStartX(st)
 		if center.X <= startX or center.X >= startX + map.Lane.LengthPerStage then
@@ -895,13 +895,13 @@ return function(t, Config)
 	end
 	check("รังบอสอยู่ในช่วงด่านตัวเองทุกด่าน", nestInRange, true)
 	check("รังบอสอยู่หลังกำแพงทุกด่านที่มีกำแพง", nestBehindWall, true)
-	check("จุดวางไข่ในรัง = จำนวนไข่ที่บอสวาง", Config.Boss.EGGS_PER_SPAWN, 5)
+	check("จุดวางไข่ในรัง = จำนวนไข่ที่บอสวาง", Config.Balance.Boss.EGGS_PER_SPAWN, 5)
 
 	-- จุดวางไข่ต้องอยู่ในรัง ไม่หลุดขอบ
 	local spotsInside = true
-	for st = 1, Config.Stage.COUNT do
+	for st = 1, Config.Balance.Stage.COUNT do
 		local center = Config.getBossNestCenter(st)
-		for i = 1, Config.Boss.EGGS_PER_SPAWN do
+		for i = 1, Config.Balance.Boss.EGGS_PER_SPAWN do
 			local spot = Config.getBossEggSpot(st, i)
 			if math.abs(spot.X - center.X) > map.BossRoom.Size.X / 2
 				or math.abs(spot.Z - center.Z) > map.BossRoom.Size.Y / 2 then
@@ -915,9 +915,9 @@ return function(t, Config)
 	-- ติดลบเมื่อไหร่ = สุ่มจุดหมายไม่ได้ แม่จะยืนนิ่งทั้งคอก
 	check("ขอบกันชนเล็กกว่าครึ่งด้านสั้นสุดของคอก",
 		map.Pen.EdgeMargin < math.min(map.Pen.Size.X, map.Pen.Size.Y) / 2, true)
-	check("ผู้เล่นใหม่เริ่มที่ด่าน 1", Config.NewPlayer.wallProgress, 1)
+	check("ผู้เล่นใหม่เริ่มที่ด่าน 1", Config.Balance.NewPlayer.wallProgress, 1)
 	check("ผู้เล่นใหม่ซื้อ upgrade damage ได้ทันที",
-		Config.getMaxDamageLevel(Config.NewPlayer.wallProgress) > 0, true)
+		Config.getMaxDamageLevel(Config.Balance.NewPlayer.wallProgress) > 0, true)
 
 	-- ══ ยามต้องจับค่าที่ทำให้แมพพัง ══
 	print("── ยามแมพ ต้องจับค่าที่พังได้จริง ──")
@@ -1179,7 +1179,7 @@ return function(t, Config)
 	-- อัปเกรดความเร็ว (บ่อเงินบ่อที่สอง)
 	--------------------------------------------------------------------------
 	print("── อัปเกรดความเร็ว: ตาราง 5 ขั้น ตัวคูณถดถอย ──")
-	local spd = Config.SpeedUpgrade
+	local spd = Config.Balance.SpeedUpgrade
 
 	-- ⚠️ 5 ขั้น ไม่ใช่ 10 — เป็นการตัดสินใจถาวร เทสต์นี้กันไม่ให้มีคนมาขยายทีหลัง
 	-- ราคาไล่ ×10 ถ้าทำ 10 ขั้น ขั้นสุดท้ายแพงกว่าขั้นแรกพันล้านเท่าแต่ให้ความเร็วเพิ่ม 3-4%
@@ -1233,7 +1233,7 @@ return function(t, Config)
 	end
 	check("ราคาเรียงจากน้อยไปมาก", ascending, true)
 
-	check("ผู้เล่นใหม่เริ่มที่ขั้น 0", Config.NewPlayer.speedLevel, 0)
+	check("ผู้เล่นใหม่เริ่มที่ขั้น 0", Config.Balance.NewPlayer.speedLevel, 0)
 
 	--------------------------------------------------------------------------
 	-- ความหนากำแพงต้องผูกกับความเร็ว
@@ -1313,4 +1313,99 @@ return function(t, Config)
 	check("มีตัวช่วยอ่านแกน Z แบบไม่พัง", type(Config.getOptionalZ), "function")
 	check("vec2 → ไม่มีแกน Z", Config.getOptionalZ(flat), nil)
 	check("vec3 → ได้แกน Z กลับมา", Config.getOptionalZ(solid), solid.Z)
+
+	--------------------------------------------------------------------------
+	-- Config.Balance — ลูกบิดสมดุลอยู่ที่เดียว และยามต้องจับของที่หลุดออกมาได้
+	--------------------------------------------------------------------------
+	-- ⚠️ เทสต์ชุดนี้ไม่ได้ตรวจ "ค่า" แต่ตรวจ **ที่อยู่ของค่า**
+	-- ก่อนหน้านี้ลูกบิดสมดุล (ปรับได้ทุกวัน) กับ id/schema (แก้แล้วข้อมูลอ่านไม่ออก)
+	-- นั่งปนกันอยู่ที่ Config ชั้นเดียวกัน ไม่มีอะไรบอกว่าอันไหนเป็นอันไหน
+	print("── Config.Balance: ลูกบิดสมดุลอยู่ที่เดียว ──")
+
+	local BALANCE_GROUPS = {
+		"StageWeightTiers", "Weight", "Production", "Damage", "NewPlayer",
+		"Economy", "Pen", "Bag", "Hatchery", "Stages", "Stage", "Boss",
+		"DamageUpgrade", "SpeedUpgrade", "Combat", "BalanceCheck", "Weapon",
+	}
+
+	local missingFromBalance = {}
+	local leakedToTop = {}
+	for _, name in BALANCE_GROUPS do
+		if (Config.Balance :: any)[name] == nil then
+			table.insert(missingFromBalance, name)
+		end
+		if (Config :: any)[name] ~= nil then
+			table.insert(leakedToTop, name)
+		end
+	end
+
+	check("ทุกกลุ่มสมดุลอยู่ใน Config.Balance", table.concat(missingFromBalance, ","), "")
+	check("ไม่มีกลุ่มสมดุลเหลือที่ Config ชั้นบนสุด", table.concat(leakedToTop, ","), "")
+	check("นับได้ 17 กลุ่ม", #BALANCE_GROUPS, 17)
+
+	-- ของที่ **ต้องไม่** ถูกย้ายเข้า Balance — id · schema · รูปทรงแมพ · ชื่อ remote
+	for _, name in { "MapDimensions", "RemoteNames", "DataStore", "Stack", "Uid", "World",
+		"Characters", "CharacterClasses", "EggTypes", "Inventory" } do
+		check(`{name} ยังอยู่นอก Balance`, (Config :: any)[name] ~= nil, true)
+		check(`{name} ไม่ถูกย้ายเข้า Balance`, (Config.Balance :: any)[name], nil)
+	end
+
+	-- ══ ยามต้องจับได้จริง ══
+	print("── ยาม Config.Balance ต้องจับของที่หลุดได้ ──")
+
+	local savedCombat = Config.Balance.Combat
+
+	local function balanceGuardCatches(mutate, restore): boolean
+		mutate()
+		local ok = (pcall(Config.validate))
+		restore()
+		return not ok
+	end
+
+	-- เผลอเติม `Config.Pen = {...}` กลับเข้าไปที่ชั้นบนสุด → ของสองชุดที่ค่าจะเพี้ยนจากกัน
+	check("เติมกลุ่มสมดุลกลับที่ชั้นบนสุด → ล้ม", balanceGuardCatches(
+		function() (Config :: any).Pen = { MAX_LEVEL = 99 } end,
+		function() (Config :: any).Pen = nil end), true)
+
+	-- ลบกลุ่มออกจาก Balance → โค้ดที่อ่านมันจะพังตอน runtime แทนที่จะพังตอนบูต
+	check("ลบกลุ่มออกจาก Balance → ล้ม", balanceGuardCatches(
+		function() (Config.Balance :: any).Combat = nil end,
+		function() (Config.Balance :: any).Combat = savedCombat end), true)
+
+	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
+
+	--------------------------------------------------------------------------
+	-- เวลาฟักไข่ — ลูกบิดเดียว ไม่ใช่ตัวเลขดิบ 9 ตัว
+	--------------------------------------------------------------------------
+	-- ⚠️ ความผิดแบบเดียวกับ turretDps: เก็บเป็นตัวเลขดิบแล้วต้องไล่แก้มือทุกครั้ง
+	print("── เวลาฟักไข่ผูกกับ SECONDS_PER_STAGE ──")
+
+	local perStage = Config.Balance.Hatchery.SECONDS_PER_STAGE
+	check("SECONDS_PER_STAGE = 30", perStage, 30)
+	check("ด่าน 1 ฟัก 30 วิ", Config.getEgg("egg_stage1").hatchTime, 30)
+	check("ด่าน 9 ฟัก 270 วิ", Config.getEgg("egg_stage9").hatchTime, 270)
+	check("ไข่ตำนานใช้ลูกบิดของตัวเอง",
+		Config.getEgg("egg_legendary").hatchTime, Config.Balance.Hatchery.LEGENDARY_SECONDS)
+
+	-- ⚠️ ข้อที่สำคัญ: ปรับลูกบิดตัวเดียวแล้วต้องขยับครบทั้ง 9 ด่าน
+	check("ทุกด่านตรงสูตร", (function(): boolean
+		for stage = 1, Config.Balance.Stage.COUNT do
+			local egg = Config.getEgg(Config.getBossEggId(stage))
+			if egg.hatchTime ~= perStage * stage then
+				return false
+			end
+		end
+		return true
+	end)(), true)
+
+	-- ไข่ที่ปิดแล้วยังถือตัวเลขดิบไว้ได้ เพราะแช่แข็งไปแล้ว ไม่มีใครฟัก
+	check("ไข่ที่ปิดแล้วไม่ถูกยามบังคับ", (pcall(Config.validate)), true)
+
+	-- ยามต้องจับตัวเลขดิบที่หลุดกลับเข้ามา
+	local stage5 = Config.getEgg("egg_stage5")
+	local savedHatch = stage5.hatchTime
+	check("ใส่ตัวเลขดิบที่ไม่ตรงสูตร → ล้ม", balanceGuardCatches(
+		function() (stage5 :: any).hatchTime = 999 end,
+		function() (stage5 :: any).hatchTime = savedHatch end), true)
+	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
 end

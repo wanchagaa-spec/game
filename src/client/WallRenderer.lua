@@ -14,7 +14,7 @@
 -- บันทึกไว้ใน docs/map-layout.md แล้ว
 --
 -- ══ Phase blockout ══
--- ยังไม่มี DataStore จึงอ่าน wallProgress จาก Config.NewPlayer ไปก่อน
+-- ยังไม่มี DataStore จึงอ่าน wallProgress จาก Config.Balance.NewPlayer ไปก่อน
 -- เปลี่ยนค่าทดสอบได้ด้วย WallRenderer.setWallProgress(n) จาก command bar ฝั่ง client
 -- Phase 2 ค่อยเปลี่ยนมารับจาก server ผ่าน RemoteEvent
 --
@@ -35,7 +35,7 @@ local WALL_COLOR = Color3.fromRGB(126, 116, 104)
 local WALL_TOP_COLOR = Color3.fromRGB(154, 142, 126)
 
 local folder: Folder? = nil
-local currentProgress = Config.NewPlayer.wallProgress
+local currentProgress = Config.Balance.NewPlayer.wallProgress
 
 --------------------------------------------------------------------------------
 -- วาด
@@ -113,7 +113,7 @@ function WallRenderer.render()
 	parent:ClearAllChildren()
 
 	local built = 0
-	for stage = 1, Config.Stage.COUNT do
+	for stage = 1, Config.Balance.Stage.COUNT do
 		-- wallProgress = ด่านที่ยืนอยู่ → กำแพงของด่านที่มากกว่านั้นยังไม่ได้พัง
 		if stage > currentProgress then
 			buildWall(stage, parent)
@@ -132,7 +132,7 @@ end
 -- ตัวนี้เปลี่ยนแค่สิ่งที่ "เห็นและชน" บนเครื่องนี้ ไม่ได้ให้สิทธิ์อะไรเพิ่มจริง
 -- เพราะการตีกำแพงและการให้รางวัลคำนวณฝั่ง server ทั้งหมด (Phase 3)
 function WallRenderer.setWallProgress(value: number)
-	local clamped = math.clamp(math.floor(value), 1, Config.Stage.COUNT)
+	local clamped = math.clamp(math.floor(value), 1, Config.Balance.Stage.COUNT)
 	currentProgress = clamped
 	WallRenderer.render()
 end

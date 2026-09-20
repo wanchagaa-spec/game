@@ -5,8 +5,9 @@
 --   MapBuilder — สร้างแมพทั้งใบด้วยโค้ด (ลานคอก · เลนรบ · รังบอส · ร้านค้า)
 --   PenService — จองคอกให้ผู้เล่น + วาดแม่ที่เดินได้และไข่ลงในคอกนั้น
 --   EggService — สร้างไข่ (พร้อมน้ำหนัก) จับเวลา ฟักเป็นตัวแม่ เข้าคอก/กระเป๋า
+--   DataService — อ่าน/เขียน PlayerData ลง DataStore (จุดเดียวในโปรเจกต์ที่แตะ DataStore)
 --
--- Phase 1.5: ข้อมูลอยู่ใน memory ทั้งหมด ยังไม่มี DataStore (อยู่ Phase 2)
+-- Phase 2A: ข้อมูลเซฟลง DataStore แล้ว ออกเกมแล้วเข้าใหม่ของยังอยู่
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15,7 +16,9 @@ local StarterPlayer = game:GetService("StarterPlayer")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local PlayerData = require(ReplicatedStorage.Shared.PlayerData)
 local MapBuilder = require(ServerScriptService.MapBuilder)
+local DataService = require(ServerScriptService.DataService)
 local PenService = require(ServerScriptService.PenService)
 local EggService = require(ServerScriptService.EggService)
 
@@ -45,6 +48,24 @@ if not configOk then
 	warn(`[Main]    สาเหตุ: {configErr}`)
 	warn("════════════════════════════════════════════════════════════")
 	error(configErr, 0)
+end
+
+-- ⚠️ ยามตัวที่สอง: ข้อมูลผู้เล่นที่ **เต็มทุกเพดานพร้อมกัน** ต้องยังอยู่ในลิมิต DataStore
+-- แยกจาก Config.validate() เพราะ Config require PlayerData ไม่ได้ (จะวน require กลับมาหากัน)
+--
+-- ⚠️ ยามตัวนี้จับสิ่งที่ตาคนมองไม่เห็น: เพดานหนึ่งตัวขึ้น แล้วข้อมูลทะลุ 4 MB
+-- ซึ่งอาการคือ **เซฟล้มเงียบ ๆ เฉพาะผู้เล่นที่สะสมเยอะ** = คนที่เล่นนานที่สุดเสียของก่อน
+local dataOk, dataErr = pcall(function(): string?
+	local bytes = PlayerData.validate()
+	print(`[Main] ข้อมูลผู้เล่นที่เต็มทุกเพดาน = {bytes} ไบต์ (เพดานที่ตั้งไว้ {Config.DataStore.MAX_PLAYER_DATA_BYTES})`)
+	return nil
+end)
+if not dataOk then
+	warn("════════════════════════════════════════════════════════════")
+	warn("[Main] ❌ PlayerData.validate() ไม่ผ่าน — เพดานที่ตั้งไว้ทำให้ข้อมูลเซฟไม่ลง")
+	warn(`[Main]    สาเหตุ: {dataErr}`)
+	warn("════════════════════════════════════════════════════════════")
+	error(dataErr, 0)
 end
 
 -- ⚠️ MaxPlayers ต้องเท่ากับจำนวนคอก ไม่งั้นคนที่เกินมาจะเข้าเกมได้แบบไม่มีคอก
@@ -96,9 +117,15 @@ elseif StarterPlayer.CharacterJumpHeight ~= Config.MapDimensions.Player.JumpHeig
 end
 
 Remotes.setupServer()
+DataService.init()
 MapBuilder.build()
 PenService.buildWorld()
 EggService.start()
+
+-- ⚠️ ต่อ BindToClose **ก่อน** ปล่อยให้ใครเข้ามาเล่น
+-- ถ้าต่อทีหลัง มีช่วงที่เซิร์ฟเวอร์ปิดแล้วไม่มีใครเซฟให้เลย
+DataService.bindToClose()
+DataService.startAutosave()
 
 -- แมพพร้อมแล้ว มีพื้นให้ยืนแล้ว ค่อยปล่อยให้ตัวละครเกิด
 Players.CharacterAutoLoads = true
@@ -123,7 +150,10 @@ local function onPlayerAdded(player: Player)
 	end
 
 	-- ต้องเรียกหลังจองคอกแล้ว เพราะไข่กับแม่ต้องมีคอกให้วางก่อน
-	EggService.onPlayerAdded(player)
+	-- ⚠️ คืน false = โหลดข้อมูลไม่สำเร็จและผู้เล่นถูกเตะไปแล้ว — คืนคอกให้คนถัดไปด้วย
+	if not EggService.onPlayerAdded(player) then
+		PenService.release(player)
+	end
 end
 
 local function onPlayerRemoving(player: Player)

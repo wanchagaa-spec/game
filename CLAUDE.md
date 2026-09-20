@@ -342,7 +342,9 @@ src/
     Main.server.lua      → ServerScriptService.Main (entry point, ต่อสายอย่างเดียว)
     MapBuilder.lua       → ⚠️ โครงหลัก: สร้างแมพทั้งใบด้วยโค้ด (ลานคอก/เลนรบ/รังบอส/ร้านค้า)
     PenService.lua       → จอง/คืนคอก + วาดแม่ที่เดินได้และไข่ลงในคอก
-    EggService.lua       → สร้างไข่ (พร้อมน้ำหนัก) จับเวลา ฟักเป็นตัวแม่ คอก/กระเป๋า (memory)
+    EggService.lua       → สร้างไข่ (พร้อมน้ำหนัก) จับเวลา ฟักเป็นตัวแม่ คอก/กระเป๋า
+    DataService.lua      → ⚠️ โครงหลัก: **จุดเดียวที่แตะ DataStore ได้** · session lock · retry
+                            · autosave · BindToClose · รับของปลอมเข้าไปทดสอบได้
   client/   → StarterPlayerScripts (UI ทั้งหมด + ของที่เห็นเฉพาะตัวเอง)
     Main.client.lua      → StarterPlayerScripts.Main (entry point)
     WallRenderer.lua     → ⚠️ วาดกำแพงตาม wallProgress **ต้องอยู่ฝั่ง client เท่านั้น**
@@ -352,6 +354,8 @@ src/
                             อัตราผลิต สถานะ stack key สูตร damage/เงิน
                             คอก/กระเป๋า/สวนฟัก ด่าน กำแพง บอส อาวุธ ชื่อ RemoteEvent
     Remotes.lua          → สร้าง/รอหา RemoteEvent
+    PlayerData.lua       → ⚠️ โครงหลัก: โครง PlayerData + template ผู้เล่นใหม่ + migration
+                            + กฎ encode (§9.3) + วัดขนาด · **ไม่แตะ Roblox API เลย** จึงเทสต์ได้นอก Studio
 docs/
   data-schema.md       → ⚠️ โครงหลัก: schema ของ PlayerData + ที่มาของตัวเลขสมดุล
                             + แผน migration + จุดเสี่ยง exploit + ProcessReceipt
@@ -379,7 +383,12 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   · `os.clock()` → `os.time()`
   📄 บันทึกว่ารื้ออะไรไปบ้าง + เช็คลิสต์ที่เหลือ อยู่ใน `docs/phase-1.5-rework.md`
   ⚠️ **ยังไม่ได้เปิด Studio ทดสอบ** — โค้ดผ่านแค่ `rojo build` + `luau-lsp analyze` + `Config.validate()`
-- **Phase 2** — DataStore + ผลิตลูก + ผลิตเงิน + อัปเกรดคอก + ขายแม่
+- **Phase 2A** — DataStore เซฟ/โหลด + โครง `heldEggs` ใหม่ ✅
+  `DataService` (UpdateAsync · session lock · retry 3 ครั้ง · autosave 60 วิ แบบกระจาย ·
+  BindToClose) · `PlayerData` (template · migration · กฎ encode · วัดขนาด)
+  · กระเป๋าไข่ 50 → **10,000** · `PlaceEggInHatcheryRequest` ส่ง **id ประจำฟอง** ไม่ใช่ตำแหน่ง
+  ⚠️ **ยังไม่ได้ทดสอบใน Studio** — ต้อง publish + เปิด API ก่อน (ดู README)
+- **Phase 2B** — ผลิตลูก + ผลิตเงิน + อัปเกรดคอก + ขายแม่ + ข้อ D (คอก+กระเป๋าเต็มพร้อมกัน)
   📄 ออกแบบเสร็จแล้วใน `docs/data-schema.md` · Config พร้อมแล้ว
 - **Phase 3** — แมพ 9 ด่าน + กำแพง + ทหารฝ่ายรับ (HP รวม) + **ปล่อยทหารต่อเนื่อง (Age of War)**
   + ปุ่มอัญเชิญ + auto-pause + `stageProgress` สะสมถาวร + จัดทีม + ตายถาวร + UI สองแถบ (แม่/ลูก)
@@ -449,6 +458,16 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 - **เวลาฟักไข่** — `hatchTime` ในตาราง `EggTypes` **คำนวณจาก
   `Config.Balance.Hatchery.SECONDS_PER_STAGE` ห้ามใส่ตัวเลขดิบ** · `validate()` บังคับว่าต้องตรงสูตร
   (ไข่ที่ `enabled = false` ยกเว้น — แช่แข็งไปแล้ว)
+- **`heldEggs` — `{ nextEggId, items }`** ไม่ใช่อาเรย์ยาวคงที่แล้ว · ไข่แต่ละฟองมี `id` ประจำตัว
+  **ห้ามลด `nextEggId` ห้าม reuse id** (เหตุผลเดียวกับ `nextUid`) ·
+  ห้ามแตะ `items` ตรง ๆ ใช้ `PlayerData.addHeldEgg/findHeldEgg/removeHeldEgg` เท่านั้น
+  · `PlaceEggInHatcheryRequest` ส่ง **id** ไม่ใช่ตำแหน่ง — ส่งตำแหน่งแล้วจะวางผิดฟองเวลาไข่ฟักคั่นจังหวะ
+- **`sessionLock` ใน PlayerData** — กันผู้เล่นคนเดียวเปิดสองเซิร์ฟเวอร์พร้อมกัน
+  ถอดออกเมื่อไหร่ = สองเซิร์ฟเวอร์ถือข้อมูลคนละชุด ใครเซฟทีหลังทับของอีกคนทั้งชุด
+- **`Config.DataStore`** — `NAME` / `KEY_PREFIX` (เปลี่ยน = ผู้เล่นเก่าหาข้อมูลตัวเองไม่เจอ) ·
+  `SESSION_LOCK_SECONDS` · `AUTOSAVE_INTERVAL` / `AUTOSAVE_STAGGER` · `RETRY_*` ·
+  `BIND_TO_CLOSE_SECONDS` (ต้อง < 30 · Roblox ตัดที่ 30) · `MAX_PLAYER_DATA_BYTES`
+  ⚠️ `validate()` ผูกค่าพวกนี้เข้าหากันแล้ว — lock ต้องยาวกว่ารอบเซฟที่ช้าสุด ฯลฯ
 - **`productId` ของ Developer Product และการจัดการ `ProcessReceipt`** — พลาดแล้ว
   ผู้เล่นจ่ายเงินจริงแล้วไม่ได้ของ หรือได้ของซ้ำจากการจ่ายครั้งเดียว
 - **`Config.Balance.SpeedUpgrade`** — ราคา/จำนวนขั้น/`CURVE_EXPONENT`/`MAX_MULTIPLIER`/`SPEED_CEILING`
@@ -486,7 +505,10 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 **Phase 1.5 เขียนโค้ดเสร็จแล้ว** — โค้ดใน `src/` ตรงดีไซน์ใหม่ทั้งหมด
 (ฟักไข่ได้ **ตัวแม่** ไม่ใช่ทหาร · ไข่มีน้ำหนักตั้งแต่ตอนสร้าง · คอก + กระเป๋า + สวนฟัก 50 ช่อง)
 **ยังไม่ได้เปิด Studio ทดสอบ** ผ่านแค่ `rojo build` + `luau-lsp analyze` สะอาด + `Config.validate()`
-**Phase 2–7 ออกแบบเสร็จแล้ว + `Config.lua` พร้อมแล้ว แต่ยังไม่ได้เขียนโค้ดระบบ**
+**Phase 2A เขียนโค้ดเสร็จแล้ว** — DataStore เซฟ/โหลดได้ · session lock · autosave ·
+กระเป๋าไข่ 10,000 ฟองด้วยโครง `{ nextEggId, items }`
+**ยังไม่ได้ทดสอบใน Studio** (ต้อง publish + เปิด Enable Studio Access to API Services ก่อน)
+**Phase 2B–7 ออกแบบเสร็จแล้ว + `Config.lua` พร้อมแล้ว แต่ยังไม่ได้เขียนโค้ดระบบ**
 
 ค่าทั้งหมดใน Config ผ่านการทดสอบพฤติกรรมจริงแล้ว 457 เคส (`luau tests/run.luau`)
 (สุ่มน้ำหนัก 5 ล้านครั้ง · สุ่มตัวละคร 300,000 ครั้งต่อไข่ · ไข่รายด่าน 60,000 ครั้งต่อด่าน ·
@@ -545,18 +567,26 @@ stack key · uid · บัฟสถานะ · แหล่งที่มา�
 - ✅ **`Boundary.Margin` = แถบหญ้านอกกำแพง** พื้นโตตาม ไม่ใช่หดกำแพงเข้ามา
 - ✅ **ยุบ `Config.Map` alias ทิ้ง** เหลือชื่อเดียวคือ `Config.MapDimensions`
 - ✅ **กระโดดใช้โหมด JumpHeight (7.2)** ไม่ใช่ JumpPower — Config ตรงกับที่ Roblox ใช้จริงแล้ว
+- ✅ **ลูกบิดสมดุลทั้งหมดอยู่ใน `Config.Balance`** 17 กลุ่ม · `validate()` กันไม่ให้หลุดออกไปชั้นบน
+- ✅ **DataStore ใช้ `UpdateAsync` ทุก path ห้าม `SetAsync`** · session lock 5 นาที ·
+  โหลดไม่ได้ = **เตะออก ไม่มีโหมด guest** (เล่นต่อ = autosave เขียนข้อมูลเปล่าทับของจริง)
+- ✅ **Studio ใช้ DataStore คนละตัว** เลือกด้วย `RunService:IsStudio()` ไม่ใช่ธงที่ต้องสลับมือ
+- ✅ **แจกไข่เริ่มต้นเฉพาะผู้เล่นใหม่จริง** (ธง `isNew` จาก `DataService.loadAsync`)
+  ไม่งั้นได้ไข่ฟรีทุกล็อกอิน — บั๊กที่มองไม่เห็นตอนยังไม่มี DataStore เพราะทุกคนเป็นผู้เล่นใหม่ตลอด
 
 ค้างอยู่ตอนนี้:
 - **ยังไม่ได้ทดสอบใน Studio** → เช็คลิสต์ใน `docs/map-layout.md` §11 และ `docs/phase-1.5-rework.md` §8
 - **ขนาดแมพขยายรอบที่ 3 แล้ว ยังไม่ได้ลองเดินจริง** — ลาน 382 × 390 · เลน 1,620 ·
   ทั้งแมพ 2,002 × 390 · วิ่งจากคอกถึงรังบอสด่าน 1 = **11.6 วิ** (ยามกำหนดไม่เกิน 15)
   ดูตัวเลขด้วย `luau tools/dump-map.luau` · ตัวที่กระทบมากสุดคือ `MapDimensions.Lane.LengthPerStage`
-- ⚠️ **เพดานไข่ในกระเป๋าจะขึ้นเป็น 10,000** แต่โครง `heldEggs` ปัจจุบันรับไม่ไหว
-  (อาเรย์ยาวคงที่ = เขียน `false` หมื่นตัวทุกครั้งที่เซฟ) · ข้อเสนอโครงใหม่อยู่ใน
-  `docs/data-schema.md` §3.3 — ทำจริงตอน Phase 2 · **UI ต้อง virtualize ด้วย**
+- ✅ **เพดานไข่ในกระเป๋าขึ้นเป็น 10,000 แล้ว** พร้อมโครงใหม่ `{ nextEggId, items }`
+  ⚠️ **แต่ UI ยังไม่ virtualize** — ตอนนี้ server ส่งแค่ 50 ฟองแรกต่อ sync กันถล่มแบนด์วิดท์
+  ลิสต์เต็มต้องรอ Phase 5.5 (`docs/hotbar-design.md`)
 - ⚠️ **คอกและกระเป๋าเต็มพร้อมกัน = แม่ที่ฟักได้หายไป** (Phase 2 ต้องค้างไว้ในสวนแทน
   — `docs/data-schema.md` §13 ข้อ D)
-- ยังไม่มี DataStore — ข้อมูลอยู่ใน memory ผู้เล่นออกเกม = หายหมด
+- ✅ มี DataStore แล้ว (Phase 2A) — แต่ **ยังไม่เคยรันกับ DataStore จริงสักครั้ง**
+  ⚠️ `Config.DataStore.MAX_PLAYER_DATA_BYTES` วัดด้วยตัว encode ของเราเอง ไม่ใช่ของ Roblox
+  จึงตั้งเพดานไว้ 3 MB ไม่ใช่ 4 MB · เคสเต็มพิกัดตอนนี้ = 708 KB (16.9% ของลิมิตจริง)
 - ⚠️ **เวลาฟักไข่รายด่าน (30 วิ × เลขด่าน) ยังไม่ได้เทียบกับรอบรีเกิดบอส 5 นาที**
   ด่าน 9 ฟัก 270 วิ กับบอสรีเกิด 300 วิ ใกล้กันมาก
 - รายการที่เคลียร์ตอนถึงเฟสนั้นได้ อยู่ใน `docs/data-schema.md` §13

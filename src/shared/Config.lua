@@ -491,9 +491,34 @@ Config.DataStore = {
 	DEV_NAME = "PlayerData_dev_v1", -- ใช้ตอนทดสอบใน Studio จะได้ไม่เขียนทับข้อมูลจริง
 	KEY_PREFIX = "player_", -- key เต็ม = KEY_PREFIX .. UserId (ลิมิตของ Roblox คือ 50 ตัวอักษร)
 
+	-- ⚠️ เลือก store ด้วย `RunService:IsStudio()` **ไม่ใช่ธงที่ต้องสลับมือ**
+	-- ธงที่ต้องสลับมือมีวันลืมสลับ แล้ววันนั้นคือวันที่เทสต์เขียนทับข้อมูลผู้เล่นจริง
+	-- (ดู DataService.storeName)
+
 	AUTOSAVE_INTERVAL = 60, -- เซฟอัตโนมัติทุกกี่วินาที (งบเขียน = 60 + ผู้เล่น×10 ต่อนาที)
-	LOAD_RETRY_COUNT = 3, -- โหลดไม่สำเร็จ ลองซ้ำกี่ครั้ง
-	LOAD_RETRY_BASE_DELAY = 1, -- หน่วงครั้งแรกกี่วินาที แล้วคูณสองไปเรื่อย ๆ
+
+	-- ⚠️ ผู้เล่นคนที่ N เลื่อนรอบเซฟออกไป N × ค่านี้ วินาที
+	-- ไม่งั้น 6 คนที่เข้าพร้อมกันจะเซฟพร้อมกันทุกนาที = งบเขียนพีคเป็นก้อน
+	-- 6 คน × 10 วิ = 50 วิ ซึ่งยังน้อยกว่า AUTOSAVE_INTERVAL จึงไม่มีใครถูกเลื่อนข้ามรอบ
+	AUTOSAVE_STAGGER = 10,
+
+	RETRY_COUNT = 3, -- ลองซ้ำกี่ครั้งรวมทั้งหมด (ทั้งโหลดและเซฟ)
+	RETRY_BASE_DELAY = 2, -- หน่วงก่อนลองซ้ำครั้งแรก แล้วคูณสองไปเรื่อย ๆ (2 · 4 · 8)
+
+	-- ⚠️ session lock กันผู้เล่นคนเดียวกันเปิดสองเซิร์ฟเวอร์พร้อมกัน
+	-- ถ้าไม่มี: เซิร์ฟ A กับ B ต่างถือข้อมูลคนละชุด ใครเซฟทีหลังทับของอีกคนทั้งชุด
+	-- อายุ 5 นาทีเพราะ autosave ทุก 60 วิ ต่อ lock ให้เรื่อย ๆ อยู่แล้ว
+	-- ค้างเกิน 5 นาที = เซิร์ฟเวอร์นั้นดับไปแล้วจริง ๆ ปล่อยให้เข้าได้
+	SESSION_LOCK_SECONDS = 300,
+
+	-- ⚠️ BindToClose ของ Roblox ให้เวลาแค่ 30 วินาทีแล้วปิดเซิร์ฟทิ้ง
+	-- เผื่อไว้ 25 เพื่อให้มีจังหวะ log ก่อนถูกตัด
+	BIND_TO_CLOSE_SECONDS = 25,
+
+	-- ⚠️ ลิมิตจริงของ Roblox คือ 4 MB ต่อ 1 key · ตั้งเพดานตัวเองไว้ที่ 3 MB
+	-- เผื่อไว้เพราะตัวประเมินขนาดของเราไม่ใช่ตัว encode ตัวเดียวกับที่ Roblox ใช้จริง
+	-- `PlayerData.validate()` วัดข้อมูลที่เต็มทุกเพดานแล้วเทียบกับค่านี้ตอนบูต
+	MAX_PLAYER_DATA_BYTES = 3 * 1024 * 1024,
 }
 
 --------------------------------------------------------------------------------
@@ -1103,7 +1128,11 @@ Balance.Bag = {
 
 Balance.Hatchery = {
 	-- จำนวนไข่ที่ถือติดตัวได้ ยังไม่เข้าสวนฟัก (PlayerData.heldEggs)
-	BAG_CAPACITY = 50,
+	-- ⚠️ ขึ้นจาก 50 เป็น 10,000 ได้เพราะ `heldEggs` เลิกเป็นอาเรย์ยาวคงที่แล้ว
+	-- โครงเดิมเขียน `false` ให้ครบความยาวทุกครั้งที่เซฟ → ที่ 10,000 คือ ~62 KB
+	-- ต่อให้ผู้เล่นถือไข่จริง 3 ฟอง · โครงใหม่เก็บเฉพาะฟองที่มีจริง (~200 B)
+	-- ⚠️ UI ต้อง virtualize ลิสต์นี้ ห้ามสร้าง GUI element ตามจำนวนไข่ตรง ๆ
+	BAG_CAPACITY = 10000,
 
 	-- จำนวนไข่ที่ฟักพร้อมกันได้ = จำนวนแท่นในสวนฟัก (PlayerData.hatching)
 	MAX_SLOTS = 50,
@@ -3610,7 +3639,59 @@ function Config.validate()
 		production.UPGRADE_RATE_MULTIPLIER <= production.UPGRADE_COST_MULTIPLIER,
 		"Config: ผลของ upgrade ต่อขั้นไม่ควรมากกว่าราคาที่จ่ายต่อขั้น ไม่งั้นกำแพงจะหมดความหมายช่วงท้ายเกม"
 	)
-	assert(Config.DataStore.AUTOSAVE_INTERVAL >= 10, "Config: AUTOSAVE_INTERVAL ถี่เกินไป เสี่ยงโดน throttle")
+	local store = Config.DataStore
+	assert(store.AUTOSAVE_INTERVAL >= 10, "Config: AUTOSAVE_INTERVAL ถี่เกินไป เสี่ยงโดน throttle")
+
+	-- ⚠️ เซฟห่างเกิน 5 นาที = ผู้เล่นที่เน็ตหลุดเสียงานได้ถึง 5 นาที
+	-- และยาวกว่าอายุ session lock ด้วย ซึ่งแปลว่า lock จะหมดอายุก่อนถูกต่อ
+	assert(
+		store.AUTOSAVE_INTERVAL < 300,
+		`Config: AUTOSAVE_INTERVAL = {store.AUTOSAVE_INTERVAL} ห่างเกินไป (ต้องน้อยกว่า 300 วินาที)`
+	)
+
+	-- ⚠️ lock ต้องอายุยาวกว่ารอบ autosave ที่เลื่อนช้าสุด ไม่งั้น lock ของคนที่ยังเล่นอยู่
+	-- จะหมดอายุระหว่างรอรอบเซฟถัดไป แล้วคนอื่นแย่งเข้าไปทับข้อมูลได้
+	local slowestSaveGap = store.AUTOSAVE_INTERVAL + store.AUTOSAVE_STAGGER * Config.World.MAX_PENS
+	assert(
+		store.SESSION_LOCK_SECONDS > slowestSaveGap,
+		`Config: SESSION_LOCK_SECONDS ({store.SESSION_LOCK_SECONDS}) ต้องยาวกว่ารอบเซฟที่ช้าสุด ({slowestSaveGap})`
+	)
+
+	-- ⚠️ stagger ของผู้เล่นคนสุดท้ายต้องไม่ยาวจนข้ามรอบ autosave ไปทั้งรอบ
+	-- คนที่ 1 เลื่อน 0 วิ · คนที่ 6 เลื่อน (6-1) × 10 = 50 วิ ซึ่งยังอยู่ในรอบ 60 วิ
+	-- ⚠️ ใช้ (index - 1) ไม่ใช่ index ตรง ๆ — ถ้าใช้ index คนที่ 6 จะเลื่อน 60 วิพอดี
+	-- = ข้ามไปชนรอบถัดไป แล้วเขาจะเซฟห่างกว่าคนอื่นหนึ่งรอบเต็มตลอดไป
+	local lastOffset = store.AUTOSAVE_STAGGER * (Config.World.MAX_PENS - 1)
+	assert(
+		lastOffset < store.AUTOSAVE_INTERVAL,
+		`Config: คนสุดท้ายถูกเลื่อนเซฟ {lastOffset} วิ ซึ่งไม่น้อยกว่า AUTOSAVE_INTERVAL `
+			.. `({store.AUTOSAVE_INTERVAL}) — เขาจะถูกข้ามไปรอบถัดไปตลอด`
+	)
+
+	assert(store.RETRY_COUNT >= 1 and store.RETRY_COUNT % 1 == 0, "Config: RETRY_COUNT ต้องเป็นจำนวนเต็มตั้งแต่ 1")
+	assert(store.RETRY_BASE_DELAY > 0, "Config: RETRY_BASE_DELAY ต้องมากกว่า 0")
+
+	-- ⚠️ Roblox ตัดเซิร์ฟที่ 30 วินาทีหลัง BindToClose · retry ทั้งชุดต้องจบก่อนนั้น
+	-- เวลารวมของ backoff = BASE × (2^COUNT - 2)  (ครั้งแรกยิงทันที ไม่หน่วง)
+	local backoffTotal = store.RETRY_BASE_DELAY * (2 ^ store.RETRY_COUNT - 2)
+	assert(
+		backoffTotal < store.BIND_TO_CLOSE_SECONDS,
+		`Config: หน่วง retry รวม {backoffTotal} วิ ยาวกว่างบตอนปิดเซิร์ฟ ({store.BIND_TO_CLOSE_SECONDS} วิ) — `
+			.. `เซฟรอบสุดท้ายจะถูกตัดกลางคัน`
+	)
+	assert(
+		store.BIND_TO_CLOSE_SECONDS < 30,
+		"Config: BIND_TO_CLOSE_SECONDS ต้องน้อยกว่า 30 — Roblox ปิดเซิร์ฟทิ้งที่ 30 วินาที"
+	)
+	assert(store.MAX_PLAYER_DATA_BYTES < 4 * 1024 * 1024, "Config: MAX_PLAYER_DATA_BYTES ต้องต่ำกว่าลิมิตจริง 4 MB")
+
+	-- ⚠️ กระเป๋าไข่ต้องจุไม่น้อยกว่าสวนฟัก
+	-- ไข่ต้องผ่านกระเป๋าก่อนเข้าสวนเสมอ ถ้ากระเป๋าเล็กกว่า จะมีช่องในสวนที่เติมไม่ได้ตลอดกาล
+	assert(
+		Config.Balance.Hatchery.BAG_CAPACITY >= Config.Balance.Hatchery.MAX_SLOTS,
+		`Config: BAG_CAPACITY ({Config.Balance.Hatchery.BAG_CAPACITY}) ต้องไม่น้อยกว่า `
+			.. `MAX_SLOTS ({Config.Balance.Hatchery.MAX_SLOTS}) — ไข่ต้องผ่านกระเป๋าก่อนเข้าสวนฟัก`
+	)
 	assert(Config.SCHEMA_VERSION >= 1 and Config.SCHEMA_VERSION % 1 == 0, "Config: SCHEMA_VERSION ต้องเป็นจำนวนเต็มตั้งแต่ 1")
 
 	----------------------------------------------------------------------------

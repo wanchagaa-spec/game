@@ -18,56 +18,34 @@
 --   เหตุผล: ขนาดโมเดลไข่ในรังบอกน้ำหนักให้ผู้เล่นเห็น (Phase 5) การแย่งไข่จึงมีเป้าหมายจริง
 --   ผลที่ตามมา: ไข่ชนิดเดียวกันน้ำหนักต่างกันได้ → เก็บ "รายฟอง" ไม่ใช่ตัวนับ
 --
--- Phase 1.5: ข้อมูลอยู่ใน memory ของ server เท่านั้น
--- ผู้เล่นออกจากเกม = ข้อมูลหาย (Phase 2 จะต่อ DataStore)
+-- ⚠️ Phase 2A: ข้อมูลมาจาก DataStore แล้ว (DataService) ไม่ใช่ตารางใน memory ที่สร้างใหม่ทุกครั้ง
+-- ไฟล์นี้จึง **ไม่ถือ state ของตัวเอง** อ่าน/เขียนผ่าน DataService.getCached() ทางเดียว
+-- ของที่ไม่ควรเซฟ (ตัวกันสแปม) แยกไว้ใน sessionMeta ที่ตายพร้อมเซสชัน
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local PlayerData = require(ReplicatedStorage.Shared.PlayerData)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local DataService = require(ServerScriptService.DataService)
 local PenService = require(ServerScriptService.PenService)
 
 local EggService = {}
 
 local WORLD = Config.World
--- ⚠️ สองค่านี้แยกกันแล้ว (บังเอิญเท่ากันที่ 50 ไม่ใช่เพราะต้องเท่า)
--- BAG_SLOTS   = ความยาวของ state.heldEggs — ไข่ที่ถือไว้ ยังไม่เข้าสวน
--- HATCH_SLOTS = ความยาวของ state.hatching — ไข่ที่กำลังฟัก
--- ใช้สลับกันเมื่อไหร่ = index หลุดขอบอาเรย์ทันทีที่ปรับค่าใดค่าหนึ่ง
-local BAG_SLOTS = Config.Balance.Hatchery.BAG_CAPACITY
 local HATCH_SLOTS = Config.Balance.Hatchery.MAX_SLOTS
 
--- ไข่ 1 ฟองที่ถืออยู่ (ยังไม่เข้าสวนฟัก)
--- ⚠️ มีน้ำหนักของตัวเองตั้งแต่วินาทีที่เกิด
-export type HeldEgg = {
-	eggId: string,
-	weight: number, -- น้ำหนักแม่ที่จะได้ตอนฟัก (จำนวนเต็ม)
-}
+type Data = PlayerData.Data
+type HatchSlot = PlayerData.HatchSlot
 
--- ไข่ 1 ฟองที่กำลังฟักอยู่ในสวน
-export type HatchSlot = {
-	eggId: string,
-	weight: number, -- ยกมาจาก HeldEgg ตรง ๆ ห้ามสุ่มใหม่
-	startedAt: number, -- os.time() ตอนวาง
-	hatchAt: number, -- os.time() ที่ครบกำหนด
-}
+-- ⚠️ โครงของตัวแม่ย้ายไปอยู่ที่ PlayerData แล้ว (เพราะมันเป็นส่วนหนึ่งของข้อมูลที่เซฟ)
+-- ประกาศ export ต่อไว้เพื่อให้โมดูลที่เคย require ชนิดนี้จาก EggService ใช้ได้เหมือนเดิม
+export type Mother = PlayerData.Mother
 
--- ตัวแม่ 1 ตัว — โครงตรงกับ docs/data-schema.md §3
-export type Mother = {
-	uid: string, -- "<UserId ผู้ฟักคนแรก>-<เลขนับ>" ไม่ซ้ำทั้งเกม
-	charId: string,
-	weight: number,
-	statuses: { string },
-	lastProducedAt: number?, -- มีเฉพาะแม่ในคอก (แม่ในกระเป๋าไม่ผลิตจึงไม่ต้องนับเวลา)
-	obtainedAt: number,
-	locked: boolean,
-}
-
--- รูปทรงของ 1 ช่องที่ส่งไปให้ client
--- ช่องว่างมีแค่ occupied = false ฟิลด์ที่เหลือจึงเป็น optional
-type EggView = {
+-- รูปทรงของ 1 ช่องสวนฟักที่ส่งไปให้ client
+type SlotView = {
 	occupied: boolean,
 	eggId: string?,
 	eggName: string?,
@@ -77,22 +55,13 @@ type EggView = {
 	total: number?,
 }
 
-type PlayerState = {
-	-- อาเรย์ยาวคงที่ ช่องว่างใช้ false ห้ามใช้ nil (เหตุผลใน docs/data-schema.md §9.3)
-	heldEggs: { HeldEgg | false },
-	hatching: { HatchSlot | false },
-
-	-- ⚠️ แยกสองอาเรย์ ไม่ใช่ฟิลด์ inPen ในตัวเดียว
-	-- โค้ด settle การผลิต (Phase 2) ต้องวนเฉพาะแม่ในคอก แยกโครงไว้ทำให้ลืมกรองไม่ได้
-	mothersInPen: { Mother },
-	mothersInBag: { Mother },
-
-	nextUid: number, -- ตัวนับต่อผู้เล่น ห้ามรีเซ็ต ห้ามลด
-	penLevel: number,
-	lastRequestAt: number, -- ไว้กันสแปม
+-- ⚠️ ของที่ **ห้ามเซฟ** — ตายพร้อมเซสชัน
+-- ถ้าเอาไปใส่ใน PlayerData จะกลายเป็นฟิลด์ใหม่ใน schema ที่ต้องดูแลตลอดไปโดยไม่มีประโยชน์
+type SessionMeta = {
+	lastRequestAt: number,
 }
 
-local states: { [number]: PlayerState } = {}
+local sessionMeta: { [number]: SessionMeta } = {}
 local rng = Random.new()
 
 local placeEggRequest: RemoteEvent
@@ -100,40 +69,45 @@ local moveMotherRequest: RemoteEvent
 local eggHatched: RemoteEvent
 local farmStateSync: RemoteEvent
 
+local function dataOf(player: Player): Data?
+	return DataService.getCached(player.UserId)
+end
+
 --------------------------------------------------------------------------------
 -- สร้างไข่ — ทางเดียวที่ไข่เกิดได้
 --------------------------------------------------------------------------------
 
 -- ⚠️ ทุกทางที่ไข่เกิด (บอสวาง / แจกผู้เล่นใหม่ / คำสั่งเทสต์) ต้องผ่านตัวนี้
 -- เพื่อให้ไม่มีไข่ฟองไหนหลุดออกมาโดยไม่มีน้ำหนัก
-local function makeEgg(eggId: string): HeldEgg?
+-- คืน (eggId, weight) — ส่วน id ประจำฟองแจกโดย PlayerData.addHeldEgg
+local function rollEgg(eggId: string): (string?, number?)
 	local egg = Config.getEgg(eggId)
 	if not egg or not egg.enabled then
-		return nil
+		return nil, nil
 	end
 
 	local weight = Config.rollMotherWeightForEgg(eggId, rng)
 	if not weight then
-		return nil
+		return nil, nil
 	end
 
-	return { eggId = egg.id, weight = weight }
+	return egg.id, weight
 end
 
--- หาช่องว่างช่องแรกในอาเรย์ยาวคงที่ คืน nil ถ้าเต็ม
-local function findFreeSlot(list: { any }, size: number): number?
-	for index = 1, size do
-		if list[index] == false then
+-- หาช่องว่างช่องแรกในสวนฟัก (อาเรย์ยาวคงที่) คืน nil ถ้าเต็ม
+local function findFreeHatchSlot(hatching: { HatchSlot | false }): number?
+	for index = 1, HATCH_SLOTS do
+		if hatching[index] == false then
 			return index
 		end
 	end
 	return nil
 end
 
-local function countFilled(list: { any }, size: number): number
+local function countHatching(hatching: { HatchSlot | false }): number
 	local total = 0
-	for index = 1, size do
-		if list[index] ~= false then
+	for index = 1, HATCH_SLOTS do
+		if hatching[index] ~= false then
 			total += 1
 		end
 	end
@@ -148,25 +122,24 @@ end
 -- Phase 5 บอสจะเรียกตัวนี้ตอนผู้เล่นแย่งไข่สำเร็จ
 -- ระหว่างที่ยังไม่มีบอส ใช้เป็นคำสั่งเทสต์ใน command bar ฝั่ง server
 function EggService.grantEgg(player: Player, eggId: string): (boolean, string?)
-	local state = states[player.UserId]
-	if not state then
+	local data = dataOf(player)
+	if not data then
 		return false, "ยังไม่มีข้อมูลผู้เล่น"
 	end
 
-	local egg = makeEgg(eggId)
-	if not egg then
+	local rolledId, weight = rollEgg(eggId)
+	if not rolledId or not weight then
 		return false, `สร้างไข่ "{eggId}" ไม่ได้ (ไม่มีอยู่ หรือถูกปิดไปแล้ว)`
 	end
 
-	local slot = findFreeSlot(state.heldEggs, BAG_SLOTS)
-	if not slot then
+	local egg = PlayerData.addHeldEgg(data.heldEggs, rolledId, weight)
+	if not egg then
 		return false, "ถือไข่เต็มแล้ว"
 	end
 
-	state.heldEggs[slot] = egg
 	EggService.sync(player)
 
-	print(`[EggService] {player.Name} ได้ {egg.eggId} น้ำหนัก {Config.formatWeight(egg.weight)}`)
+	print(`[EggService] {player.Name} ได้ {egg.eggId} #{egg.id} น้ำหนัก {Config.formatWeight(egg.weight)}`)
 	return true, nil
 end
 
@@ -187,31 +160,35 @@ local function describeMother(mother: Mother)
 	}
 end
 
-local function buildSyncPayload(state: PlayerState)
+-- ⚠️ กระเป๋าไข่จุได้ถึง 10,000 ฟอง — **ห้ามส่งทั้งหมดทุกครั้งที่ sync**
+-- sync วิ่งทุก SYNC_INTERVAL วินาที ส่งหมื่นฟองทุกวินาทีคือถล่มแบนด์วิดท์ของตัวเอง
+-- ส่งเท่าที่ UI แสดงจริง + จำนวนรวม ที่เหลือรอจนกว่า UI จะทำ virtualize (Phase 5.5)
+local HELD_EGGS_PER_SYNC = 50
+
+local function buildSyncPayload(data: Data)
 	local now = os.time()
 
-	local held: { EggView } = table.create(BAG_SLOTS)
-	for index = 1, BAG_SLOTS do
-		local egg = state.heldEggs[index]
-		-- ⚠️ ใช้ type() ไม่ใช่ `~= false` — Luau ขยาย `X | false` เป็น `X | boolean`
-		-- ทำให้เทียบกับ false แล้วไม่แคบลง แต่ type() แคบลงได้เสมอ
-		if type(egg) == "table" then
-			local eggType = Config.getEgg(egg.eggId)
-			held[index] = {
-				occupied = true,
-				eggId = egg.eggId,
-				eggName = if eggType then eggType.name else egg.eggId,
-				weight = egg.weight,
-				weightText = Config.formatWeight(egg.weight),
-			}
-		else
-			held[index] = { occupied = false }
-		end
+	local heldItems = data.heldEggs.items
+	local shown = math.min(#heldItems, HELD_EGGS_PER_SYNC)
+	local held = table.create(shown)
+	for index = 1, shown do
+		local egg = heldItems[index]
+		local eggType = Config.getEgg(egg.eggId)
+		held[index] = {
+			-- ⚠️ ส่ง id ประจำฟอง **ไม่ใช่ตำแหน่ง** — client ต้องอ้างกลับมาด้วย id นี้
+			id = egg.id,
+			eggId = egg.eggId,
+			eggName = if eggType then eggType.name else egg.eggId,
+			weight = egg.weight,
+			weightText = Config.formatWeight(egg.weight),
+		}
 	end
 
-	local hatching: { EggView } = table.create(HATCH_SLOTS)
+	local hatching: { SlotView } = table.create(HATCH_SLOTS)
 	for index = 1, HATCH_SLOTS do
-		local slot = state.hatching[index]
+		local slot = data.hatching[index]
+		-- ⚠️ ใช้ type() ไม่ใช่ `~= false` — Luau ขยาย `X | false` เป็น `X | boolean`
+		-- ทำให้เทียบกับ false แล้วไม่แคบลง แต่ type() แคบลงได้เสมอ
 		if type(slot) == "table" then
 			local eggType = Config.getEgg(slot.eggId)
 			hatching[index] = {
@@ -228,49 +205,46 @@ local function buildSyncPayload(state: PlayerState)
 		end
 	end
 
-	local pen = table.create(#state.mothersInPen)
-	for _, mother in state.mothersInPen do
+	local pen = table.create(#data.mothersInPen)
+	for _, mother in data.mothersInPen do
 		table.insert(pen, describeMother(mother))
 	end
 
-	local bag = table.create(#state.mothersInBag)
-	for _, mother in state.mothersInBag do
+	local bag = table.create(#data.mothersInBag)
+	for _, mother in data.mothersInBag do
 		table.insert(bag, describeMother(mother))
 	end
 
 	return {
 		heldEggs = held,
-		heldCount = countFilled(state.heldEggs, BAG_SLOTS),
-		bagSize = BAG_SLOTS,
+		heldCount = #heldItems,
+		heldShown = shown,
+		bagSize = Config.Balance.Hatchery.BAG_CAPACITY,
 		hatching = hatching,
-		hatchingCount = countFilled(state.hatching, HATCH_SLOTS),
+		hatchingCount = countHatching(data.hatching),
 		hatcherySize = HATCH_SLOTS,
 		mothersInPen = pen,
 		mothersInBag = bag,
-		penCapacity = Config.getPenCapacity(state.penLevel),
+		penCapacity = Config.getPenCapacity(data.penLevel),
 		bagCapacity = Config.Balance.Bag.CAPACITY,
+		coins = data.currency.coins,
 	}
 end
 
 function EggService.sync(player: Player)
-	local state = states[player.UserId]
-	if not state then
+	local data = dataOf(player)
+	if not data then
 		return
 	end
-	farmStateSync:FireClient(player, buildSyncPayload(state))
+	farmStateSync:FireClient(player, buildSyncPayload(data))
 end
 
 --------------------------------------------------------------------------------
 -- ฟักไข่
 --------------------------------------------------------------------------------
 
-local function hatch(player: Player, slotIndex: number, slot: HatchSlot)
-	local state = states[player.UserId]
-	if not state then
-		return
-	end
-
-	state.hatching[slotIndex] = false
+local function hatch(player: Player, data: Data, slotIndex: number, slot: HatchSlot)
+	data.hatching[slotIndex] = false
 	PenService.hideEgg(player, slotIndex)
 
 	-- ⚠️ สุ่มแค่ "ตัวละคร" ตรงนี้ · น้ำหนักยกมาจากตัวไข่ ไม่สุ่มใหม่
@@ -287,32 +261,37 @@ local function hatch(player: Player, slotIndex: number, slot: HatchSlot)
 	end
 
 	local mother: Mother = {
-		uid = Config.makeUid(player.UserId, state.nextUid),
+		uid = Config.makeUid(player.UserId, data.nextUid),
 		charId = charId,
 		weight = slot.weight, -- ← น้ำหนักเดิมของไข่ เป๊ะ
 		statuses = {},
 		obtainedAt = os.time(),
 		locked = false,
 	}
-	state.nextUid += 1
+	data.nextUid += 1
 
 	-- คอกมีที่ว่างก็เข้าคอก (ผลิตได้) ไม่งั้นเข้ากระเป๋า
 	local placedIn: string
-	if #state.mothersInPen < Config.getPenCapacity(state.penLevel) then
+	if #data.mothersInPen < Config.getPenCapacity(data.penLevel) then
 		mother.lastProducedAt = os.time()
-		table.insert(state.mothersInPen, mother)
+		table.insert(data.mothersInPen, mother)
 		placedIn = "pen"
-	elseif #state.mothersInBag < Config.Balance.Bag.CAPACITY then
-		table.insert(state.mothersInBag, mother)
+	elseif #data.mothersInBag < Config.Balance.Bag.CAPACITY then
+		table.insert(data.mothersInBag, mother)
 		placedIn = "bag"
 	else
 		-- คอกและกระเป๋าเต็มทั้งคู่ — แม่ตัวนี้หายไป
-		-- ⚠️ Phase 2 ต้องเปลี่ยนเป็น "ค้างไว้ในสวนจนกว่าจะมีที่ว่าง" (data-schema §13 ข้อ D)
+		-- ⚠️ Phase 2B ต้องเปลี่ยนเป็น "ค้างไว้ในสวนจนกว่าจะมีที่ว่าง" (data-schema §13 ข้อ D)
 		warn(`[EggService] {player.Name} คอกและกระเป๋าเต็ม แม่ที่ฟักได้หายไป`)
 		return
 	end
 
-	PenService.refreshMothers(player, state.mothersInPen)
+	data.stats.eggsHatched += 1
+	if mother.weight > data.stats.heaviestMother then
+		data.stats.heaviestMother = mother.weight
+	end
+
+	PenService.refreshMothers(player, data.mothersInPen)
 
 	eggHatched:FireClient(player, {
 		slotIndex = slotIndex,
@@ -336,30 +315,42 @@ end
 --------------------------------------------------------------------------------
 
 -- รับค่าดิบจาก client จึงประกาศเป็น unknown แล้วค่อย validate ทีละชั้น
--- ⚠️ รับ "ตำแหน่งไข่ใน heldEggs" ไม่ใช่ชนิดไข่ — ไข่ชนิดเดียวกันน้ำหนักต่างกันได้
-function EggService.placeEgg(player: Player, rawHeldIndex: unknown, rawSlotIndex: unknown): (boolean, string?)
-	local state = states[player.UserId]
-	if not state then
+--
+-- ⚠️ รับ **id ประจำฟอง** ไม่ใช่ตำแหน่งในอาเรย์
+-- `items` เป็นอาเรย์แน่น การลบฟองหนึ่งทำให้ฟองที่อยู่หลังมันเลื่อนตำแหน่งทั้งแถว
+-- ถ้า client อ้างด้วยตำแหน่ง แล้วมีไข่ฟักเสร็จคั่นจังหวะพอดี เขาจะได้ไข่ผิดฟอง
+-- (สวนฟัก 50 ช่องทำให้มีไข่ฟักเสร็จบ่อยมาก — ไม่ใช่เคสทฤษฎี)
+function EggService.placeEgg(player: Player, rawEggId: unknown, rawSlotIndex: unknown): (boolean, string?)
+	local data = dataOf(player)
+	if not data then
 		return false, "ยังไม่มีข้อมูลผู้เล่น"
+	end
+
+	local meta = sessionMeta[player.UserId]
+	if not meta then
+		return false, "ยังไม่มีเซสชัน"
 	end
 
 	-- 1) กันสแปม
 	local now = os.time()
-	if now - state.lastRequestAt < WORLD.REQUEST_COOLDOWN then
+	if now - meta.lastRequestAt < WORLD.REQUEST_COOLDOWN then
 		return false, "กดเร็วเกินไป"
 	end
-	state.lastRequestAt = now
+	meta.lastRequestAt = now
 
-	-- 2) heldIndex ต้องเป็นจำนวนเต็มในช่วง และช่องนั้นต้องมีไข่จริง
-	if type(rawHeldIndex) ~= "number" then
-		return false, "heldIndex ไม่ใช่ number"
+	-- 2) id ต้องเป็นจำนวนเต็มบวก และต้องหาเจอในกระเป๋าจริง
+	-- ⚠️ ไม่มี "ช่วงที่อนุญาต" ให้เช็คอีกแล้ว — id เดินหน้าเรื่อย ๆ ไม่ผูกกับความจุ
+	-- สิ่งที่ตัดสินว่าใช้ได้ไหมคือ "อยู่ใน items ของคนนี้หรือเปล่า" เท่านั้น
+	if type(rawEggId) ~= "number" then
+		return false, "eggId ไม่ใช่ number"
 	end
-	if rawHeldIndex % 1 ~= 0 or rawHeldIndex < 1 or rawHeldIndex > BAG_SLOTS then
-		return false, "heldIndex อยู่นอกช่วงที่อนุญาต"
+	if rawEggId % 1 ~= 0 or rawEggId < 1 then
+		return false, "eggId ต้องเป็นจำนวนเต็มบวก"
 	end
-	local heldEgg = state.heldEggs[rawHeldIndex]
-	if type(heldEgg) ~= "table" then
-		return false, "ช่องนั้นไม่มีไข่"
+
+	local _, heldEgg = PlayerData.findHeldEgg(data.heldEggs, rawEggId)
+	if not heldEgg then
+		return false, `ไม่มีไข่ #{rawEggId} ในกระเป๋า`
 	end
 
 	local eggType = Config.getEgg(heldEgg.eggId)
@@ -375,7 +366,7 @@ function EggService.placeEgg(player: Player, rawHeldIndex: unknown, rawSlotIndex
 	-- 4) slotIndex ส่งมาหรือไม่ส่งก็ได้ ถ้าไม่ส่ง server เลือกช่องว่างช่องแรกให้
 	local slotIndex: number
 	if rawSlotIndex == nil then
-		local free = findFreeSlot(state.hatching, HATCH_SLOTS)
+		local free = findFreeHatchSlot(data.hatching)
 		if not free then
 			return false, "สวนฟักเต็มแล้ว"
 		end
@@ -387,15 +378,16 @@ function EggService.placeEgg(player: Player, rawHeldIndex: unknown, rawSlotIndex
 		if rawSlotIndex % 1 ~= 0 or rawSlotIndex < 1 or rawSlotIndex > HATCH_SLOTS then
 			return false, "slotIndex อยู่นอกช่วงที่อนุญาต"
 		end
-		if state.hatching[rawSlotIndex] ~= false then
+		if data.hatching[rawSlotIndex] ~= false then
 			return false, "ช่องนี้มีไข่อยู่แล้ว"
 		end
 		slotIndex = rawSlotIndex
 	end
 
 	-- 5) ผ่านหมดแล้ว ย้ายทั้งฟอง (eggId + weight) เข้าสวน
-	state.heldEggs[rawHeldIndex] = false
-	state.hatching[slotIndex] = {
+	-- ⚠️ ลบออกจากกระเป๋าด้วย id ไม่ใช่ตำแหน่งที่หาเจอเมื่อกี้ — กันกรณีอาเรย์ขยับระหว่างทาง
+	PlayerData.removeHeldEgg(data.heldEggs, rawEggId)
+	data.hatching[slotIndex] = {
 		eggId = heldEgg.eggId,
 		weight = heldEgg.weight, -- ← เดินทางไปด้วย ไม่สุ่มใหม่
 		startedAt = now,
@@ -422,8 +414,8 @@ local function takeMother(list: { Mother }, uid: string): Mother?
 end
 
 function EggService.moveMother(player: Player, rawUid: unknown, rawTarget: unknown): (boolean, string?)
-	local state = states[player.UserId]
-	if not state then
+	local data = dataOf(player)
+	if not data then
 		return false, "ยังไม่มีข้อมูลผู้เล่น"
 	end
 
@@ -435,30 +427,30 @@ function EggService.moveMother(player: Player, rawUid: unknown, rawTarget: unkno
 	end
 
 	if rawTarget == "pen" then
-		if #state.mothersInPen >= Config.getPenCapacity(state.penLevel) then
+		if #data.mothersInPen >= Config.getPenCapacity(data.penLevel) then
 			return false, "คอกเต็มแล้ว"
 		end
-		local mother = takeMother(state.mothersInBag, rawUid)
+		local mother = takeMother(data.mothersInBag, rawUid)
 		if not mother then
 			return false, "ไม่พบแม่ตัวนี้ในกระเป๋า"
 		end
-		-- เริ่มนับเวลาผลิตใหม่ตั้งแต่วินาทีที่เข้าคอก (Phase 2 จะใช้ค่านี้)
+		-- เริ่มนับเวลาผลิตใหม่ตั้งแต่วินาทีที่เข้าคอก (Phase 2B จะใช้ค่านี้)
 		mother.lastProducedAt = os.time()
-		table.insert(state.mothersInPen, mother)
+		table.insert(data.mothersInPen, mother)
 	else
-		if #state.mothersInBag >= Config.Balance.Bag.CAPACITY then
+		if #data.mothersInBag >= Config.Balance.Bag.CAPACITY then
 			return false, "กระเป๋าเต็มแล้ว"
 		end
-		local mother = takeMother(state.mothersInPen, rawUid)
+		local mother = takeMother(data.mothersInPen, rawUid)
 		if not mother then
 			return false, "ไม่พบแม่ตัวนี้ในคอก"
 		end
 		-- แม่ในกระเป๋าไม่ผลิตอะไรเลย จึงไม่ต้องเก็บเวลาผลิตไว้
 		mother.lastProducedAt = nil
-		table.insert(state.mothersInBag, mother)
+		table.insert(data.mothersInBag, mother)
 	end
 
-	PenService.refreshMothers(player, state.mothersInPen)
+	PenService.refreshMothers(player, data.mothersInPen)
 	EggService.sync(player)
 	return true, nil
 end
@@ -467,54 +459,78 @@ end
 -- วงจรชีวิตผู้เล่น
 --------------------------------------------------------------------------------
 
-function EggService.onPlayerAdded(player: Player)
-	-- ⚠️ อาเรย์ยาวคงที่ ช่องว่างใช้ false ห้ามใช้ nil
-	-- (Phase 2 จะเซฟลง DataStore ซึ่งอ่านอาเรย์ที่มีรูกลับมาไม่ได้ — data-schema §9.3)
-	-- ⚠️ สองอาเรย์นี้ยาวไม่เท่ากันก็ได้ จึงวนแยกกัน ห้ามยุบเป็นลูปเดียว
-	local heldEggs: { HeldEgg | false } = {}
-	for index = 1, BAG_SLOTS do
-		heldEggs[index] = false
+-- คืน false เมื่อโหลดข้อมูลไม่ได้ — ผู้เล่นถูกเตะออกไปแล้วตอนนั้น
+function EggService.onPlayerAdded(player: Player): boolean
+	local data, err, isNew = DataService.loadAsync(player.UserId)
+	if not data then
+		-- ⚠️ เตะออก ไม่ปล่อยให้เล่นต่อด้วยข้อมูลเปล่า
+		-- ปล่อยเล่นต่อ = autosave รอบถัดไปเขียนข้อมูลเปล่าทับของจริงที่ยังอยู่ครบ
+		warn(`[EggService] โหลดข้อมูลของ {player.Name} ไม่สำเร็จ: {err}`)
+		player:Kick(err or DataService.LOAD_FAILED_MESSAGE)
+		return false
 	end
 
-	local hatching: { HatchSlot | false } = {}
-	for index = 1, HATCH_SLOTS do
-		hatching[index] = false
+	sessionMeta[player.UserId] = { lastRequestAt = 0 }
+
+	-- ⚠️ แจกไข่เริ่มต้น **เฉพาะผู้เล่นใหม่จริง ๆ**
+	-- ถ้าแจกทุกครั้งที่เข้าเกม ผู้เล่นจะได้ไข่ฟรีทุกล็อกอิน = ฟาร์มด้วยการ rejoin
+	-- (บั๊กแบบนี้มองไม่เห็นตอนยังไม่มี DataStore เพราะทุกคนเป็นผู้เล่นใหม่ตลอด)
+	if isNew then
+		-- แจกทีละฟองผ่าน grantEgg เพื่อให้แต่ละฟองได้สุ่มน้ำหนักของตัวเอง
+		-- startingEggs เป็นแค่ "คำสั่งแจก" ไม่ใช่รูปแบบที่เก็บ
+		for eggId, amount in Config.Balance.NewPlayer.startingEggs do
+			for _ = 1, amount do
+				EggService.grantEgg(player, eggId)
+			end
+		end
+		print(`[EggService] {player.Name} เป็นผู้เล่นใหม่ — แจกไข่เริ่มต้นแล้ว`)
 	end
 
-	states[player.UserId] = {
-		heldEggs = heldEggs,
-		hatching = hatching,
-		mothersInPen = {},
-		mothersInBag = {},
-		nextUid = 1,
-		penLevel = 1,
-		lastRequestAt = 0,
-	}
+	-- วาดแม่ที่โหลดกลับมาลงคอก
+	PenService.refreshMothers(player, data.mothersInPen)
 
-	-- ⚠️ แจกไข่เริ่มต้นทีละฟองผ่าน grantEgg เพื่อให้แต่ละฟองได้สุ่มน้ำหนักของตัวเอง
-	-- startingEggs เป็นแค่ "คำสั่งแจก" ไม่ใช่รูปแบบที่เก็บ
-	for eggId, amount in Config.Balance.NewPlayer.startingEggs do
-		for _ = 1, amount do
-			EggService.grantEgg(player, eggId)
+	-- ⚠️ ไข่ที่ค้างอยู่ในสวนตอนออกเกมต้องกลับมาโชว์ในคอกด้วย
+	for slotIndex = 1, HATCH_SLOTS do
+		local slot = data.hatching[slotIndex]
+		if type(slot) == "table" then
+			local eggType = Config.getEgg(slot.eggId)
+			if eggType then
+				PenService.showEgg(player, slotIndex, eggType)
+			end
 		end
 	end
 
 	EggService.sync(player)
+	return true
 end
 
 function EggService.onPlayerRemoving(player: Player)
-	-- Phase 1.5 ทิ้งข้อมูลทั้งหมด Phase 2 ตรงนี้จะกลายเป็นจุดเซฟลง DataStore
-	states[player.UserId] = nil
+	sessionMeta[player.UserId] = nil
+
+	-- ไม่มีข้อมูลในมือ = โหลดไม่สำเร็จแล้วถูกเตะไปตั้งแต่แรก ไม่มีอะไรให้เซฟ
+	-- ⚠️ และ **ห้ามเซฟ** ด้วย เพราะจะกลายเป็นเขียนข้อมูลเปล่าทับของจริง
+	if not DataService.getCached(player.UserId) then
+		return
+	end
+
+	-- ⚠️ ปลด session lock ด้วยเสมอ ไม่งั้นเข้าเกมใหม่ไม่ได้จนกว่า lock จะหมดอายุ 5 นาที
+	local ok, err = DataService.saveAsync(player.UserId, true)
+	if ok then
+		print(`[EggService] เซฟข้อมูลของ {player.Name} แล้ว`)
+	else
+		warn(`[EggService] เซฟข้อมูลของ {player.Name} ไม่สำเร็จ: {err}`)
+	end
+	DataService.forget(player.UserId)
 end
 
 function EggService.getMothersInPen(player: Player): { Mother }
-	local state = states[player.UserId]
-	return if state then state.mothersInPen else {}
+	local data = dataOf(player)
+	return if data then data.mothersInPen else {}
 end
 
 function EggService.getMothersInBag(player: Player): { Mother }
-	local state = states[player.UserId]
-	return if state then state.mothersInBag else {}
+	local data = dataOf(player)
+	return if data then data.mothersInBag else {}
 end
 
 --------------------------------------------------------------------------------
@@ -527,8 +543,8 @@ function EggService.start()
 	eggHatched = Remotes.waitFor(Config.RemoteNames.EGG_HATCHED)
 	farmStateSync = Remotes.waitFor(Config.RemoteNames.FARM_STATE_SYNC)
 
-	placeEggRequest.OnServerEvent:Connect(function(player, rawHeldIndex, rawSlotIndex)
-		local ok, reason = EggService.placeEgg(player, rawHeldIndex, rawSlotIndex)
+	placeEggRequest.OnServerEvent:Connect(function(player, rawEggId, rawSlotIndex)
+		local ok, reason = EggService.placeEgg(player, rawEggId, rawSlotIndex)
 		if not ok then
 			print(`[EggService] ปฏิเสธคำขอวางไข่ของ {player.Name}: {reason}`)
 		end
@@ -549,12 +565,12 @@ function EggService.start()
 
 			local now = os.time()
 			for _, player in Players:GetPlayers() do
-				local state = states[player.UserId]
-				if state then
+				local data = dataOf(player)
+				if data then
 					for slotIndex = 1, HATCH_SLOTS do
-						local slot = state.hatching[slotIndex]
+						local slot = data.hatching[slotIndex]
 						if type(slot) == "table" and now >= slot.hatchAt then
-							hatch(player, slotIndex, slot)
+							hatch(player, data, slotIndex, slot)
 						end
 					end
 					EggService.sync(player)

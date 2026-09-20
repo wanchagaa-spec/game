@@ -792,7 +792,10 @@ return function(t, Config)
 	check("ช่องฟักมีค่าเป็นของตัวเอง", type(Config.Balance.Hatchery.MAX_SLOTS), "number")
 	check("MAX_EGGS เดิมถูกถอดออกแล้ว", Config.Balance.Hatchery.MAX_EGGS, nil)
 	-- ⚠️ เช็คค่าทีละตัว **ไม่ได้เช็คว่าเท่ากัน** เพราะไม่ได้บังคับว่าต้องเท่า
-	check("ค่าเริ่มต้นกระเป๋าไข่ = 50", Config.Balance.Hatchery.BAG_CAPACITY, 50)
+	-- ⚠️ ขึ้นเป็น 10,000 ตอน Phase 2A พร้อมกับโครง heldEggs ใหม่ที่เก็บเฉพาะฟองที่มีจริง
+	check("กระเป๋าไข่ = 10,000", Config.Balance.Hatchery.BAG_CAPACITY, 10000)
+	check("กระเป๋าไข่จุไม่น้อยกว่าสวนฟัก",
+	      Config.Balance.Hatchery.BAG_CAPACITY >= Config.Balance.Hatchery.MAX_SLOTS, true)
 	check("ค่าเริ่มต้นช่องฟัก = 50", Config.Balance.Hatchery.MAX_SLOTS, 50)
 
 	-- ยามต้องจับค่าที่ทำให้ไข่เดินทางต่อไม่ได้

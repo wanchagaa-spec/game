@@ -125,7 +125,9 @@ resultLabel.TextColor3 = DIM
 -- สถานะล่าสุดที่ server ส่งมา (ไว้ให้ปุ่มอ้างอิง)
 --------------------------------------------------------------------------------
 
-local firstHeldIndex: number? = nil
+-- ⚠️ เก็บ **id ประจำฟอง** ไม่ใช่ตำแหน่งในลิสต์
+-- ตำแหน่งเลื่อนได้ทุกครั้งที่มีไข่ถูกเอาออกจากกระเป๋า id ไม่เลื่อน
+local firstHeldId: number? = nil
 local firstPenUid: string? = nil
 local firstBagUid: string? = nil
 
@@ -134,12 +136,13 @@ local firstBagUid: string? = nil
 --------------------------------------------------------------------------------
 
 placeButton.Activated:Connect(function()
-	if not firstHeldIndex then
+	if not firstHeldId then
 		return
 	end
-	-- ⚠️ ส่ง "ตำแหน่งไข่ใน heldEggs" ไม่ใช่ชนิดไข่
-	-- ไข่ชนิดเดียวกันน้ำหนักต่างกันได้ ระบุด้วยชนิดไม่ได้
-	placeEggRequest:FireServer(firstHeldIndex)
+	-- ⚠️ ส่ง **id ประจำฟอง** ไม่ใช่ชนิดไข่ และไม่ใช่ตำแหน่งในลิสต์
+	--   · ชนิดไข่ระบุไม่ได้ — ไข่ชนิดเดียวกันน้ำหนักต่างกันได้
+	--   · ตำแหน่งระบุไม่ได้ — ไข่ฟักเสร็จคั่นจังหวะแล้วทั้งแถวเลื่อน เราจะวางผิดฟอง
+	placeEggRequest:FireServer(firstHeldId)
 end)
 
 toBagButton.Activated:Connect(function()
@@ -157,18 +160,21 @@ end)
 farmStateSync.OnClientEvent:Connect(function(payload)
 	-- ── ไข่ในกระเป๋า ──
 	-- ⚠️ จุดที่ดูออกว่ากฎ "น้ำหนักมาก่อน" ทำงานถูก: ไข่โชว์น้ำหนักตั้งแต่ยังไม่ฟัก
-	firstHeldIndex = nil
+	--
+	-- ⚠️ `payload.heldEggs` เป็น **อาเรย์แน่นของไข่ที่มีจริง** ไม่ใช่อาเรย์ยาวเท่าความจุแล้ว
+	-- กระเป๋าจุ 10,000 ฟอง — server ส่งมาให้แค่ส่วนแรกเท่าที่ UI แสดงจริง
+	-- และแต่ละฟองมี `id` ประจำตัว **ซึ่งเป็นสิ่งเดียวที่ส่งกลับไปหา server ได้**
+	firstHeldId = nil
 	local heldLines = {}
-	-- ⚠️ กระเป๋าไข่กับสวนฟักยาวไม่เท่ากันได้แล้ว ใช้ขนาดของใครของมัน
-	for index = 1, payload.bagSize do
-		local egg = payload.heldEggs[index]
-		if egg and egg.occupied then
-			if not firstHeldIndex then
-				firstHeldIndex = index
-			end
-			if #heldLines < 3 then
-				table.insert(heldLines, `  [{index}] {egg.eggName} — {egg.weightText}`)
-			end
+	for index, egg in payload.heldEggs do
+		if not firstHeldId then
+			firstHeldId = egg.id
+		end
+		if #heldLines < 3 then
+			table.insert(heldLines, `  #{egg.id} {egg.eggName} — {egg.weightText}`)
+		end
+		if index >= 3 then
+			break
 		end
 	end
 	if #heldLines == 0 then
@@ -179,7 +185,7 @@ farmStateSync.OnClientEvent:Connect(function(payload)
 			.. table.concat(heldLines, "\n")
 			.. (if more > 0 then `\n  ...อีก {more} ฟอง` else "")
 	end
-	placeButton.Text = if firstHeldIndex then "เอาไข่ฟองแรกเข้าสวนฟัก" else "ไม่มีไข่ให้วาง"
+	placeButton.Text = if firstHeldId then "เอาไข่ฟองแรกเข้าสวนฟัก" else "ไม่มีไข่ให้วาง"
 
 	-- ── สวนฟัก ──
 	local hatchLines = {}

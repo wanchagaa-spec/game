@@ -45,6 +45,23 @@ local function ensureFolder(): Folder
 	if folder and folder.Parent then
 		return folder
 	end
+
+	-- ⚠️ ต้องหา "LocalWalls" ที่มีอยู่แล้วใน Workspace ก่อนเสมอ ห้ามสร้างใหม่ตรง ๆ
+	-- StarterPlayerScripts ถูก copy เป็น PlayerScripts ตอนเข้าเกม → มี ModuleScript
+	-- WallRenderer อย่างน้อย 2 instance ที่ต่างคนต่างมี `folder`/`currentProgress` ของตัวเอง
+	-- (ตัวต้นฉบับใน StarterPlayerScripts กับตัวที่ก็อปมาใน PlayerScripts ที่ Main.client.lua
+	-- require จริง) ถ้า instance ไหนสร้างโฟลเดอร์ใหม่ทิ้งไว้โดยไม่เช็คของเดิมก่อน
+	-- จะเกิดโฟลเดอร์ "LocalWalls" ซ้อนกันสองใบใน Workspace เดียวกัน — ใบที่ผู้เล่นยืนชนอยู่จริง
+	-- (สร้างจาก instance ที่ Main.client.lua เรียกตอนบูต) ไม่ถูกแตะเลยแม้แต่นิดเดียว
+	-- ต่อให้เรียก setWallProgress จาก instance ไหนก็ตาม (เช่น จาก command bar ที่ require
+	-- ผ่านคนละ path) เพราะ Workspace เป็น service เดียวจริงของทั้งเกม การหาโฟลเดอร์เดิมด้วยชื่อ
+	-- ทำให้ทุก instance ลงเอยที่ Part ชุดเดียวกันเสมอ
+	local existing = Workspace:FindFirstChild("LocalWalls")
+	if existing and existing:IsA("Folder") then
+		folder = existing
+		return existing
+	end
+
 	local created = Instance.new("Folder")
 	created.Name = "LocalWalls"
 	-- อยู่ใน Workspace ของเครื่องนี้เท่านั้น server ไม่รู้จักและ replicate ไปหาใครไม่ได้

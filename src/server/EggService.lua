@@ -31,6 +31,7 @@ local PlayerData = require(ReplicatedStorage.Shared.PlayerData)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local DataService = require(ServerScriptService.DataService)
 local PenService = require(ServerScriptService.PenService)
+local ProductionService = require(ServerScriptService.ProductionService)
 
 local EggService = {}
 
@@ -215,6 +216,23 @@ local function buildSyncPayload(data: Data)
 		table.insert(bag, describeMother(mother))
 	end
 
+	-- ⚠️ กองลูก — จำนวน stack key ยังเล็กมาก (สถานะยังไม่เปิดใช้จริง) ส่งทั้งหมดได้
+	-- ต่างจากกระเป๋าไข่ (10,000 ฟอง) ที่ต้อง virtualize เพราะเป็นคนละขนาดกัน
+	local children = {}
+	for key, count in data.children do
+		local charId, weight, statuses = Config.parseStackKey(key)
+		local character = if charId then Config.getCharacter(charId) else nil
+		table.insert(children, {
+			key = key,
+			charName = if character then character.name else charId,
+			class = if character then character.class else "?",
+			weight = weight,
+			weightText = if weight then Config.formatWeight(Config.getChildWeight(weight)) else "?",
+			statuses = statuses,
+			count = count,
+		})
+	end
+
 	return {
 		heldEggs = held,
 		heldCount = #heldItems,
@@ -228,6 +246,7 @@ local function buildSyncPayload(data: Data)
 		penCapacity = Config.getPenCapacity(data.penLevel),
 		bagCapacity = Config.Balance.Bag.CAPACITY,
 		coins = data.currency.coins,
+		children = children,
 	}
 end
 
@@ -265,7 +284,11 @@ local function hatch(player: Player, data: Data, slotIndex: number, slot: HatchS
 		charId = charId,
 		weight = slot.weight, -- ← น้ำหนักเดิมของไข่ เป๊ะ
 		statuses = {},
-		obtainedAt = os.time(),
+		-- ⚠️ ใช้ slot.hatchAt ไม่ใช่ os.time() — เวลาที่ "ควรฟักเสร็จจริง" ไม่ใช่เวลาที่โค้ดมาเช็คเจอ
+		-- ต่างกันได้ถึง 8 ชั่วโมงตอนผู้เล่นล็อกอินกลับมาแล้วเช็คไข่ที่ค้างจากตอนออฟไลน์
+		-- (docs/data-schema.md §5.3) ถ้าใช้ os.time() แม่ตัวนี้จะไม่ได้เครดิตผลิตย้อนหลังเลย
+		-- ทั้งที่ควรได้ตั้งแต่วินาทีที่ไข่ครบเวลาจริง ไม่ใช่วินาทีที่ผู้เล่นเข้าเกม
+		obtainedAt = slot.hatchAt,
 		locked = false,
 	}
 	data.nextUid += 1
@@ -273,7 +296,7 @@ local function hatch(player: Player, data: Data, slotIndex: number, slot: HatchS
 	-- คอกมีที่ว่างก็เข้าคอก (ผลิตได้) ไม่งั้นเข้ากระเป๋า
 	local placedIn: string
 	if #data.mothersInPen < Config.getPenCapacity(data.penLevel) then
-		mother.lastProducedAt = os.time()
+		mother.lastProducedAt = slot.hatchAt
 		table.insert(data.mothersInPen, mother)
 		placedIn = "pen"
 	elseif #data.mothersInBag < Config.Balance.Bag.CAPACITY then
@@ -308,6 +331,19 @@ local function hatch(player: Player, data: Data, slotIndex: number, slot: HatchS
 		`[EggService] {player.Name} ฟัก {slot.eggId} ช่อง {slotIndex} ได้ {character.name} `
 			.. `({character.class}) {Config.formatWeight(mother.weight)} → {placedIn}`
 	)
+end
+
+-- ฟักไข่ทุกฟองในสวนที่ครบเวลาแล้ว ณ nowValue — ใช้ทั้งจาก loop ออนไลน์ (ทุก SYNC_INTERVAL)
+-- และตอน login เพื่อ "ตามให้ทัน" ไข่ที่ครบเวลาไปแล้วระหว่างออฟไลน์
+-- ⚠️ ต้องเรียกตัวนี้ก่อน settle การผลิตเสมอ (docs/data-schema.md §5.3) ไม่งั้นแม่ที่เพิ่งฟัก
+-- ออกมาระหว่างช่วงออฟไลน์จะไม่ได้รับเครดิตผลิตย้อนหลังของตัวเองเลย
+local function processReadyHatchSlots(player: Player, data: Data, nowValue: number)
+	for slotIndex = 1, HATCH_SLOTS do
+		local slot = data.hatching[slotIndex]
+		if type(slot) == "table" and nowValue >= slot.hatchAt then
+			hatch(player, data, slotIndex, slot)
+		end
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -445,6 +481,9 @@ function EggService.moveMother(player: Player, rawUid: unknown, rawTarget: unkno
 		if not mother then
 			return false, "ไม่พบแม่ตัวนี้ในคอก"
 		end
+		-- ⚠️ ต้อง settle ผลผลิตค้างก่อนเอาออกจากคอกเสมอ (ทั้งลูกและเงิน) ไม่งั้นเวลาที่ยังไม่ settle
+		-- จะหายไปเฉย ๆ — lastProducedAt ถูกล้างเป็น nil บรรทัดถัดไป พอออกจากคอกแล้วหาไม่เจออีกแล้ว
+		ProductionService.settleMother(data, mother, true)
 		-- แม่ในกระเป๋าไม่ผลิตอะไรเลย จึงไม่ต้องเก็บเวลาผลิตไว้
 		mother.lastProducedAt = nil
 		table.insert(data.mothersInBag, mother)
@@ -611,10 +650,19 @@ function EggService.onPlayerAdded(player: Player): boolean
 		print(`[EggService] {player.Name} เป็นผู้เล่นใหม่ — แจกไข่เริ่มต้นแล้ว`)
 	end
 
-	-- วาดแม่ที่โหลดกลับมาลงคอก
+	-- ⚠️ ลำดับตอน login ห้ามสลับ (docs/data-schema.md §5.3):
+	--   1. โหลดข้อมูล (ทำไปแล้วข้างบน)
+	--   2. เคลียร์ไข่ที่ฟักครบระหว่างออฟไลน์ก่อน — สร้างแม่ใหม่ตั้ง lastProducedAt = hatchAt
+	--   3. ค่อย settle การผลิตออฟไลน์ (ต้องรวมแม่ที่เพิ่งฟักในข้อ 2 ด้วย)
+	-- ถ้าสลับ 2 กับ 3 แม่ที่ฟักออกมาตอนชั่วโมงแรกของการออฟไลน์ 8 ชั่วโมงจะไม่ได้เครดิตย้อนหลังเลย
+	local nowValue = os.time()
+	processReadyHatchSlots(player, data, nowValue)
+	ProductionService.settleAllInPen(data, false)
+
+	-- วาดแม่ที่โหลดกลับมาลงคอก (รวมแม่ที่เพิ่งฟักเสร็จในข้อ 2 ด้วยแล้ว)
 	PenService.refreshMothers(player, data.mothersInPen)
 
-	-- ⚠️ ไข่ที่ค้างอยู่ในสวนตอนออกเกมต้องกลับมาโชว์ในคอกด้วย
+	-- ⚠️ ไข่ที่ยัง**ไม่ครบเวลา**ค้างอยู่ในสวนตอนออกเกมต้องกลับมาโชว์ในคอกด้วย
 	for slotIndex = 1, HATCH_SLOTS do
 		local slot = data.hatching[slotIndex]
 		if type(slot) == "table" then
@@ -634,9 +682,14 @@ function EggService.onPlayerRemoving(player: Player)
 
 	-- ไม่มีข้อมูลในมือ = โหลดไม่สำเร็จแล้วถูกเตะไปตั้งแต่แรก ไม่มีอะไรให้เซฟ
 	-- ⚠️ และ **ห้ามเซฟ** ด้วย เพราะจะกลายเป็นเขียนข้อมูลเปล่าทับของจริง
-	if not DataService.getCached(player.UserId) then
+	local data = DataService.getCached(player.UserId)
+	if not data then
 		return
 	end
+
+	-- ⚠️ settle การผลิตออนไลน์ให้ถึง now ก่อนเซฟเสมอ (docs/data-schema.md §5.4)
+	-- ไม่งั้นเวลาที่เพิ่งเล่นอยู่ช่วงท้ายจะถูกนับเป็นออฟไลน์ (ช้ากว่า 10 เท่า) ตอนเข้าเกมครั้งหน้า
+	ProductionService.settleAllInPen(data, true)
 
 	-- ⚠️ ปลด session lock ด้วยเสมอ ไม่งั้นเข้าเกมใหม่ไม่ได้จนกว่า lock จะหมดอายุ 5 นาที
 	local ok, err = DataService.saveAsync(player.UserId, true)
@@ -688,16 +741,11 @@ function EggService.start()
 		while true do
 			task.wait(WORLD.SYNC_INTERVAL)
 
-			local now = os.time()
+			local nowValue = os.time()
 			for _, player in Players:GetPlayers() do
 				local data = dataOf(player)
 				if data then
-					for slotIndex = 1, HATCH_SLOTS do
-						local slot = data.hatching[slotIndex]
-						if type(slot) == "table" and now >= slot.hatchAt then
-							hatch(player, data, slotIndex, slot)
-						end
-					end
+					processReadyHatchSlots(player, data, nowValue)
 					EggService.sync(player)
 				end
 			end

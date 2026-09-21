@@ -56,6 +56,7 @@ end
 local suites: { { name: string, run: (any, any) -> () } } = {
 	{ name = "Config", run = require("./config.spec") },
 	{ name = "PlayerData + DataService", run = require("./playerdata.spec") },
+	{ name = "ProductionService", run = require("./production.spec") },
 }
 
 local startedAt = os.clock()

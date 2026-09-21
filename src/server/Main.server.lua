@@ -21,6 +21,7 @@ local MapBuilder = require(ServerScriptService.MapBuilder)
 local DataService = require(ServerScriptService.DataService)
 local PenService = require(ServerScriptService.PenService)
 local EggService = require(ServerScriptService.EggService)
+local ProductionService = require(ServerScriptService.ProductionService)
 
 -- ⚠️ กันตัวละครเกิดก่อนแมพสร้างเสร็จ
 -- แมพทั้งใบ generate ตอน server start ดังนั้น**ก่อนหน้านั้นโลกว่างเปล่า ไม่มีพื้นเลย**
@@ -121,6 +122,13 @@ DataService.init()
 MapBuilder.build()
 PenService.buildWorld()
 EggService.start()
+
+-- ⚠️ Phase 2B-1: ผลิตลูก + ผลิตเงินจากแม่ในคอก ทำงานเป็น periodic tick แยกจากลูปของ
+-- EggService (คนละ interval: Config.Balance.Production.TICK_INTERVAL ไม่ใช่ Config.World.SYNC_INTERVAL)
+-- ⚠️ inject EggService.sync เข้าไปแทนที่จะให้ ProductionService require EggService ตรง ๆ
+-- กัน circular require (EggService เองก็ require ProductionService ไปเรียก settleMother
+-- ตอนย้ายแม่ออกจากคอก)
+ProductionService.start(EggService.sync)
 
 -- ⚠️ ต่อ BindToClose **ก่อน** ปล่อยให้ใครเข้ามาเล่น
 -- ถ้าต่อทีหลัง มีช่วงที่เซิร์ฟเวอร์ปิดแล้วไม่มีใครเซฟให้เลย

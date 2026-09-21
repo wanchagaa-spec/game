@@ -489,6 +489,13 @@ Config.RemoteNames = {
 	-- client → server : FireServer(uid, "pen" | "bag")
 	MOVE_MOTHER_REQUEST = "MoveMotherRequest",
 
+	-- client → server : FireServer() — ไม่มีพารามิเตอร์ อัปคอกของผู้เล่นเองขึ้น 1 ขั้นเสมอ
+	UPGRADE_PEN_REQUEST = "UpgradePenRequest",
+
+	-- client → server : FireServer(motherUid) — ขายได้เฉพาะแม่ในกระเป๋าเท่านั้น
+	-- ⚠️ ไม่มีพารามิเตอร์ราคา — ราคาคำนวณฝั่ง server เสมอ ไม่มีช่องให้ client ส่งราคามาเอง
+	SELL_MOTHER_REQUEST = "SellMotherRequest",
+
 	-- server → client : { slotIndex, eggId, charId, charName, class, weight, placedIn }
 	EGG_HATCHED = "EggHatched",
 

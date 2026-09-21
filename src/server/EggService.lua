@@ -59,6 +59,8 @@ type SlotView = {
 	weightText: string?,
 	remaining: number?,
 	total: number?,
+	-- ครบเวลาฟักแล้วแต่ยังวางแม่ไม่ได้ (คอก+กระเป๋าเต็มพร้อมกัน — ข้อ D) รอที่ว่างอยู่
+	stuck: boolean?,
 }
 
 -- ⚠️ ของที่ **ห้ามเซฟ** — ตายพร้อมเซสชัน
@@ -72,6 +74,8 @@ local rng = Random.new()
 
 local placeEggRequest: RemoteEvent
 local moveMotherRequest: RemoteEvent
+local upgradePenRequest: RemoteEvent
+local sellMotherRequest: RemoteEvent
 local eggHatched: RemoteEvent
 local farmStateSync: RemoteEvent
 
@@ -190,13 +194,22 @@ local function buildSyncPayload(data: Data)
 		}
 	end
 
+	-- ⚠️ ข้อ D: slot ที่ครบเวลาฟักแล้วแต่ยังวางแม่ไม่ได้ (คอก+กระเป๋าเต็มพร้อมกัน) ยังนับเป็น
+	-- occupied=true ตามปกติ (ไม่มีการเคลียร์ slot จนกว่าจะวางสำเร็จ — ดู hatch()) แค่ remaining=0
+	-- ค้างอยู่เฉย ๆ · เพิ่ม stuck=true ให้ต่างหากเพื่อให้ client แยกแสดงได้ว่า "รอที่ว่าง" ไม่ใช่
+	-- "กำลังฟักอยู่" และนับรวมเป็น stuckHatchCount ให้ข้อความแจ้งเตือนใช้
 	local hatching: { SlotView } = table.create(HATCH_SLOTS)
+	local stuckHatchCount = 0
 	for index = 1, HATCH_SLOTS do
 		local slot = data.hatching[index]
 		-- ⚠️ ใช้ type() ไม่ใช่ `~= false` — Luau ขยาย `X | false` เป็น `X | boolean`
 		-- ทำให้เทียบกับ false แล้วไม่แคบลง แต่ type() แคบลงได้เสมอ
 		if type(slot) == "table" then
 			local eggType = Config.getEgg(slot.eggId)
+			local stuck = now >= slot.hatchAt
+			if stuck then
+				stuckHatchCount += 1
+			end
 			hatching[index] = {
 				occupied = true,
 				eggId = slot.eggId,
@@ -205,6 +218,7 @@ local function buildSyncPayload(data: Data)
 				weightText = Config.formatWeight(slot.weight),
 				remaining = math.max(0, slot.hatchAt - now),
 				total = math.max(1, slot.hatchAt - slot.startedAt),
+				stuck = stuck,
 			}
 		else
 			hatching[index] = { occupied = false }
@@ -248,10 +262,15 @@ local function buildSyncPayload(data: Data)
 		hatcherySize = HATCH_SLOTS,
 		mothersInPen = pen,
 		mothersInBag = bag,
+		penLevel = data.penLevel,
 		penCapacity = Config.getPenCapacity(data.penLevel),
+		penUpgradeCost = Config.getPenUpgradeCost(data.penLevel), -- nil = เต็มเพดานแล้ว
 		bagCapacity = Config.Balance.Bag.CAPACITY,
 		coins = data.currency.coins,
 		children = children,
+		-- ⚠️ ข้อ D: จำนวนแม่ที่ฟักเสร็จแล้วแต่ยังค้างในสวนฟักเพราะคอก+กระเป๋าเต็มพร้อมกัน
+		-- client ใช้ค่านี้โชว์ข้อความ "กระเป๋าแม่เต็ม ขายแม่บางตัวเพื่อรับแม่ที่ฟักเสร็จแล้ว" (ยังไม่ทำ UI เฟสนี้)
+		stuckHatchCount = stuckHatchCount,
 	}
 end
 
@@ -267,10 +286,13 @@ end
 -- ฟักไข่
 --------------------------------------------------------------------------------
 
+-- ⚠️ ข้อ D (data-schema §13): คอก+กระเป๋าเต็มพร้อมกันตอนไข่ครบเวลาฟักพอดี
+-- แก้โดย **ไม่แตะ schema เลย**: ถ้าวางแม่ไม่ได้ ให้ return เฉย ๆ โดยไม่เคลียร์ data.hatching[slotIndex]
+-- และไม่ hideEgg — ไข่ฟองนั้นค้างอยู่ในสวนฟักเหมือนเดิมทุกอย่าง (โมเดลยังโชว์ ยังนับเป็นไข่ที่ฟักอยู่)
+-- แค่ตอนนี้ "ครบเวลาแล้วแต่ยังไม่มีที่ให้ไปต่อ" — ตัวจับเวลาผ่าน 0 แล้วค้างที่ 0
+-- รอบ tick ถัดไป / ตอนมีที่ว่างเปิด (ขายแม่ · อัปคอก · ย้ายแม่) จะเรียก hatch() ซ้ำที่ slot นี้เอง
+-- (processReadyHatchSlots เห็น slot นี้ครบเวลาแล้วเสมอ จนกว่าจะวางสำเร็จจริง) ไม่ใช่บั๊ก เป็นการรอที่ตั้งใจ
 local function hatch(player: Player, data: Data, slotIndex: number, slot: HatchSlot)
-	data.hatching[slotIndex] = false
-	PenService.hideEgg(player, slotIndex)
-
 	-- ⚠️ ตัวละครสุ่มไว้แล้วตั้งแต่ตอนวางไข่ลงสวนฟัก (EggService.placeEgg) อ่านจาก slot.charId
 	-- ตรง ๆ ไม่สุ่มใหม่ตรงนี้ — สุ่มใหม่จะทำให้เวลาฟักที่คำนวณไว้ตอนวาง (จากคลาสที่สุ่มได้ตอนนั้น)
 	-- ไม่ตรงกับคลาสที่ได้จริงตอนฟัก
@@ -281,14 +303,32 @@ local function hatch(player: Player, data: Data, slotIndex: number, slot: HatchS
 	local charId = slot.charId or Config.rollCharacter(slot.eggId, rng)
 	if not charId then
 		warn(`[EggService] ไข่ "{slot.eggId}" ไม่มีตารางคลาส ฟักไม่ได้`)
+		-- ⚠️ เคสนี้ต่างจากข้อ D: แก้ด้วยการรอไม่ได้ (ตารางคลาสหายไปจริง ไม่ใช่แค่ที่เต็มชั่วคราว)
+		-- เคลียร์ช่องทิ้งเหมือนพฤติกรรมเดิม กันไข่ค้างค้างอยู่ตลอดไปโดยไม่มีทางแก้
+		data.hatching[slotIndex] = false
+		PenService.hideEgg(player, slotIndex)
 		return
 	end
 
 	local character = Config.getCharacter(charId)
 	if not character then
 		warn(`[EggService] ตารางคลาสของไข่ "{slot.eggId}" ชี้ไปที่ตัวละคร "{charId}" ที่ไม่มีอยู่`)
+		data.hatching[slotIndex] = false
+		PenService.hideEgg(player, slotIndex)
 		return
 	end
+
+	-- ⚠️ เช็คที่ว่างก่อนเคลียร์ช่อง/ซ่อนโมเดลไข่เสมอ (ข้อ D) — ถ้าเต็มทั้งคู่ ไม่แตะอะไรเลย
+	-- แล้วปล่อยให้ tick ถัดไปหรือ event ที่เปิดที่ว่าง (ขาย/อัปคอก/ย้ายแม่) มาเรียกซ้ำเอง
+	local penFull = #data.mothersInPen >= Config.getPenCapacity(data.penLevel)
+	local bagFull = #data.mothersInBag >= Config.Balance.Bag.CAPACITY
+	if penFull and bagFull then
+		return
+	end
+
+	-- ผ่านจุดนี้แปลว่าวางแม่ได้แน่นอน — ค่อยเคลียร์ช่อง/ซ่อนโมเดลไข่
+	data.hatching[slotIndex] = false
+	PenService.hideEgg(player, slotIndex)
 
 	local mother: Mother = {
 		uid = Config.makeUid(player.UserId, data.nextUid),
@@ -299,25 +339,23 @@ local function hatch(player: Player, data: Data, slotIndex: number, slot: HatchS
 		-- ต่างกันได้ถึง 8 ชั่วโมงตอนผู้เล่นล็อกอินกลับมาแล้วเช็คไข่ที่ค้างจากตอนออฟไลน์
 		-- (docs/data-schema.md §5.3) ถ้าใช้ os.time() แม่ตัวนี้จะไม่ได้เครดิตผลิตย้อนหลังเลย
 		-- ทั้งที่ควรได้ตั้งแต่วินาทีที่ไข่ครบเวลาจริง ไม่ใช่วินาทีที่ผู้เล่นเข้าเกม
+		--
+		-- ⚠️ ข้อ D: ถ้าแม่ตัวนี้เพิ่งค้างมาก่อน (เต็มตอนฟักเสร็จรอบแรก) ก็ยังใช้ hatchAt เดิมนี้
+		-- ไม่ใช่เวลาที่วางสำเร็จจริง — เพดานออฟไลน์ 8 ชม. ของ ProductionService ครอบไว้อยู่แล้ว
+		-- จึงไม่มีทางได้เครดิตเกินจริงแม้จะค้างอยู่นานกว่านั้น
 		obtainedAt = slot.hatchAt,
 		locked = false,
 	}
 	data.nextUid += 1
 
-	-- คอกมีที่ว่างก็เข้าคอก (ผลิตได้) ไม่งั้นเข้ากระเป๋า
 	local placedIn: string
-	if #data.mothersInPen < Config.getPenCapacity(data.penLevel) then
+	if not penFull then
 		mother.lastProducedAt = slot.hatchAt
 		table.insert(data.mothersInPen, mother)
 		placedIn = "pen"
-	elseif #data.mothersInBag < Config.Balance.Bag.CAPACITY then
+	else
 		table.insert(data.mothersInBag, mother)
 		placedIn = "bag"
-	else
-		-- คอกและกระเป๋าเต็มทั้งคู่ — แม่ตัวนี้หายไป
-		-- ⚠️ Phase 2B ต้องเปลี่ยนเป็น "ค้างไว้ในสวนจนกว่าจะมีที่ว่าง" (data-schema §13 ข้อ D)
-		warn(`[EggService] {player.Name} คอกและกระเป๋าเต็ม แม่ที่ฟักได้หายไป`)
-		return
 	end
 
 	data.stats.eggsHatched += 1
@@ -348,10 +386,29 @@ end
 -- และตอน login เพื่อ "ตามให้ทัน" ไข่ที่ครบเวลาไปแล้วระหว่างออฟไลน์
 -- ⚠️ ต้องเรียกตัวนี้ก่อน settle การผลิตเสมอ (docs/data-schema.md §5.3) ไม่งั้นแม่ที่เพิ่งฟัก
 -- ออกมาระหว่างช่วงออฟไลน์จะไม่ได้รับเครดิตผลิตย้อนหลังของตัวเองเลย
+--
+-- ⚠️ ตัวนี้ยังเป็นจุดเดียวที่ "ลองย้ายแม่ที่ค้างอยู่" (ข้อ D) เข้าคอก/กระเป๋าด้วย — เรียกซ้ำได้
+-- ปลอดภัยเสมอ (slot ที่วางสำเร็จแล้วเป็น false ไปแล้ว จะไม่ถูกแตะซ้ำ)
+--
+-- ⚠️ ต้องเรียง slot ตาม hatchAt (น้อยสุดก่อน) ไม่ใช่ตาม slotIndex ตรง ๆ — สำคัญตอนคอก+กระเป๋า
+-- เต็มพร้อมกันและมีหลายฟองค้างพร้อมกัน (ข้อ D) ต้องได้คิวตามลำดับฟักเสร็จก่อน-หลังจริง
+-- ไม่ใช่ตามเลขช่องในสวนฟักซึ่งไม่มีความหมายเชิงเวลาเลย
 local function processReadyHatchSlots(player: Player, data: Data, nowValue: number)
+	local readySlots: { number } = {}
 	for slotIndex = 1, HATCH_SLOTS do
 		local slot = data.hatching[slotIndex]
 		if type(slot) == "table" and nowValue >= slot.hatchAt then
+			table.insert(readySlots, slotIndex)
+		end
+	end
+
+	table.sort(readySlots, function(a, b)
+		return (data.hatching[a] :: HatchSlot).hatchAt < (data.hatching[b] :: HatchSlot).hatchAt
+	end)
+
+	for _, slotIndex in readySlots do
+		local slot = data.hatching[slotIndex]
+		if type(slot) == "table" then
 			hatch(player, data, slotIndex, slot)
 		end
 	end
@@ -518,8 +575,92 @@ function EggService.moveMother(player: Player, rawUid: unknown, rawTarget: unkno
 		table.insert(data.mothersInBag, mother)
 	end
 
+	-- ⚠️ ย้ายแม่ = เปิดที่ว่างอีกฝั่งเสมอ (เข้าคอกเปิดที่ว่างในกระเป๋า / เข้ากระเป๋าเปิดที่ว่างในคอก)
+	-- ลองย้ายแม่ที่ค้างในสวนฟักมาเข้าทันที เผื่อพอดีมีของรออยู่ (ข้อ D — data-schema §13)
+	processReadyHatchSlots(player, data, os.time())
+
 	PenService.refreshMothers(player, data.mothersInPen)
 	EggService.sync(player)
+	return true, nil
+end
+
+--------------------------------------------------------------------------------
+-- อัปเกรดคอก
+--------------------------------------------------------------------------------
+
+-- ไม่มีพารามิเตอร์ — อัปคอกของผู้เล่นเองขึ้น 1 ขั้นเสมอ ใช้ตาราง Config.Balance.Pen ตรง ๆ
+function EggService.upgradePen(player: Player): (boolean, string?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น"
+	end
+
+	local cost = Config.getPenUpgradeCost(data.penLevel)
+	if not cost then
+		return false, "คอกเต็มเพดานแล้ว"
+	end
+	if data.currency.coins < cost then
+		return false, "เงินไม่พอ"
+	end
+
+	-- ⚠️ หักเงิน + เพิ่มเลเวลต้องทำพร้อมกันไม่มี yield คั่นกลาง (ไม่มี task.wait ระหว่างสองบรรทัดนี้)
+	-- กันเคส "หักเงินแล้วแต่เลเวลไม่ขึ้น" ถ้ามี error กลางทาง — Luau เป็น single-thread
+	-- ไม่มีจุด yield ระหว่างสองบรรทัดนี้เลย จึง atomic โดยธรรมชาติอยู่แล้ว
+	data.currency.coins -= cost
+	data.penLevel += 1
+
+	-- ⚠️ ความจุที่เพิ่มขึ้นมีผลทันทีอยู่แล้ว เพราะทุกจุดอ่าน Config.getPenCapacity(data.penLevel)
+	-- สด ๆ ทุกครั้ง (ไม่มีการ cache ความจุไว้ที่ไหน) — แต่ต้องลองดันแม่ที่ค้างเข้าคอกทันทีด้วย
+	-- เผื่อเพิ่งเปิดที่ว่างพอดี (ข้อ D)
+	processReadyHatchSlots(player, data, os.time())
+
+	PenService.refreshMothers(player, data.mothersInPen)
+	EggService.sync(player)
+
+	print(`[EggService] {player.Name} อัปเกรดคอกเป็น Lv{data.penLevel} (จ่าย {cost} coins)`)
+	return true, nil
+end
+
+--------------------------------------------------------------------------------
+-- ขายแม่ — เฉพาะแม่ในกระเป๋าเท่านั้น (ย้อนกลับไม่ได้)
+--------------------------------------------------------------------------------
+
+-- ⚠️ ขายได้เฉพาะแม่ใน mothersInBag เท่านั้น (เหมือนกฎเดิม "ส่งรบได้แค่จากกระเป๋า")
+-- กันขายพลาดตัวที่กำลังผลิตอยู่ในคอกโดยไม่ได้ตั้งใจ — อยากขายแม่ในคอกต้องย้ายออกมาก่อน
+function EggService.sellMother(player: Player, rawUid: unknown): (boolean, string?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น"
+	end
+
+	if type(rawUid) ~= "string" then
+		return false, "uid ไม่ใช่ string"
+	end
+
+	local mother = takeMother(data.mothersInBag, rawUid)
+	if not mother then
+		-- ข้อความช่วยเหลือ: บอกสาเหตุที่ชัดเจนกว่าถ้าแม่ตัวนี้อยู่ในคอกจริง (ไม่ใช่ข้อมูลของคนอื่น
+		-- เพราะเช็คแค่ในอาเรย์ของ player คนนี้เอง ไม่รั่วไหลข้อมูลข้ามบัญชี)
+		for _, m in data.mothersInPen do
+			if m.uid == rawUid then
+				return false, "แม่ตัวนี้อยู่ในคอก ต้องย้ายเข้ากระเป๋าก่อนถึงขายได้"
+			end
+		end
+		return false, "ไม่พบแม่ตัวนี้ในกระเป๋า"
+	end
+
+	-- ⚠️ คำนวณราคาฝั่ง server เท่านั้น — remote นี้รับแค่ uid ไม่มีพารามิเตอร์ราคาให้ client ส่งมาเอง
+	-- ใช้ Config.getMotherSellPrice() ตัวเดียวกับที่ Config เตรียมไว้แล้ว (สูตร §2 ในสรุปท้ายงาน)
+	local price = Config.getMotherSellPrice(mother.weight, data.wallProgress, mother.statuses)
+	data.currency.coins += price
+	data.stats.totalCoinsEarned += price
+
+	-- ⚠️ ขายแล้วเปิดที่ว่างในกระเป๋า ลองย้ายแม่ที่ค้างในสวนฟักมาเข้าทันที (ข้อ D)
+	processReadyHatchSlots(player, data, os.time())
+
+	EggService.sync(player)
+
+	print(`[EggService] {player.Name} ขายแม่ {mother.uid} ({Config.formatWeight(mother.weight)}) ได้ {price} coins`)
 	return true, nil
 end
 
@@ -747,6 +888,8 @@ end
 function EggService.start()
 	placeEggRequest = Remotes.waitFor(Config.RemoteNames.PLACE_EGG_IN_HATCHERY_REQUEST)
 	moveMotherRequest = Remotes.waitFor(Config.RemoteNames.MOVE_MOTHER_REQUEST)
+	upgradePenRequest = Remotes.waitFor(Config.RemoteNames.UPGRADE_PEN_REQUEST)
+	sellMotherRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHER_REQUEST)
 	eggHatched = Remotes.waitFor(Config.RemoteNames.EGG_HATCHED)
 	farmStateSync = Remotes.waitFor(Config.RemoteNames.FARM_STATE_SYNC)
 
@@ -761,6 +904,20 @@ function EggService.start()
 		local ok, reason = EggService.moveMother(player, rawUid, rawTarget)
 		if not ok then
 			print(`[EggService] ปฏิเสธคำขอย้ายแม่ของ {player.Name}: {reason}`)
+		end
+	end)
+
+	upgradePenRequest.OnServerEvent:Connect(function(player)
+		local ok, reason = EggService.upgradePen(player)
+		if not ok then
+			print(`[EggService] ปฏิเสธคำขออัปเกรดคอกของ {player.Name}: {reason}`)
+		end
+	end)
+
+	sellMotherRequest.OnServerEvent:Connect(function(player, rawUid)
+		local ok, reason = EggService.sellMother(player, rawUid)
+		if not ok then
+			print(`[EggService] ปฏิเสธคำขอขายแม่ของ {player.Name}: {reason}`)
 		end
 	end)
 

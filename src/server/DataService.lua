@@ -74,6 +74,20 @@ local cache: { [number]: Data } = {}
 -- กันเซฟซ้อนของผู้เล่นคนเดียวกัน (autosave ชนกับตอนออกเกม)
 local saving: { [number]: boolean } = {}
 
+-- ⚠️ log ให้เห็น "อะไรถูกเขียนลงไปจริง" ไม่ใช่แค่ "เซฟสำเร็จ"
+-- บั๊กข้อมูลหายรอบก่อนใช้เวลาไล่นาน เพราะ log บอกแค่ว่าเซฟผ่าน
+-- แต่ไม่บอกว่าสิ่งที่เซฟมีแม่กี่ตัว
+local function describe(data: Data): string
+	local hatching = 0
+	for _, slot in data.hatching do
+		if type(slot) == "table" then
+			hatching += 1
+		end
+	end
+	return `แม่ในคอก {#data.mothersInPen} · กระเป๋า {#data.mothersInBag} · `
+		.. `ไข่ฟัก {hatching} · ไข่ในกระเป๋า {#data.heldEggs.items}`
+end
+
 --------------------------------------------------------------------------------
 -- ตั้งค่า
 --------------------------------------------------------------------------------
@@ -234,6 +248,7 @@ function DataService.loadAsync(userId: number): (Data?, string?, boolean)
 	end
 
 	cache[userId] = loaded
+	print(`[DataService] โหลด {userId} สำเร็จ · {if isNew then "ผู้เล่นใหม่" else "ผู้เล่นเก่า"} · {describe(loaded)}`)
 	return loaded, nil, isNew
 end
 
@@ -336,6 +351,11 @@ function DataService.saveAsync(userId: number, releaseLock: boolean, deadline: n
 		return false, tostring(err)
 	end
 
+	print(
+		`[DataService] เซฟ {userId} สำเร็จ · {if releaseLock then "รอบสุดท้าย (ปลด lock)" else "autosave"} · `
+			.. describe(data)
+	)
+
 	if releaseLock then
 		cache[userId] = nil
 	end
@@ -385,21 +405,42 @@ end
 
 -- ⚠️ Roblox ให้เวลา 30 วินาทีแล้วปิดทิ้งไม่ว่าจะเซฟเสร็จหรือไม่
 -- เซฟทุกคน **พร้อมกัน** ไม่ใช่ไล่ทีละคน — ไล่ทีละคนที่ 6 คนอาจไม่ทันคนท้าย ๆ
+-- ใครบ้างที่ยังมีข้อมูลค้างและต้องเซฟก่อนเซิร์ฟปิด
+--
+-- ⚠️⚠️ อ่านจาก **แคช** ไม่ใช่ `Players:GetPlayers()` — นี่คือความต่างที่ทำข้อมูลหาย
+-- ตอนผู้เล่นคนสุดท้ายกด Leave ลำดับเหตุการณ์คือ:
+--   1. PlayerRemoving ยิง → เซฟรอบสุดท้ายเริ่ม แล้วค้างอยู่ใน UpdateAsync
+--   2. Roblox เริ่มปิดเซิร์ฟ → BindToClose ยิง
+--   3. ถึงตอนนี้ `Players:GetPlayers()` **ว่างไปแล้ว**
+-- โค้ดเดิมเจอว่างแล้ว return ทันที → เซิร์ฟตายทับเซฟที่ยังวิ่งอยู่
+-- = ได้อาการเดียวกับบั๊กเซฟซ้อนเป๊ะ (ของที่ได้มาหลัง autosave รอบสุดท้ายหายหมด)
+function DataService.pendingOnClose(): { number }
+	local pending: { number } = {}
+	for userId in cache do
+		table.insert(pending, userId)
+	end
+	return pending
+end
+
 function DataService.saveAllOnClose()
-	local Players = game:GetService("Players")
 	local deadline = now() + DS.BIND_TO_CLOSE_SECONDS
 
-	local players = Players:GetPlayers()
-	if #players == 0 then
+	-- ⚠️ `saveAsync` ที่ releaseLock = true จะรอรอบที่ค้างอยู่ให้จบเองแล้วเขียนทับ
+	-- จึงเรียกซ้ำได้ปลอดภัย ไม่ต้องกลัวไปแย่งกับรอบที่กำลังวิ่ง
+	local pending = DataService.pendingOnClose()
+	if #pending == 0 then
 		return
 	end
 
-	print(`[DataService] เซิร์ฟเวอร์กำลังปิด — เซฟ {#players} คน`)
+	print(`[DataService] เซิร์ฟเวอร์กำลังปิด — ยังมีข้อมูลค้าง {#pending} คน`)
 
-	local remaining = #players
-	for _, player in players do
+	local remaining = #pending
+	for _, userId in pending do
 		task.spawn(function()
-			DataService.saveAsync(player.UserId, true, deadline)
+			-- เซฟรอบสุดท้ายของเขาอาจจบไปแล้วระหว่างนี้ — แคชว่างแล้วก็ไม่ต้องทำอะไร
+			if cache[userId] then
+				DataService.saveAsync(userId, true, deadline)
+			end
 			remaining -= 1
 		end)
 	end

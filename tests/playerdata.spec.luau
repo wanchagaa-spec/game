@@ -582,4 +582,48 @@ return function(t, Config)
 	check("เข้าใหม่แล้วไม่มีไข่ค้าง", if rejoined then rejoined.hatching[1] else nil, false)
 
 	-- ⚠️ autosave (ไม่ใช่รอบสุดท้าย) ยังข้ามได้เหมือนเดิม — รอบที่ค้างอยู่เขียนข้อมูลชุดเดียวกัน
+
+	----------------------------------------------------------------------------
+	-- 🔴 บั๊กพี่น้องกัน: ผู้เล่นคนสุดท้ายออก → เซิร์ฟปิดทับเซฟที่ยังไม่จบ
+	----------------------------------------------------------------------------
+	-- ลำดับเหตุการณ์ตอนคนสุดท้ายกด Leave:
+	--   1. PlayerRemoving ยิง → เซฟรอบสุดท้ายเริ่ม แล้วค้างอยู่ใน UpdateAsync
+	--   2. Roblox เริ่มปิดเซิร์ฟ → BindToClose ยิง
+	--   3. ถึงตอนนี้ `Players:GetPlayers()` **ว่างไปแล้ว**
+	--
+	-- โค้ดเดิมไล่จากรายชื่อผู้เล่น เจอว่าง แล้ว return ทันที
+	-- → เซิร์ฟตายทับเซฟที่ยังวิ่งอยู่ → ได้อาการเดียวกับบั๊กข้างบนเป๊ะ (แม่หาย ไข่กลับมา)
+	print("── ปิดเซิร์ฟตอนคนสุดท้ายเพิ่งออก ──")
+
+	local closeStore = { data = {} }
+	function closeStore.UpdateAsync(_self, key, transform)
+		local result = transform(closeStore.data[key])
+		if result ~= nil then
+			closeStore.data[key] = deepCopy(result)
+		end
+		return result
+	end
+	function closeStore.GetAsync(_self, key)
+		return closeStore.data[key]
+	end
+
+	DataService.injectForTests({
+		store = closeStore,
+		sleep = function() end,
+		now = function() return 3000000 end,
+		jobId = function() return "server-A" end,
+	})
+
+	local LAST_USER = 4242424
+	DataService.loadAsync(LAST_USER)
+
+	-- ⚠️ นี่คือหัวใจ: ผู้เล่นออกจากเกมไปแล้ว (ไม่อยู่ใน Players:GetPlayers() อีกต่อไป)
+	-- แต่ข้อมูลยังค้างอยู่ในแคชเพราะเซฟรอบสุดท้ายยังไม่จบ
+	local toSave = DataService.pendingOnClose()
+	check("ตอนปิดเซิร์ฟยังเห็นคนที่ออกไปแล้วแต่เซฟไม่จบ", #toSave, 1)
+	check("และเป็นคนที่ถูกต้อง", toSave[1], LAST_USER)
+
+	-- เซฟจบแล้วต้องไม่เหลือใครให้ทำอีก
+	DataService.saveAsync(LAST_USER, true)
+	check("เซฟจบแล้วไม่เหลือใครค้าง", #DataService.pendingOnClose(), 0)
 end

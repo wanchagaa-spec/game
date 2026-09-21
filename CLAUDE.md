@@ -469,6 +469,9 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   `BIND_TO_CLOSE_SECONDS` (ต้อง < 30 · Roblox ตัดที่ 30) · `MAX_PLAYER_DATA_BYTES` ·
   `SAVE_WAIT_LIMIT` / `SAVE_WAIT_STEP`
   ⚠️ `validate()` ผูกค่าพวกนี้เข้าหากันแล้ว — lock ต้องยาวกว่ารอบเซฟที่ช้าสุด ฯลฯ
+- ⚠️⚠️ **ตอนปิดเซิร์ฟต้องไล่จากแคช ไม่ใช่ `Players:GetPlayers()`** (`DataService.pendingOnClose`)
+  ตอนคนสุดท้ายกด Leave, `PlayerRemoving` ยิงก่อน `BindToClose` เสมอ → รายชื่อผู้เล่นว่างไปแล้ว
+  แต่เซฟของเขายังค้างกลางทาง · ไล่จากรายชื่อ = เซิร์ฟตายทับเซฟที่ยังวิ่ง
 - ⚠️⚠️ **เซฟรอบสุดท้าย (ออกเกม/ปิดเซิร์ฟ) ต้องรอรอบที่ค้างอยู่ให้จบ ห้ามข้าม**
   ตัวกัน "เซฟซ้อน" ใช้ได้กับ autosave เท่านั้น · ข้ามเมื่อไหร่ = ของที่ได้มาหลัง autosave รอบนั้นหายหมด
   และ `sessionLock` ไม่ถูกปลดด้วย (เข้าเกมใหม่ไม่ได้ 5 นาที) — เคยเกิดจริง ดู `docs/data-schema.md` §9.4

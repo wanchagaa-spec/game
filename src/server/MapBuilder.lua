@@ -271,18 +271,12 @@ function MapBuilder.buildPlaza(parent: Folder)
 	local halfDepth = Config.getPlazaHalfDepth()
 	makeFloor("GrassFloor", maxX - minX, halfDepth * 2, (minX + maxX) / 2, 0, COLORS.grass, plaza)
 
-	-- ทางเดินกลาง — **เป็นหญ้าเหมือนพื้นรอบข้าง ไม่มีเส้นแบ่งให้เห็น**
-	-- เดิมเป็นแถบพื้นเทาซึ่งอ่านเป็น "ถนน" ทั้งที่มันคือลานหญ้าผืนเดียวกัน
-	-- ตัวแถบยังอยู่เพื่อใช้วางแนวคอก 2 แถวเหมือนเดิม แค่กลืนไปกับพื้น
-	local walk = makePart(
-		"Walkway",
-		Vector3.new(maxX - minX, 0.2, MAP.Pen.RowGap),
-		Vector3.new((minX + maxX) / 2, 0, 0),
-		COLORS.grass,
-		plaza
-	)
-	walk.Material = Enum.Material.Grass
-	walk.CanCollide = false
+	-- ⚠️ **ไม่มี Part ของทางเดินกลางแล้ว** — ลบทิ้งตอนไล่บั๊กภาพกระพริบ
+	-- มันเคยเป็นแถบเทาที่อ่านเป็น "ถนน" แล้วถูกเปลี่ยนเป็นหญ้าให้กลืนกับพื้น
+	-- พอสีและวัสดุเหมือนพื้นเป๊ะ มันก็ไม่เหลืออะไรให้ดูอีก — เป็นแค่แผ่นบาง ๆ
+	-- วางทาบอยู่บนพื้นหญ้าเฉย ๆ คอยกวนสายตาด้วยการกระพริบ
+	-- ความกว้างทางเดิน (`Pen.RowGap`) ยังคุมระยะห่างสองแถวคอกอยู่เหมือนเดิม
+	-- เพราะตำแหน่งคอกมาจาก `Config.getPenPlotCenter()` ไม่ได้มาจาก Part นี้
 
 	-- ══ คอก 6 แปลง ══ พื้นในคอกเป็นหญ้าทั้งหมด **ไม่มีแปลงหรือช่องตาราง**
 	local pens = Instance.new("Folder")
@@ -404,8 +398,32 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	local startX = Config.getLaneStartX()
 	local endX = Config.getLaneEndX()
 
-	-- พื้นเลน (ช่วงปกติ กว้าง LANE_WIDTH) — ส่วนที่ผายออกอยู่กับห้องบอส
-	makeFloor("LaneFloor", endX - startX, MAP.Lane.Width, (startX + endX) / 2, 0, COLORS.lane, lane)
+	-- ══ พื้นเลน ══ **สร้างเป็นช่วง ๆ เว้นตรงห้องบอส**
+	--
+	-- ⚠️ เดิมเป็นแผ่นเดียวยาวตลอดเลน แล้วพื้นห้องบอส (80 x 80) มาวางทับ
+	-- ผิวบนของทั้งสองแผ่นอยู่ที่ Y = 0 เท่ากันเป๊ะ = **ระนาบเดียวกัน 9 จุด รวม 43,200 ตร.studs**
+	-- การ์ดจอเลือกไม่ได้ว่าจะวาดแผ่นไหนทับ → ภาพกระพริบสลับไปมาตามมุมกล้อง (z-fighting)
+	--
+	-- แก้ด้วยการ "ไม่วาดซ้อน" ไม่ใช่ขยับความสูงหนีกัน
+	-- ขยับความสูงแปลว่ามีขั้นให้สะดุด และของที่วางบนพื้นจะลอยหรือจม
+	-- ห้องบอสกว้างกว่าเลนอยู่แล้ว (80 > 60) ช่วงที่เว้นไว้จึงถูกพื้นห้องบอสคลุมเต็มพอดี
+	-- ⚠️ ชื่อ floorCursor ไม่ใช่ cursor เฉย ๆ เพราะตัวสร้างกำแพงข้างล่างมี cursor ของตัวเอง
+	local roomHalfSpan = MAP.BossRoom.Size.X / 2
+	local floorCursor = startX
+
+	local function laneSegment(fromX: number, toX: number, index: number)
+		if toX - fromX <= 0 then
+			return
+		end
+		makeFloor(`LaneFloor{index}`, toX - fromX, MAP.Lane.Width, (fromX + toX) / 2, 0, COLORS.lane, lane)
+	end
+
+	for stage = 1, Config.Balance.Stage.COUNT do
+		local center = Config.getBossNestCenter(stage)
+		laneSegment(floorCursor, center.X - roomHalfSpan, stage)
+		floorCursor = math.max(floorCursor, center.X + roomHalfSpan)
+	end
+	laneSegment(floorCursor, endX, Config.Balance.Stage.COUNT + 1)
 
 	-- ══ กำแพงสองข้างทาง ══ เดินเป็นขั้นตรงห้องบอสที่กว้างกว่าเลน
 	local walls = Instance.new("Folder")
@@ -622,11 +640,46 @@ function MapBuilder.buildSpawns(parent: Folder)
 	end
 end
 
+-- ⚠️ ของที่ต้องเก็บไว้เสมอ — ลบแล้วเอนจินสร้างใหม่ให้ แต่ระหว่างนั้นภาพและกล้องพัง
+local KEEP_IN_WORKSPACE: { [string]: boolean } = {
+	Terrain = true,
+	Camera = true,
+}
+
+-- ล้างของที่ไม่ใช่ของเราออกจาก Workspace ก่อนสร้างแมพ
+--
+-- ⚠️ ทำไมต้องมี: ไฟล์ place ที่เคยสร้างจาก template ของ Studio จะมี **Baseplate**
+-- (พื้นเทา 512 x 512) กับ SpawnLocation ติดมาด้วย ของพวกนั้นไม่ได้หายไปไหน
+-- ตอน MapBuilder สร้างแมพ เพราะเราแค่ "เพิ่ม" โฟลเดอร์เข้าไป ไม่เคยลบอะไรเลย
+-- ผลคือเห็นพื้นเทาโผล่รอบขอบแมพที่เราสร้าง
+--
+-- ⚠️ แมพทั้งใบมาจากสคริปต์ 100% (กฎในCLAUDE.md) ดังนั้น **ทุกอย่างใน Workspace
+-- ที่ไม่ใช่ของเราคือของหลงเหลือ** ล้างได้อย่างปลอดภัย และควรล้างด้วย
+-- ไม่งั้นไฟล์ place ของแต่ละคนจะมีของติดมาไม่เท่ากันแล้วเห็นภาพคนละแบบ
+local function clearForeignObjects()
+	local removed: { string } = {}
+
+	for _, child in Workspace:GetChildren() do
+		-- ข้ามตัวละครผู้เล่น เผื่อมีใครเข้ามาก่อนแมพสร้างเสร็จ
+		local isCharacter = child:FindFirstChildOfClass("Humanoid") ~= nil
+		if not KEEP_IN_WORKSPACE[child.ClassName] and not isCharacter then
+			table.insert(removed, `{child.Name} ({child.ClassName})`)
+			child:Destroy()
+		end
+	end
+
+	if #removed > 0 then
+		print(`[MapBuilder] ล้างของเดิมใน Workspace {#removed} ชิ้น: {table.concat(removed, ", ")}`)
+	end
+end
+
 function MapBuilder.build()
 	if built then
 		return
 	end
 	built = true
+
+	clearForeignObjects()
 
 	local folder = Instance.new("Folder")
 	folder.Name = "Map"

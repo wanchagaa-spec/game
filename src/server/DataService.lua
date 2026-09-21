@@ -249,8 +249,42 @@ function DataService.saveAsync(userId: number, releaseLock: boolean, deadline: n
 		return false, "ไม่มีข้อมูลในหน่วยความจำ (โหลดไม่สำเร็จตั้งแต่แรก?)"
 	end
 
+	-- ⚠️⚠️ รอบเซฟซ้อนกัน — จุดนี้เคยทำข้อมูลผู้เล่นหายจริงมาแล้ว
+	--
+	-- เดิมเขียนว่า "ถ้ากำลังเซฟอยู่ ก็ไม่ต้องทำอะไร" ซึ่งถูกสำหรับ autosave
+	-- แต่ **ผิดมหันต์สำหรับเซฟรอบสุดท้าย** ตอนผู้เล่นออกจากเกม:
+	--
+	--   t+60.0  autosave เริ่ม · UpdateAsync ค้างระหว่างยิงข้ามเน็ต
+	--   t+60.2  transform ทำงาน → Roblox ตรึง snapshot ไว้ ณ วินาทีนั้น (ยังไม่ฟัก)
+	--   t+60.5  ไข่ฟักเสร็จ → แม่เข้าคอก (อยู่ในหน่วยความจำเท่านั้น)
+	--   t+60.6  ผู้เล่นกด Leave → เซฟรอบสุดท้ายเห็น saving[] เป็น true → **ไม่ทำอะไรเลย**
+	--   t+60.7  forget() ทิ้งข้อมูลในหน่วยความจำ
+	--   t+60.8  autosave เขียน snapshot เก่าลง DataStore
+	--   → แม่หายไป ไข่กลับมาค้างในสวนฟัก และ session lock ไม่ถูกปลด
+	--
+	-- เซฟรอบสุดท้ายจึงต้อง **รอ** รอบก่อนหน้าให้จบ แล้วค่อยเขียนทับด้วยของจริง
+	-- ส่วน autosave ข้ามได้ตามเดิม เพราะรอบที่ค้างอยู่ก็เขียนข้อมูลชุดเดียวกัน
+	local isFinalSave = releaseLock
 	if saving[userId] then
-		return false, "กำลังเซฟอยู่แล้ว"
+		if not isFinalSave then
+			return false, "กำลังเซฟอยู่แล้ว"
+		end
+
+		local waited = 0
+		while saving[userId] do
+			if deadline and now() >= deadline then
+				logWarn(`[DataService] {userId} หมดเวลารอรอบเซฟก่อนหน้าตอนปิดเซิร์ฟ`)
+				return false, "หมดเวลารอรอบเซฟก่อนหน้า"
+			end
+			if waited >= DS.SAVE_WAIT_LIMIT then
+				-- ⚠️ ค้างนานขนาดนี้แปลว่า thread ที่เซฟอยู่ตายกลางคัน
+				-- ยอมเขียนทับดีกว่าปล่อยให้ข้อมูลหาย — ของในมือใหม่กว่าเสมอ
+				logWarn(`[DataService] {userId} รอรอบเซฟก่อนหน้าเกิน {DS.SAVE_WAIT_LIMIT} วิ — เซฟทับเลย`)
+				break
+			end
+			sleep(DS.SAVE_WAIT_STEP)
+			waited += DS.SAVE_WAIT_STEP
+		end
 	end
 	saving[userId] = true
 

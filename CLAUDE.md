@@ -466,8 +466,12 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   ถอดออกเมื่อไหร่ = สองเซิร์ฟเวอร์ถือข้อมูลคนละชุด ใครเซฟทีหลังทับของอีกคนทั้งชุด
 - **`Config.DataStore`** — `NAME` / `KEY_PREFIX` (เปลี่ยน = ผู้เล่นเก่าหาข้อมูลตัวเองไม่เจอ) ·
   `SESSION_LOCK_SECONDS` · `AUTOSAVE_INTERVAL` / `AUTOSAVE_STAGGER` · `RETRY_*` ·
-  `BIND_TO_CLOSE_SECONDS` (ต้อง < 30 · Roblox ตัดที่ 30) · `MAX_PLAYER_DATA_BYTES`
+  `BIND_TO_CLOSE_SECONDS` (ต้อง < 30 · Roblox ตัดที่ 30) · `MAX_PLAYER_DATA_BYTES` ·
+  `SAVE_WAIT_LIMIT` / `SAVE_WAIT_STEP`
   ⚠️ `validate()` ผูกค่าพวกนี้เข้าหากันแล้ว — lock ต้องยาวกว่ารอบเซฟที่ช้าสุด ฯลฯ
+- ⚠️⚠️ **เซฟรอบสุดท้าย (ออกเกม/ปิดเซิร์ฟ) ต้องรอรอบที่ค้างอยู่ให้จบ ห้ามข้าม**
+  ตัวกัน "เซฟซ้อน" ใช้ได้กับ autosave เท่านั้น · ข้ามเมื่อไหร่ = ของที่ได้มาหลัง autosave รอบนั้นหายหมด
+  และ `sessionLock` ไม่ถูกปลดด้วย (เข้าเกมใหม่ไม่ได้ 5 นาที) — เคยเกิดจริง ดู `docs/data-schema.md` §9.4
 - **`productId` ของ Developer Product และการจัดการ `ProcessReceipt`** — พลาดแล้ว
   ผู้เล่นจ่ายเงินจริงแล้วไม่ได้ของ หรือได้ของซ้ำจากการจ่ายครั้งเดียว
 - **`Config.Balance.SpeedUpgrade`** — ราคา/จำนวนขั้น/`CURVE_EXPONENT`/`MAX_MULTIPLIER`/`SPEED_CEILING`

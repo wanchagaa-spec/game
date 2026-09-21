@@ -515,6 +515,13 @@ Config.DataStore = {
 	-- เผื่อไว้ 25 เพื่อให้มีจังหวะ log ก่อนถูกตัด
 	BIND_TO_CLOSE_SECONDS = 25,
 
+	-- ⚠️ เซฟรอบสุดท้าย (ตอนออกเกม/ปิดเซิร์ฟ) ต้อง **รอ** รอบที่ค้างอยู่ให้จบก่อน ห้ามข้าม
+	-- เคยเป็นบั๊กจริง: autosave ค้างอยู่ระหว่างยิงข้ามเน็ต ผู้เล่นกดออกพอดี
+	-- เซฟรอบสุดท้ายเห็นว่า "กำลังเซฟอยู่แล้ว" เลยไม่ทำอะไรเลย แล้วข้อมูลถูกทิ้ง
+	-- → ของที่ได้มาหลัง autosave รอบนั้นหายหมด และ session lock ก็ไม่ถูกปลดด้วย
+	SAVE_WAIT_LIMIT = 10, -- รอรอบก่อนหน้าได้นานสุดกี่วินาที
+	SAVE_WAIT_STEP = 0.2, -- เช็คซ้ำถี่แค่ไหนระหว่างรอ
+
 	-- ⚠️ ลิมิตจริงของ Roblox คือ 4 MB ต่อ 1 key · ตั้งเพดานตัวเองไว้ที่ 3 MB
 	-- เผื่อไว้เพราะตัวประเมินขนาดของเราไม่ใช่ตัว encode ตัวเดียวกับที่ Roblox ใช้จริง
 	-- `PlayerData.validate()` วัดข้อมูลที่เต็มทุกเพดานแล้วเทียบกับค่านี้ตอนบูต
@@ -3684,6 +3691,17 @@ function Config.validate()
 		"Config: BIND_TO_CLOSE_SECONDS ต้องน้อยกว่า 30 — Roblox ปิดเซิร์ฟทิ้งที่ 30 วินาที"
 	)
 	assert(store.MAX_PLAYER_DATA_BYTES < 4 * 1024 * 1024, "Config: MAX_PLAYER_DATA_BYTES ต้องต่ำกว่าลิมิตจริง 4 MB")
+
+	-- ⚠️ เวลารอรอบเซฟก่อนหน้าต้องสั้นกว่างบตอนปิดเซิร์ฟ
+	-- ไม่งั้นเซฟรอบสุดท้ายจะหมดเวลาไปกับการรอ แล้วไม่ได้เขียนอะไรเลย
+	assert(
+		store.SAVE_WAIT_LIMIT < store.BIND_TO_CLOSE_SECONDS,
+		`Config: SAVE_WAIT_LIMIT ({store.SAVE_WAIT_LIMIT}) ต้องสั้นกว่า BIND_TO_CLOSE_SECONDS ({store.BIND_TO_CLOSE_SECONDS})`
+	)
+	assert(
+		store.SAVE_WAIT_STEP > 0 and store.SAVE_WAIT_STEP < store.SAVE_WAIT_LIMIT,
+		"Config: SAVE_WAIT_STEP ต้องมากกว่า 0 และสั้นกว่า SAVE_WAIT_LIMIT"
+	)
 
 	-- ⚠️ กระเป๋าไข่ต้องจุไม่น้อยกว่าสวนฟัก
 	-- ไข่ต้องผ่านกระเป๋าก่อนเข้าสวนเสมอ ถ้ากระเป๋าเล็กกว่า จะมีช่องในสวนที่เติมไม่ได้ตลอดกาล

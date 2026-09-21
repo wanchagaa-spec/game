@@ -445,4 +445,141 @@ return function(t, Config)
 	print(`   คนที่ 1 เลื่อน 0 วิ · คนที่ {Config.World.MAX_PENS} เลื่อน {lastOffset} วิ · รอบละ {Config.DataStore.AUTOSAVE_INTERVAL} วิ`)
 
 	check("key ของ DataStore ไม่ยาวเกิน 50 ตัวอักษร", #DataService.keyFor(99999999999999) <= 50, true)
+
+	----------------------------------------------------------------------------
+	-- 🔴 บั๊กที่เคยทำข้อมูลผู้เล่นหายจริง: ฟักเสร็จแล้วแม่หาย ไข่กลับมาค้าง
+	----------------------------------------------------------------------------
+	-- อาการที่เจอในเกมจริง (แอป Roblox ไม่ใช่ Studio):
+	--   ฟักไข่ได้แม่ → เห็นแม่ในคอกชัด ๆ → รอเกิน 1 นาที → ออกจากเกม → เข้าใหม่
+	--   → แม่หายไป มีไข่ **น้ำหนักเท่าเดิมเป๊ะ** กลับมาค้างอยู่ในสวนฟักแทน
+	--
+	-- สาเหตุ: `saveAsync` เคยตอบว่า "กำลังเซฟอยู่แล้ว" แล้วไม่ทำอะไรเลย
+	-- ซึ่งถูกสำหรับ autosave แต่ผิดมหันต์สำหรับเซฟรอบสุดท้ายตอนผู้เล่นออกจากเกม
+	--
+	-- ⚠️ เทสต์นี้ต้องใช้ store ที่ **ค้างได้** เพราะบั๊กอยู่ที่จังหวะล้วน ๆ
+	-- store แบบทำงานจบในบรรทัดเดียว (ที่ใช้ในเทสต์ข้างบน) จับบั๊กนี้ไม่ได้เลย
+	print("── บั๊กเซฟซ้อน: ฟักเสร็จตอน autosave ค้าง แล้วออกจากเกม ──")
+
+	local function deepCopy(value)
+		if type(value) ~= "table" then
+			return value
+		end
+		local out = {}
+		for key, child in value do
+			out[key] = deepCopy(child)
+		end
+		return out
+	end
+
+	-- UpdateAsync ของ Roblox ค้างสองช่วง: ดึงค่าปัจจุบัน แล้วค่อยเขียนกลับ
+	-- ⚠️ Roblox แปลงค่าที่ transform คืนมาเป็น JSON **ทันทีที่ transform จบ**
+	-- = snapshot ถูกตรึงไว้ตรงนั้น สิ่งที่แก้หลังจากนั้นไม่เข้าไปในรอบนี้แล้ว
+	local pending: thread? = nil
+	local slowStore = { data = {} }
+	function slowStore.UpdateAsync(_self, key, transform)
+		pending = coroutine.running()
+		coroutine.yield() -- ช่วงดึงค่าปัจจุบัน
+		local result = transform(slowStore.data[key])
+		local frozen = if result ~= nil then deepCopy(result) else nil
+		coroutine.yield() -- ช่วงเขียนกลับ
+		if frozen ~= nil then
+			slowStore.data[key] = frozen
+		end
+		return result
+	end
+	function slowStore.GetAsync(_self, key)
+		return slowStore.data[key]
+	end
+
+	local slowClock = 2000000
+	DataService.injectForTests({
+		store = slowStore,
+		-- `task.wait` จริงคืนคิวให้ thread อื่นเดินต่อ — จำลองด้วยการปลุกรอบที่ค้างอยู่
+		sleep = function()
+			if pending and coroutine.status(pending) == "suspended" then
+				coroutine.resume(pending)
+			end
+		end,
+		now = function() return slowClock end,
+		jobId = function() return "server-A" end,
+	})
+
+	local HATCH_USER = 5551234
+	local hatchKey = "player_" .. HATCH_USER
+
+	local function pump(...)
+		for _, thread in { ... } do
+			if coroutine.status(thread) == "suspended" then
+				coroutine.resume(thread)
+			end
+		end
+	end
+
+	-- เข้าเกม
+	local joinCo = coroutine.create(function() DataService.loadAsync(HATCH_USER) end)
+	coroutine.resume(joinCo)
+	for _ = 1, 6 do
+		pump(pending :: any, joinCo)
+	end
+
+	local live = DataService.getCached(HATCH_USER)
+	check("โหลดข้อมูลเข้าแคชแล้ว", live ~= nil, true)
+
+	-- วางไข่ 224 kg เข้าสวนฟัก (น้ำหนักเดียวกับที่เจอในเกมจริง)
+	live.hatching[1] = { eggId = "egg_stage1", weight = 224, startedAt = slowClock, hatchAt = slowClock + 30 }
+
+	-- ══ autosave เริ่มทำงาน แล้วค้างอยู่กลางทาง ══
+	slowClock += 60
+	local autoCo = coroutine.create(function() DataService.saveAsync(HATCH_USER, false) end)
+	coroutine.resume(autoCo) -- ค้างที่ช่วงดึงค่า
+	coroutine.resume(pending :: any) -- transform ทำงาน (snapshot = ก่อนฟัก) แล้วค้างที่ช่วงเขียน
+
+	-- ══ ไข่ฟักเสร็จระหว่างนั้น — ลูป sync เป็นคนละ thread ══
+	local hatched = live.hatching[1]
+	live.hatching[1] = false
+	table.insert(live.mothersInPen, {
+		uid = Config.makeUid(HATCH_USER, live.nextUid),
+		charId = "horse",
+		weight = hatched.weight,
+		statuses = {},
+		obtainedAt = slowClock,
+		locked = false,
+		lastProducedAt = slowClock,
+	})
+	live.nextUid += 1
+	check("ในหน่วยความจำ: แม่เข้าคอกแล้ว", #live.mothersInPen, 1)
+	check("ในหน่วยความจำ: สวนฟักว่างแล้ว", live.hatching[1], false)
+
+	-- ══ ผู้เล่นกด Leave ระหว่างที่ autosave ยังค้าง ══
+	local leaveCo = coroutine.create(function() DataService.saveAsync(HATCH_USER, true) end)
+	coroutine.resume(leaveCo)
+	for _ = 1, 40 do
+		pump(pending :: any, autoCo, leaveCo)
+	end
+	DataService.forget(HATCH_USER)
+
+	-- ══ สิ่งที่อยู่ใน DataStore จริงหลังผู้เล่นออกไปแล้ว ══
+	local onDisk = slowStore.data[hatchKey]
+	check("เซฟรอบสุดท้ายเขียนจริง ไม่ถูกข้าม", onDisk ~= nil, true)
+	-- ⚠️ สามข้อนี้คืออาการที่ผู้เล่นเจอ ถ้าข้อไหนตก แปลว่าบั๊กกลับมาแล้ว
+	check("แม่ยังอยู่ในคอก (ไม่หายไป)", #onDisk.mothersInPen, 1)
+	-- ⚠️ อ่านแบบกันพัง เพื่อให้ตอนบั๊กกลับมา เทสต์ "ตก" พร้อมรายงานครบทุกข้อ
+	-- ไม่ใช่ error กลางคันจนข้ออื่นไม่ได้รัน (เคยเป็นแบบนั้นตอนเขียนเทสต์นี้ครั้งแรก)
+	local savedMother = onDisk.mothersInPen[1]
+	check("น้ำหนักแม่ตรงกับไข่ที่ฟัก", if savedMother then savedMother.weight else nil, 224)
+	check("ไม่มีไข่ค้างในสวนฟัก", onDisk.hatching[1], false)
+	-- ⚠️ ผลพวงข้อที่สอง: lock ที่ไม่ถูกปลดทำให้เข้าเกมใหม่ไม่ได้นานถึง 5 นาที
+	check("session lock ถูกปลดแล้ว", onDisk.sessionLock, nil)
+
+	-- โหลดกลับมาต้องได้สถานะหลังฟัก ไม่ใช่ก่อนฟัก
+	local afterCo = coroutine.create(function() DataService.loadAsync(HATCH_USER) end)
+	coroutine.resume(afterCo)
+	for _ = 1, 8 do
+		pump(pending :: any, afterCo)
+	end
+	local rejoined = DataService.getCached(HATCH_USER)
+	check("เข้าใหม่แล้วแม่ยังอยู่", if rejoined then #rejoined.mothersInPen else -1, 1)
+	check("เข้าใหม่แล้วไม่มีไข่ค้าง", if rejoined then rejoined.hatching[1] else nil, false)
+
+	-- ⚠️ autosave (ไม่ใช่รอบสุดท้าย) ยังข้ามได้เหมือนเดิม — รอบที่ค้างอยู่เขียนข้อมูลชุดเดียวกัน
 end

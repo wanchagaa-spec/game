@@ -456,6 +456,55 @@ function EggService.moveMother(player: Player, rawUid: unknown, rawTarget: unkno
 end
 
 --------------------------------------------------------------------------------
+-- DEBUG เท่านั้น — ไม่มี UI เรียกผ่าน command bar ฝั่ง server:
+--     require(game.ServerScriptService.EggService).debugFillHatchery(game.Players.<ชื่อ>)
+--------------------------------------------------------------------------------
+
+-- เอาไข่จากกระเป๋าผู้เล่นมาวางลงสวนฟักให้เต็มทุกช่องว่าง (หรือจนไข่ในกระเป๋าหมด)
+-- ⚠️ ใช้ EggService.placeEgg() ตัวเดียวกับที่ปุ่มวางไข่ในเกมใช้จริงทุกฟอง
+-- ผ่าน validate ครบทุกจุดเหมือนผู้เล่นกดเอง (eggId มีจริงในกระเป๋า, มีคอก, ช่องว่าง ฯลฯ)
+-- ⚠️ ยกเว้นตัวกันสแปม REQUEST_COOLDOWN — นั่นเป็นตัวจับเวลาไม่ให้ "คนกดรัว" ไม่ใช่กฎถูก/ผิด
+-- ของการวางไข่ ฟังก์ชันนี้ตั้งใจวางรัวในลูปเดียวเพื่อทดสอบเคส "สวนฟักเต็ม" ก่อนไข่ฟองแรก
+-- จะฟักเสร็จ จึงรีเซ็ตให้เองทุกรอบ ไม่งั้นวางได้ฟองเดียวแล้วโดนปฏิเสธเป็น "กดเร็วเกินไป" ทันที
+function EggService.debugFillHatchery(player: Player)
+	local data = dataOf(player)
+	if not data then
+		warn(`[EggService] debugFillHatchery: {player.Name} ยังไม่มีข้อมูลผู้เล่น`)
+		return
+	end
+
+	local meta = sessionMeta[player.UserId]
+	if not meta then
+		warn(`[EggService] debugFillHatchery: {player.Name} ยังไม่มีเซสชัน`)
+		return
+	end
+
+	local placed = 0
+	while true do
+		local nextEgg = data.heldEggs.items[1]
+		if not nextEgg then
+			break
+		end
+
+		meta.lastRequestAt = 0 -- ข้ามตัวกันสแปม (ดูเหตุผลด้านบน)
+		local ok, reason = EggService.placeEgg(player, nextEgg.id, nil)
+		if not ok then
+			print(`[EggService] debugFillHatchery: {player.Name} หยุดที่ {placed} ฟอง — {reason}`)
+			break
+		end
+		placed += 1
+	end
+
+	local hatchingNow = countHatching(data.hatching)
+	print(
+		`[EggService] debugFillHatchery: {player.Name} วางได้ {placed} ฟอง · `
+			.. `เหลือในกระเป๋า {#data.heldEggs.items} ฟอง · `
+			.. `สวนฟัก {hatchingNow}/{HATCH_SLOTS} `
+			.. `({if hatchingNow >= HATCH_SLOTS then "เต็มแล้ว" else "ยังไม่เต็ม"})`
+	)
+end
+
+--------------------------------------------------------------------------------
 -- วงจรชีวิตผู้เล่น
 --------------------------------------------------------------------------------
 

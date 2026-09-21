@@ -362,6 +362,7 @@ docs/
   map-layout.md        → ⚠️ โครงหลัก: ผังแมพ พิกัดทุกโซน และกฎ client/server
   hotbar-design.md     → ดีไซน์ Hotbar 10 ช่อง (Phase 5.5 · ยังไม่ได้เขียนโค้ด)
   phase-1.5-rework.md  → บันทึกการรื้อโค้ด Phase 1 ให้ตรงดีไซน์ใหม่ (ทำครบแล้ว) + เช็คลิสต์ที่ต้องทดสอบใน Studio
+  debug-commands.md    → คำสั่ง debug ทั้งหมดที่เรียกผ่าน command bar ใน Studio (ไม่ใช่ฟีเจอร์ในเกม)
 default.project.json   → mapping ของ Rojo
 ```
 

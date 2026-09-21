@@ -670,6 +670,12 @@ end
 --     EggService.debugFillHatchery(game.Players.<ชื่อ>)
 --     EggService.debugClearBag(game.Players.<ชื่อ>)
 --     EggService.debugResetAll(game.Players.<ชื่อ>)
+--     EggService.debugGrantMother(game.Players.<ชื่อ>, 1500, "wukong", "pen")
+--     EggService.debugGrantEggWithWeight(game.Players.<ชื่อ>, "egg_stage5", 100000000)
+--     EggService.debugSetWallProgress(game.Players.<ชื่อ>, 7)
+--     EggService.debugSetCurrency(game.Players.<ชื่อ>, 1000000)
+--     EggService.debugSnapshot(game.Players.<ชื่อ>)
+-- 📄 รายละเอียด + ตัวอย่างใช้ทดสอบครบทุก tier น้ำหนัก อยู่ใน docs/debug-commands.md
 --------------------------------------------------------------------------------
 
 -- เซฟทันทีให้ทุกฟังก์ชัน debug ในนี้ ไม่รอ autosave
@@ -787,6 +793,209 @@ function EggService.debugResetAll(player: Player)
 			.. `ไข่ที่กำลังฟัก {hatchingRemoved} ฟอง · `
 			.. debugSaveNow(player)
 	)
+end
+
+-- สร้างแม่ตรง ๆ ข้ามขั้นตอนฟักทั้งหมด — ใช้ทดสอบขนาดโมเดล/ราคาขาย/ความจุคอกทุก tier
+-- โดยไม่ต้องพึ่งการสุ่มธรรมชาติ (tier 7 = 100,000,000 kg ออกแค่ 1 ในล้านฟองจริง ทดสอบด้วยการ
+-- สุ่มเล่น ๆ ไม่ทันแน่นอน)
+--
+-- destination: "pen" | "bag" — ⚠️ ถ้า "pen" แต่คอกเต็ม **ปฏิเสธตรง ๆ ไม่ fallback ไปกระเป๋าเงียบ ๆ**
+-- เพราะ fallback แบบนั้นจะทำให้เทสต์ "คอกเต็มพอดี" (ข้อ D) ที่ตั้งใจตั้งไว้เพี้ยนไปเป็นอย่างอื่น
+-- โดยที่คนเรียกไม่รู้ตัว
+function EggService.debugGrantMother(
+	player: Player,
+	weight: number,
+	charId: string,
+	destination: string
+): (boolean, string?)
+	local data = dataOf(player)
+	if not data then
+		warn(`[EggService] debugGrantMother: {player.Name} ยังไม่มีข้อมูลผู้เล่น`)
+		return false, "ยังไม่มีข้อมูลผู้เล่น"
+	end
+
+	local character = Config.getCharacter(charId)
+	if not character then
+		warn(`[EggService] debugGrantMother: ไม่มีตัวละคร "{charId}" ใน Config`)
+		return false, `ไม่มีตัวละคร "{charId}"`
+	end
+
+	if destination ~= "pen" and destination ~= "bag" then
+		warn(`[EggService] debugGrantMother: destination ต้องเป็น "pen" หรือ "bag" เท่านั้น`)
+		return false, `destination ต้องเป็น "pen" หรือ "bag" เท่านั้น`
+	end
+
+	-- ⚠️ น้ำหนักแม่ต้องเป็นจำนวนเต็มเสมอ (เป็นส่วนหนึ่งของ stack key) — เครื่องมือ debug ก็ต้อง
+	-- รักษากติกานี้ ไม่งั้นกองลูกที่ผลิตจากแม่ตัวนี้ทีหลังจะได้ stack key เพี้ยนไปจากแม่ตัวอื่น
+	local flooredWeight = math.floor(weight)
+	if flooredWeight <= 0 then
+		warn(`[EggService] debugGrantMother: น้ำหนักต้องมากกว่า 0`)
+		return false, "น้ำหนักต้องมากกว่า 0"
+	end
+
+	-- เช็คที่ว่างก่อนสร้างแม่จริง กันเปลือง uid (เดินหน้าอย่างเดียว ห้าม reuse) ถ้าจะโดนปฏิเสธ
+	if destination == "pen" and #data.mothersInPen >= Config.getPenCapacity(data.penLevel) then
+		warn(`[EggService] debugGrantMother: {player.Name} คอกเต็มแล้ว`)
+		return false, "คอกเต็มแล้ว"
+	end
+	if destination == "bag" and #data.mothersInBag >= Config.Balance.Bag.CAPACITY then
+		warn(`[EggService] debugGrantMother: {player.Name} กระเป๋าเต็มแล้ว`)
+		return false, "กระเป๋าเต็มแล้ว"
+	end
+
+	local mother: Mother = {
+		uid = Config.makeUid(player.UserId, data.nextUid),
+		charId = charId,
+		weight = flooredWeight,
+		statuses = {},
+		obtainedAt = os.time(),
+		locked = false,
+	}
+	data.nextUid += 1
+
+	if destination == "pen" then
+		mother.lastProducedAt = os.time()
+		table.insert(data.mothersInPen, mother)
+		PenService.refreshMothers(player, data.mothersInPen)
+	else
+		table.insert(data.mothersInBag, mother)
+	end
+
+	EggService.sync(player)
+
+	print(
+		`[EggService] debugGrantMother: {player.Name} ได้ {character.name} ({character.class}) `
+			.. `{Config.formatWeight(flooredWeight)} → {destination} · `
+			.. debugSaveNow(player)
+	)
+	return true, nil
+end
+
+-- วางไข่ในกระเป๋าโดย**บังคับน้ำหนัก**ตามที่ระบุ (ข้าม RNG ของ Config.rollMotherWeightForEgg)
+-- ยังคงสุ่ม "ตัวละคร" ตามตารางคลาสของ eggId นั้นตามปกติตอนวางลงสวนฟัก (ไม่ได้บังคับคลาส)
+-- ใช้ทดสอบว่าขนาดโมเดลไข่/เวลาฟักคำนวณถูกตามน้ำหนักที่กำหนดครบทุก tier
+function EggService.debugGrantEggWithWeight(player: Player, eggId: string, weightOverride: number): (boolean, string?)
+	local data = dataOf(player)
+	if not data then
+		warn(`[EggService] debugGrantEggWithWeight: {player.Name} ยังไม่มีข้อมูลผู้เล่น`)
+		return false, "ยังไม่มีข้อมูลผู้เล่น"
+	end
+
+	local egg = Config.getEgg(eggId)
+	if not egg or not egg.enabled then
+		warn(`[EggService] debugGrantEggWithWeight: ไข่ "{eggId}" ไม่มีอยู่หรือถูกปิดไปแล้ว`)
+		return false, `ไข่ "{eggId}" ไม่มีอยู่หรือถูกปิดไปแล้ว`
+	end
+
+	-- ⚠️ เหตุผลเดียวกับ debugGrantMother — น้ำหนักไข่/แม่ต้องเป็นจำนวนเต็มเสมอ
+	local flooredWeight = math.floor(weightOverride)
+	if flooredWeight <= 0 then
+		warn(`[EggService] debugGrantEggWithWeight: น้ำหนักต้องมากกว่า 0`)
+		return false, "น้ำหนักต้องมากกว่า 0"
+	end
+
+	local heldEgg = PlayerData.addHeldEgg(data.heldEggs, egg.id, flooredWeight)
+	if not heldEgg then
+		warn(`[EggService] debugGrantEggWithWeight: {player.Name} ถือไข่เต็มแล้ว`)
+		return false, "ถือไข่เต็มแล้ว"
+	end
+
+	EggService.sync(player)
+
+	print(
+		`[EggService] debugGrantEggWithWeight: {player.Name} ได้ {heldEgg.eggId} #{heldEgg.id} `
+			.. `น้ำหนักบังคับ {Config.formatWeight(heldEgg.weight)} · `
+			.. debugSaveNow(player)
+	)
+	return true, nil
+end
+
+-- ตั้งค่า wallProgress ที่เก็บฝั่ง server ตรง ๆ — ⚠️ คนละตัวกับกำแพงที่ WallRenderer วาดฝั่ง
+-- client (client ยังไม่ได้รับค่านี้ผ่าน sync ในเฟสนี้ ตั้งแล้วต้องดูผลจากสูตร ไม่ใช่จากภาพกำแพง)
+-- ใช้ทดสอบสูตรเงิน (Config.getCoinsPerMinute) และเพดาน damage upgrade ที่ผูกกับ wallProgress
+function EggService.debugSetWallProgress(player: Player, n: number)
+	local data = dataOf(player)
+	if not data then
+		warn(`[EggService] debugSetWallProgress: {player.Name} ยังไม่มีข้อมูลผู้เล่น`)
+		return
+	end
+
+	local before = data.wallProgress
+	-- ⚠️ clamp ในช่วง 1..จำนวนด่าน เหมือนที่ Config.getCoinsPerMinute/getMaxDamageLevel ทำเอง
+	-- ตั้งนอกช่วงนี้ไม่มีความหมายเชิงเกม (ไม่มีด่านที่ 0 หรือด่านที่ 10)
+	local clamped = math.clamp(math.floor(n), 1, Config.Balance.Stage.COUNT)
+	data.wallProgress = clamped
+
+	EggService.sync(player)
+
+	print(
+		`[EggService] debugSetWallProgress: {player.Name} {before} → {clamped}`
+			.. `{if clamped ~= n then ` (ปัด/clamp จาก {n})` else ""} · `
+			.. debugSaveNow(player)
+	)
+end
+
+-- ตั้งค่า currency.coins ตรง ๆ — ใช้ทดสอบอัปเกรดคอก/ขายแม่โดยไม่ต้องรอสะสมเงินจริง
+-- ⚠️ แตะแค่ coins ไม่แตะ gems (คนละบ่อ ยังไม่มีระบบ Robux ให้ debug ในเฟสนี้)
+function EggService.debugSetCurrency(player: Player, coins: number)
+	local data = dataOf(player)
+	if not data then
+		warn(`[EggService] debugSetCurrency: {player.Name} ยังไม่มีข้อมูลผู้เล่น`)
+		return
+	end
+
+	local before = data.currency.coins
+	local clamped = math.max(0, math.floor(coins))
+	data.currency.coins = clamped
+
+	EggService.sync(player)
+
+	print(`[EggService] debugSetCurrency: {player.Name} เงิน {before} → {clamped} coins · ` .. debugSaveNow(player))
+end
+
+-- พิมพ์ข้อมูลสำคัญทั้งหมดของผู้เล่นแบบอ่านง่าย — ⚠️ read-only ไม่แก้อะไรเลย จึงไม่เซฟ
+-- (เซฟข้อมูลที่ไม่เปลี่ยนแปลงคือเขียน DataStore ทิ้งเปล่า ๆ) ใช้หา uid จริงของแม่เพื่อทดสอบ
+-- SellMotherRequest/MoveMotherRequest ต่อผ่าน command bar
+function EggService.debugSnapshot(player: Player)
+	local data = dataOf(player)
+	if not data then
+		warn(`[EggService] debugSnapshot: {player.Name} ยังไม่มีข้อมูลผู้เล่น`)
+		return
+	end
+
+	print(`━━ debugSnapshot: {player.Name} ━━`)
+	print(`  เงิน: {data.currency.coins} coins · {data.currency.gems} gems`)
+	print(
+		`  คอก: Lv{data.penLevel} ({#data.mothersInPen}/{Config.getPenCapacity(data.penLevel)}) · `
+			.. `wallProgress: {data.wallProgress}`
+	)
+
+	print(`  แม่ในคอก ({#data.mothersInPen} ตัว):`)
+	for _, mother in data.mothersInPen do
+		print(`    · {mother.uid} — {mother.charId} {Config.formatWeight(mother.weight)}`)
+	end
+
+	print(`  แม่ในกระเป๋า ({#data.mothersInBag}/{Config.Balance.Bag.CAPACITY} ตัว):`)
+	for _, mother in data.mothersInBag do
+		print(`    · {mother.uid} — {mother.charId} {Config.formatWeight(mother.weight)}`)
+	end
+
+	print(`  ไข่ในกระเป๋า: {#data.heldEggs.items} ฟอง`)
+
+	local now = os.time()
+	local occupiedSlots = 0
+	for slotIndex = 1, HATCH_SLOTS do
+		local slot = data.hatching[slotIndex]
+		if type(slot) == "table" then
+			occupiedSlots += 1
+			local status = if now >= slot.hatchAt
+				then "ครบเวลาแล้ว — ค้างรอที่ว่าง (ข้อ D)"
+				else `เหลืออีก {slot.hatchAt - now} วิ`
+			print(`    · ช่อง {slotIndex}: {slot.eggId} {Config.formatWeight(slot.weight)} — {status}`)
+		end
+	end
+	print(`  สวนฟัก: {occupiedSlots}/{HATCH_SLOTS} ช่องไม่ว่าง`)
+	print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 end
 
 --------------------------------------------------------------------------------

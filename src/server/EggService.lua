@@ -457,8 +457,19 @@ end
 
 --------------------------------------------------------------------------------
 -- DEBUG เท่านั้น — ไม่มี UI เรียกผ่าน command bar ฝั่ง server:
---     require(game.ServerScriptService.EggService).debugFillHatchery(game.Players.<ชื่อ>)
+--     local EggService = require(game.ServerScriptService.EggService)
+--     EggService.debugFillHatchery(game.Players.<ชื่อ>)
+--     EggService.debugClearBag(game.Players.<ชื่อ>)
+--     EggService.debugResetAll(game.Players.<ชื่อ>)
 --------------------------------------------------------------------------------
+
+-- เซฟทันทีให้ทุกฟังก์ชัน debug ในนี้ ไม่รอ autosave
+-- ⚠️ releaseLock = false เหมือน autosave ปกติทุกประการ — แค่สั่งเองตอนนี้เลย
+-- ไม่ปลด session lock ผู้เล่นเล่นต่อได้เหมือนไม่มีอะไรเกิดขึ้น (คนละเคสกับตอนออกเกม)
+local function debugSaveNow(player: Player): string
+	local ok, err = DataService.saveAsync(player.UserId, false)
+	return if ok then "เซฟแล้ว" else `เซฟไม่สำเร็จ: {err}`
+end
 
 -- เอาไข่จากกระเป๋าผู้เล่นมาวางลงสวนฟักให้เต็มทุกช่องว่าง (หรือจนไข่ในกระเป๋าหมด)
 -- ⚠️ ใช้ EggService.placeEgg() ตัวเดียวกับที่ปุ่มวางไข่ในเกมใช้จริงทุกฟอง
@@ -500,7 +511,72 @@ function EggService.debugFillHatchery(player: Player)
 		`[EggService] debugFillHatchery: {player.Name} วางได้ {placed} ฟอง · `
 			.. `เหลือในกระเป๋า {#data.heldEggs.items} ฟอง · `
 			.. `สวนฟัก {hatchingNow}/{HATCH_SLOTS} `
-			.. `({if hatchingNow >= HATCH_SLOTS then "เต็มแล้ว" else "ยังไม่เต็ม"})`
+			.. `({if hatchingNow >= HATCH_SLOTS then "เต็มแล้ว" else "ยังไม่เต็ม"}) · `
+			.. debugSaveNow(player)
+	)
+end
+
+-- ลบแม่ทั้งหมดในกระเป๋า (mothersInBag) + ไข่ทั้งหมดในกระเป๋า (heldEggs)
+-- ⚠️ ไม่แตะแม่ในคอก (mothersInPen) และไม่แตะสวนฟัก (hatching) เลย
+function EggService.debugClearBag(player: Player)
+	local data = dataOf(player)
+	if not data then
+		warn(`[EggService] debugClearBag: {player.Name} ยังไม่มีข้อมูลผู้เล่น`)
+		return
+	end
+
+	local mothersRemoved = #data.mothersInBag
+	local eggsRemoved = #data.heldEggs.items
+
+	table.clear(data.mothersInBag)
+	table.clear(data.heldEggs.items)
+
+	EggService.sync(player)
+
+	print(
+		`[EggService] debugClearBag: {player.Name} ลบแม่ในกระเป๋า {mothersRemoved} ตัว · `
+			.. `ไข่ในกระเป๋า {eggsRemoved} ฟอง · `
+			.. debugSaveNow(player)
+	)
+end
+
+-- ล้างทุกอย่าง: แม่ในคอก + แม่ในกระเป๋า + ไข่ในกระเป๋า + ไข่ที่กำลังฟัก
+-- เหมือนเริ่มเกมใหม่ (แต่ไม่แจกไข่เริ่มต้นให้อัตโนมัติ — ต้องเรียก grantEgg เอง)
+function EggService.debugResetAll(player: Player)
+	local data = dataOf(player)
+	if not data then
+		warn(`[EggService] debugResetAll: {player.Name} ยังไม่มีข้อมูลผู้เล่น`)
+		return
+	end
+
+	local motherPenRemoved = #data.mothersInPen
+	local motherBagRemoved = #data.mothersInBag
+	local eggsRemoved = #data.heldEggs.items
+
+	-- ⚠️ ไข่ที่กำลังฟักมีโมเดลโชว์อยู่ในคอกด้วย ต้อง hideEgg ทีละช่องเหมือนตอนฟักเสร็จจริง
+	-- ไม่งั้นข้อมูลถูกล้างแต่โมเดลไข่ค้างอยู่ในคอกให้เห็น (ข้อมูลกับภาพไม่ตรงกัน)
+	local hatchingRemoved = 0
+	for slotIndex = 1, HATCH_SLOTS do
+		if type(data.hatching[slotIndex]) == "table" then
+			PenService.hideEgg(player, slotIndex)
+			data.hatching[slotIndex] = false
+			hatchingRemoved += 1
+		end
+	end
+
+	table.clear(data.mothersInPen)
+	table.clear(data.mothersInBag)
+	table.clear(data.heldEggs.items)
+
+	-- ⚠️ แม่ในคอกก็มีโมเดลเดินอยู่จริง ต้อง refreshMothers ให้คอกว่างตามข้อมูล
+	PenService.refreshMothers(player, data.mothersInPen)
+	EggService.sync(player)
+
+	print(
+		`[EggService] debugResetAll: {player.Name} ล้างแม่ในคอก {motherPenRemoved} ตัว · `
+			.. `แม่ในกระเป๋า {motherBagRemoved} ตัว · ไข่ในกระเป๋า {eggsRemoved} ฟอง · `
+			.. `ไข่ที่กำลังฟัก {hatchingRemoved} ฟอง · `
+			.. debugSaveNow(player)
 	)
 end
 

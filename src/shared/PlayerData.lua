@@ -40,6 +40,13 @@ export type HeldEggs = {
 export type HatchSlot = {
 	eggId: string,
 	weight: number,
+	-- ตัวละครที่จะฟักออกมา — สุ่มไว้ตั้งแต่ตอนวางไข่ลงสวนฟัก (ไม่ใช่ตอนฟักเสร็จ) เพราะเวลาฟัก
+	-- ต้องใช้คลาสมาคำนวณ (Config.getHatchSeconds) ผู้เล่นยังไม่เห็นค่านี้จนกว่าจะฟักเสร็จจริง
+	-- (ห้ามส่งฟิลด์นี้เข้า sync payload ที่ client เห็น)
+	--
+	-- ⚠️ optional เพื่อรองรับช่องที่ค้างฟักอยู่จากก่อนเพิ่มฟิลด์นี้ (ไข่ที่วางไปแล้วตอน deploy
+	-- รุ่นเก่า) — EggService.hatch() มี fallback สุ่มให้ตอนนั้นถ้าไม่มีค่านี้ติดมา
+	charId: string?,
 	startedAt: number,
 	hatchAt: number,
 }
@@ -470,6 +477,7 @@ function PlayerData.buildWorstCase(): Data
 		data.hatching[index] = {
 			eggId = "egg_legendary",
 			weight = 100000000,
+			charId = "jade_emperor",
 			startedAt = 9999999999,
 			hatchAt = 9999999999,
 		}

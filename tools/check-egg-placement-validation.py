@@ -36,13 +36,24 @@ local FakePenService = {}
 function FakePenService.getPen(_player)
 \treturn true
 end
-function FakePenService.showEgg(_player, _slotIndex, _eggType) end
+function FakePenService.showEgg(_player, _slotIndex, _eggType, _weight) end
 function FakePenService.hideEgg(_player, _slotIndex) end
 function FakePenService.refreshMothers(_player, _mothers) end
+
+-- fake ProductionService — EggService require ตัวนี้ตรง ๆ ตั้งแต่ Phase 2B-1
+-- (onPlayerAdded/moveMother เรียก settleAllInPen/settleMother) ไม่ใช่สิ่งที่เทสต์ชุดนี้สนใจ
+local FakeProductionService = {}
+function FakeProductionService.settleMother(_data, _mother, _online)
+\treturn 0, 0, false
+end
+function FakeProductionService.settleAllInPen(_data, _online)
+\treturn 0, 0, false
+end
 
 -- fake Remotes — จุดสำคัญ: ต้องจับ callback ที่ EggService.start() ผูกไว้จริง ๆ
 -- เพื่อยิงเข้า callback ตัวนั้นตรง ๆ ไม่ใช่เรียก EggService.placeEgg() legacy
 local capturedHandlers = {}
+local lastFiredPayload = {} -- [remoteName] = payload ล่าสุดที่ FireClient ส่งไป (ไว้ตรวจว่า client ไม่เห็นของที่ไม่ควรเห็น)
 local FakeRemotes = {}
 function FakeRemotes.waitFor(name)
 \tlocal remote = {}
@@ -52,7 +63,9 @@ function FakeRemotes.waitFor(name)
 \t\t\treturn { Disconnect = function() end }
 \t\tend,
 \t}
-\tremote.FireClient = function(_self, _player, _payload) end
+\tremote.FireClient = function(_self, _player, payload)
+\t\tlastFiredPayload[name] = payload
+\tend
 \treturn remote
 end
 
@@ -71,6 +84,7 @@ local __env = {
 \tRemotes = FakeRemotes,
 \tDataService = DataService,
 \tPenService = FakePenService,
+\tProductionService = FakeProductionService,
 \tPlayers = {},
 \tRandom = FakeRandom,
 \twarn = print, -- warn ไม่มีใน luau CLI (ดูคอมเมนต์เดียวกันใน DataService.lua)
@@ -87,6 +101,7 @@ local PlayerData = __env.PlayerData
 local Remotes = __env.Remotes
 local DataService = __env.DataService
 local PenService = __env.PenService
+local ProductionService = __env.ProductionService
 local Players = __env.Players
 local Random = __env.Random
 local warn = __env.warn
@@ -148,12 +163,16 @@ local function freshPlayer(tag)
 end
 
 -- แจกไข่ที่รู้ id แน่นอน (ไม่พึ่ง startingEggs ที่ผู้เล่นใหม่ได้อัตโนมัติ)
-local function grantKnownEgg(player)
-\tlocal okGrant = EggService.grantEgg(player, "egg_stage1")
-\tassert(okGrant, "เซ็ตอัพเทสต์ผิด — grantEgg ล้ม")
+local function grantSpecificEgg(player, eggId)
+\tlocal okGrant = EggService.grantEgg(player, eggId)
+\tassert(okGrant, `เซ็ตอัพเทสต์ผิด — grantEgg("{eggId}") ล้ม`)
 \tlocal data = DataService.getCached(player.UserId)
 \tlocal newest = data.heldEggs.items[#data.heldEggs.items]
 \treturn newest.id
+end
+
+local function grantKnownEgg(player)
+\treturn grantSpecificEgg(player, "egg_stage1")
 end
 
 local function countHatchingSlots(data)
@@ -285,6 +304,68 @@ do
 \t)
 end
 
+print("\\n━━ กรณีที่ 9: เวลาฟักไข่ source=\\"boss\\" คำนวณจากน้ำหนัก+คลาสที่สุ่มไว้ตอนวาง ━━")
+do
+\tlocal player, data = freshPlayer("Case9")
+\tlocal eggId = grantKnownEgg(player)
+\tlocal pOk = pcall(placeEggHandler, player, eggId, nil)
+\tcheck("วางไข่ไม่ error/crash", pOk)
+
+\tlocal slot
+\tfor i = 1, HATCH_SLOTS do
+\t\tif type(data.hatching[i]) == "table" then
+\t\t\tslot = data.hatching[i]
+\t\t\tbreak
+\t\tend
+\tend
+\tassert(slot, "เซ็ตอัพเทสต์ผิด — วางไข่แล้วไม่เจอช่องที่ใช้")
+
+\tcheck("charId ถูกสุ่มไว้แล้วตั้งแต่ตอนวาง (ไม่ใช่ nil)", slot.charId ~= nil)
+\tlocal expectedSeconds = Config.getHatchSeconds(slot.weight, slot.charId)
+\tcheck(
+\t\t`เวลาฟักตรงกับ Config.getHatchSeconds(น้ำหนัก, คลาสที่สุ่มได้) พอดี `
+\t\t\t.. `(ได้ {slot.hatchAt - slot.startedAt} ต้องการ {expectedSeconds})`,
+\t\tslot.hatchAt - slot.startedAt == expectedSeconds
+\t)
+
+\t-- ⚠️ จุดสำคัญ: ตัวละครสุ่มไว้แล้วจริง แต่ต้อง **ไม่หลุดไปให้ client เห็น** ก่อนฟักเสร็จ
+\t-- (ความเซอร์ไพรส์ตอนฟักต้องยังอยู่ครบ แม้ server จะรู้ผลไว้ก่อนแล้วก็ตาม)
+\tEggService.sync(player)
+\tlocal payload = lastFiredPayload[Config.RemoteNames.FARM_STATE_SYNC]
+\tassert(payload, "เซ็ตอัพเทสต์ผิด — sync ไม่ได้ยิง FarmStateSync")
+\tlocal syncedSlot = payload.hatching[1]
+\tfor i = 1, HATCH_SLOTS do
+\t\tif payload.hatching[i] and payload.hatching[i].occupied then
+\t\t\tsyncedSlot = payload.hatching[i]
+\t\t\tbreak
+\t\tend
+\tend
+\tcheck("sync payload ของช่องที่กำลังฟัก ไม่มีฟิลด์ charId หลุดไปให้ client เห็น", syncedSlot.charId == nil)
+end
+
+print("\\n━━ กรณีที่ 10: ไข่ตำนาน (source=\\"robux\\") ฟักคงที่เสมอ ไม่ขึ้นกับน้ำหนัก/คลาส ━━")
+do
+\tlocal player, data = freshPlayer("Case10")
+\tlocal eggId = grantSpecificEgg(player, "egg_legendary")
+\tlocal pOk = pcall(placeEggHandler, player, eggId, nil)
+\tcheck("วางไข่ตำนานไม่ error/crash", pOk)
+
+\tlocal slot
+\tfor i = 1, HATCH_SLOTS do
+\t\tif type(data.hatching[i]) == "table" then
+\t\t\tslot = data.hatching[i]
+\t\t\tbreak
+\t\tend
+\tend
+\tassert(slot, "เซ็ตอัพเทสต์ผิด — วางไข่ตำนานแล้วไม่เจอช่องที่ใช้")
+
+\tcheck(
+\t\t`เวลาฟักไข่ตำนาน = LEGENDARY_SECONDS เป๊ะ ไม่ผ่านสูตรน้ำหนัก+คลาส `
+\t\t\t.. `(ได้ {slot.hatchAt - slot.startedAt} ต้องการ {Config.Balance.Hatchery.LEGENDARY_SECONDS})`,
+\t\tslot.hatchAt - slot.startedAt == Config.Balance.Hatchery.LEGENDARY_SECONDS
+\t)
+end
+
 print(string.format("\\n=== ผ่าน %d / ตก %d ===", passCount, failCount))
 if failCount > 0 then
 \terror(`มีเทสต์ตก {failCount} เคส`, 0)
@@ -302,6 +383,7 @@ def build_harness() -> str:
     src = src.replace('local Remotes = require(ReplicatedStorage.Shared.Remotes)', '')
     src = src.replace('local DataService = require(ServerScriptService.DataService)', '')
     src = src.replace('local PenService = require(ServerScriptService.PenService)', '')
+    src = src.replace('local ProductionService = require(ServerScriptService.ProductionService)', '')
     src = src.replace('--!strict', '--!nocheck' + PRELUDE)
 
     escaped = src.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')

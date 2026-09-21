@@ -151,7 +151,10 @@ return function(t, Config)
 		obtainedAt = 1757700000,
 		locked = false,
 	}
-	sample.hatching[3] = { eggId = "egg_stage3", weight = 48000, startedAt = 100, hatchAt = 190 }
+	sample.hatching[3] = { eggId = "egg_stage3", weight = 48000, charId = "wukong", startedAt = 100, hatchAt = 190 }
+	-- ⚠️ ช่องที่ไม่มี charId จำลองข้อมูลเก่าจากก่อนเพิ่มฟิลด์นี้ (Phase: เวลาฟักตามน้ำหนัก+คลาส)
+	-- ต้อง roundtrip ได้โดยไม่พัง (EggService.hatch() มี fallback สุ่มใหม่ให้กรณีนี้)
+	sample.hatching[5] = { eggId = "egg_stage1", weight = 500, startedAt = 50, hatchAt = 110 }
 	sample.stageProgress[4] = { defendersRemaining = 4500, wallHpRemaining = 50000 }
 	PlayerData.addHeldEgg(sample.heldEggs, "egg_stage1", 320)
 	PlayerData.addHeldEgg(sample.heldEggs, "egg_stage9", 100000000)
@@ -170,6 +173,9 @@ return function(t, Config)
 	check("ช่องว่างยังเป็น false", back.hatching[1], false)
 	check("ไข่ที่ฟักอยู่กลับมาถูกช่อง", back.hatching[3].eggId, "egg_stage3")
 	check("น้ำหนักไข่ที่ฟังอยู่ตรงตัว", back.hatching[3].weight, 48000)
+	check("charId ที่สุ่มไว้ตอนวางไข่กลับมาครบ", back.hatching[3].charId, "wukong")
+	check("ช่องแบบเก่าที่ไม่มี charId ก็ roundtrip ได้ปกติ (ไม่พัง)", back.hatching[5].eggId, "egg_stage1")
+	check("ช่องแบบเก่า charId ยังเป็น nil เหมือนเดิม (ไม่ถูกเติมค่าแปลก ๆ ให้)", back.hatching[5].charId, nil)
 	check("stageProgress กลับมาถูกช่อง", back.stageProgress[4].defendersRemaining, 4500)
 	check("กระเป๋าไข่กลับมาครบจำนวน", #back.heldEggs.items, 2)
 	check("id ของไข่กลับมาครบ", back.heldEggs.items[2].id, 2)

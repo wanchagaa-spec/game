@@ -1411,4 +1411,90 @@ return function(t, Config)
 		function() (stage5 :: any).hatchTime = 999 end,
 		function() (stage5 :: any).hatchTime = savedHatch end), true)
 	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
+
+	--------------------------------------------------------------------------
+	-- ขนาดโมเดลไข่/แม่ตามน้ำหนัก
+	--------------------------------------------------------------------------
+	print("── ขนาดโมเดลไข่/แม่ scale ตาม tier น้ำหนัก ──")
+
+	check("tier 1 (100kg) = ตัวคูณ 1.00", Config.getVisualScaleMultiplier(100), 1.00)
+	check("tier 1 (999kg) ยังเป็นตัวคูณ 1.00", Config.getVisualScaleMultiplier(999), 1.00)
+	check("tier 2 (1000kg) = ตัวคูณ 1.32", Config.getVisualScaleMultiplier(1000), 1.32)
+	check("tier 7 (100,000,000kg) = ตัวคูณ 5.25", Config.getVisualScaleMultiplier(100000000), 5.25)
+	check("index ของ tier ตรงกับ WeightTiers", Config.getWeightTierIndex(50000), 3)
+
+	-- ⚠️ ฐานจริงของไข่ตรงกับตัวอย่างที่ตกลงกันไว้พอดี (ฐาน 3 × ตัวคูณ)
+	local egg1 = Config.getEggVisualSize(100)
+	local egg7 = Config.getEggVisualSize(100000000)
+	near("ไข่ tier 1 ขนาด 3.0 (ฐานเป๊ะ)", egg1.X, 3.0, 0.001)
+	near("ไข่ tier 7 ขนาด 15.75 (ฐาน 3 × 5.25)", egg7.X, 15.75, 0.001)
+	check("ไข่ยังเป็นทรงกลม (สามแกนเท่ากันเสมอ)", egg7.X == egg7.Y and egg7.Y == egg7.Z, true)
+
+	-- ⚠️ ฐานจริงของแม่คือ MapDimensions.Blockout.MotherSize (3.5, 3.5, 5) ไม่ใช่ทรงลูกบาศก์
+	-- ฐาน 8 อย่างในตัวอย่างที่ขอมา — ตัวคูณเหมือนกันเป๊ะ ต่างแค่ฐาน (รายงานไว้ในสรุปงานแล้ว)
+	local motherHeldTier1 = Config.getMotherVisualSize(100, false)
+	local motherHeldTier7 = Config.getMotherVisualSize(100000000, false)
+	near("แม่ tier 1 ตอนถือ/ส่งรบ กว้าง 3.5 (ฐานเป๊ะ ไม่ใช่ 8 ตามตัวอย่าง)", motherHeldTier1.X, 3.5, 0.001)
+	near("แม่ tier 7 ตอนถือ/ส่งรบ กว้าง 18.375 (ฐาน 3.5 × 5.25)", motherHeldTier7.X, 18.375, 0.001)
+	near("แม่ tier 7 ตอนถือ/ส่งรบ ยาว 26.25 (ฐาน 5 × 5.25)", motherHeldTier7.Z, 26.25, 0.001)
+
+	-- ⚠️ กฎ 1/10 ในคอก: ทุก tier เท่ากัน
+	local motherPenTier1 = Config.getMotherVisualSize(100, true)
+	local motherPenTier7 = Config.getMotherVisualSize(100000000, true)
+	near("แม่ tier 1 ในคอก = ตอนถือ/10", motherPenTier1.X, motherHeldTier1.X / 10, 0.0001)
+	near("แม่ tier 7 ในคอก = ตอนถือ/10", motherPenTier7.X, motherHeldTier7.X / 10, 0.0001)
+	check("แม่ในคอกเล็กกว่าแม่ตอนถือเสมอ (ไม่ใช่ตัวคูณ > 1 หลุดมา)", motherPenTier7.X < motherHeldTier7.X, true)
+
+	-- ยามต้องบังคับว่าตัวคูณต้องไต่ขึ้นเรื่อย ๆ (ตัวเล็กห้ามแสดงใหญ่กว่าตัวใหญ่)
+	local scaleTable = Config.Balance.VisualScale.WEIGHT_MULTIPLIER
+	local savedTier3Scale = scaleTable[3]
+	check("ตัวคูณ tier ถอยหลัง → ยามจับได้", balanceGuardCatches(
+		function() scaleTable[3] = scaleTable[1] end,
+		function() scaleTable[3] = savedTier3Scale end), true)
+	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
+
+	--------------------------------------------------------------------------
+	-- เวลาฟักตามน้ำหนัก + คลาส
+	--------------------------------------------------------------------------
+	print("── เวลาฟักตามน้ำหนัก + คลาส (Config.getHatchSeconds) ──")
+
+	check("tier 1 คลาส C = 1 นาที (ฐานเป๊ะ)", Config.getHatchSeconds(100, "monkey"), 60)
+	check("tier 7 คลาส S = 48 ชม. (ตัวอย่างตรวจสอบที่ตกลงกันไว้)",
+		Config.getHatchSeconds(100000000, "guanyin"), 24 * 3600 * 2)
+	check("tier 3 คลาส B = 30 นาที × 1.15",
+		Config.getHatchSeconds(50000, "bajie"), 1800 * 1.15)
+	check("charId ที่ไม่มีจริง → ถือเป็นคลาส C (ตัวคูณ 1)",
+		Config.getHatchSeconds(100, "ไม่มีจริง"), 60)
+
+	-- ⚠️ ไข่ตำนานฟักคงที่เสมอ — ตั้งใจ "จ่ายเงินจริงซื้อความเร็ว" เร็วกว่า tier 1 พอดี
+	check("ไข่ตำนานเร็วกว่าไข่ tier 1 ธรรมดาพอดี (ทั้งคู่ 1 นาที เพราะ LEGENDARY_SECONDS = 60)",
+		Config.Balance.Hatchery.LEGENDARY_SECONDS, 60)
+
+	-- เพดานกันตั้งเลขพลาด: tier สูงสุด × คลาสสูงสุด (SS) ต้องไม่เกิน MAX_HATCH_SECONDS
+	local worstHatch = Config.Balance.Hatchery.HatchTimeByTier[7] * Config.Balance.Hatchery.ClassHatchMultiplier.SS
+	check("เวลาฟักสูงสุดจริง (tier 7 × SS) = 62.4 ชม.", worstHatch, 24 * 3600 * 2.6)
+	check("ยังอยู่ใต้เพดาน MAX_HATCH_SECONDS (7 วัน)", worstHatch <= Config.Balance.Hatchery.MAX_HATCH_SECONDS, true)
+
+	-- ยามต้องจับได้ถ้าตั้งเลขจนเวลาฟักทะลุเพดาน
+	local hatchTable = Config.Balance.Hatchery.HatchTimeByTier
+	local savedTier7Hatch = hatchTable[7]
+	check("tier 7 ตั้งเกินเพดาน → ยามจับได้", balanceGuardCatches(
+		function() hatchTable[7] = Config.Balance.Hatchery.MAX_HATCH_SECONDS end,
+		function() hatchTable[7] = savedTier7Hatch end), true)
+	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
+
+	-- ยามต้องจับได้ถ้าตารางเวลาฟักถอยหลัง (tier ใหญ่กว่าต้องฟักช้ากว่าหรือเท่ากันเสมอ)
+	local savedTier3Hatch = hatchTable[3]
+	check("เวลาฟัก tier ถอยหลัง → ยามจับได้", balanceGuardCatches(
+		function() hatchTable[3] = hatchTable[1] end,
+		function() hatchTable[3] = savedTier3Hatch end), true)
+	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
+
+	-- ยามต้องจับได้ถ้าคลาสไหนหายไปจาก ClassHatchMultiplier
+	local classMultTable = Config.Balance.Hatchery.ClassHatchMultiplier
+	local savedSS = classMultTable.SS
+	check("ลบคลาส SS ออกจาก ClassHatchMultiplier → ยามจับได้", balanceGuardCatches(
+		function() classMultTable.SS = nil end,
+		function() classMultTable.SS = savedSS end), true)
+	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
 end

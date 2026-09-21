@@ -60,6 +60,14 @@ local function vec3(x: number, y: number, z: number): Vector3
 	return strictVector({ X = x, Y = y, Z = z }, "Vector3") :: Vector3
 end
 
+-- คูณ Vector3 ด้วยตัวเลข — เขียนเองแทนใช้ `*` ตรง ๆ เพราะ fallback ข้างบนไม่มี __mul
+-- (ตั้งใจไม่เติม __mul ให้ fallback ทั้งระบบ ตามกฎ "fallback ต้องเข้มเท่าของจริง" —
+-- เติม metamethod ทั่วไปจะหลอกให้โค้ดอื่นเผลอทำเลขเวกเตอร์ใน Config ได้โดยไม่ตั้งใจ)
+local function scaleVec3(v: Vector3, factor: number): Vector3
+	local raw = v :: any
+	return vec3(raw.X * factor, raw.Y * factor, raw.Z * factor)
+end
+
 local function vec2(x: number, y: number): Vector2
 	if HAS_VECTOR2 then
 		return Vector2.new(x, y)
@@ -109,7 +117,14 @@ export type EggType = {
 	-- ไข่ปกติได้จากการแย่งในรังบอส · ไข่ตำนานซื้อด้วย Robux ผ่าน Developer Product
 	-- เงินในเกมใช้ซื้อได้แค่ อาวุธ · อัปเกรดอาวุธ · อัปเกรดคอก
 	source: string, -- "boss" = แย่งจากรังบอส | "robux" = Developer Product
-	hatchTime: number, -- เวลาฟักเป็นวินาที นับฝั่ง server เท่านั้น
+	-- เวลาฟักเป็นวินาที นับฝั่ง server เท่านั้น
+	-- ⚠️ ไข่ source="robux" (ไข่ตำนาน) ใช้ค่านี้ตรง ๆ เสมอ (คงที่ ไม่ขึ้นกับ tier/คลาส — ตั้งใจ
+	-- "จ่ายเงินจริงซื้อความเร็ว") ส่วนไข่ source="boss" ค่านี้เป็นแค่ metadata/ประวัติที่ยังคง
+	-- ไว้ให้ validate() ตรวจสอบสูตร SECONDS_PER_STAGE ต่อไป **ไม่ใช่ค่าที่ใช้จริงในการฟักแล้ว**
+	-- เวลาฟักจริงของไข่ source="boss" มาจาก Config.getHatchSeconds(weight, charId) แทน
+	-- (ขึ้นกับน้ำหนัก+คลาสของสิ่งที่จะฟักออกมา ซึ่งฐานเวลาฟักตามด่าน/SECONDS_PER_STAGE เดิม
+	-- ไม่มีที่ให้ยืนแล้วเพราะไม่มีมิติน้ำหนัก/คลาสเข้ามาเกี่ยว — ดู docs/data-schema.md §5.1)
+	hatchTime: number,
 
 	-- ด่านที่ไข่ฟองนี้มาจาก (บอสด่าน N วางไข่ของด่าน N เท่านั้น)
 	-- nil = ไม่ผูกกับด่าน (ไข่ Robux ใช้ด่านที่ผู้ซื้ออยู่)
@@ -552,6 +567,7 @@ local BALANCE_GROUPS: { string } = {
 	"StageWeightTiers", "Weight", "Production", "Damage", "NewPlayer",
 	"Economy", "Pen", "Bag", "Hatchery", "Stages", "Stage", "Boss",
 	"DamageUpgrade", "SpeedUpgrade", "Combat", "BalanceCheck", "Weapon",
+	"VisualScale",
 }
 
 --------------------------------------------------------------------------------
@@ -615,6 +631,24 @@ Balance.Weight = {
 	TIER_ROLL_MAX = 1000000,
 
 	TIERS = WeightTiers,
+}
+
+--------------------------------------------------------------------------------
+-- ขนาดโมเดลไข่/แม่ตามน้ำหนัก
+--------------------------------------------------------------------------------
+-- ไข่กับแม่ scale ตามน้ำหนักด้วย **ตัวคูณชุดเดียวกัน** (คนละฐาน — ฐานคือ
+-- MapDimensions.Blockout.EggSize / MotherSize ที่ tier 1) ตัวคูณจึงมาอยู่รวมกันที่นี่
+-- แทนที่จะแยกเป็น EggVisualScale/MotherVisualScale สองตาราง (ค่าจะซ้ำกันเป๊ะทุกแถว
+-- แก้ตัวหนึ่งแล้วลืมอีกตัวได้ง่าย) — ดู Config.getEggVisualSize / getMotherVisualSize
+--
+-- ⚠️ ต้องมี 7 ค่าตรงกับ 7 tier ใน WeightTiers เสมอ · validate() บังคับ
+Balance.VisualScale = {
+	-- tier 1..7 → ตัวคูณขนาด (100kg = ฐานเป๊ะ, 100M kg = ใหญ่กว่าฐาน 5.25 เท่า)
+	WEIGHT_MULTIPLIER = { 1.00, 1.32, 1.74, 2.29, 3.02, 3.98, 5.25 },
+
+	-- แม่ตอนอยู่ในคอก (ฟาร์ม) เล็กกว่าตอน "ถือ" (กระเป๋า/เลือกตัว) หรือ "ส่งรบ" 10 เท่า
+	-- ทุก tier เท่ากัน — ไข่ไม่มีกฎนี้ (ไข่แสดงขนาดเดียวกันทุกที่ที่เห็น)
+	MOTHER_PEN_SHRINK = 0.1,
 }
 
 --------------------------------------------------------------------------------
@@ -1144,15 +1178,45 @@ Balance.Hatchery = {
 	-- จำนวนไข่ที่ฟักพร้อมกันได้ = จำนวนแท่นในสวนฟัก (PlayerData.hatching)
 	MAX_SLOTS = 50,
 
-	-- ⚠️ เวลาฟักของไข่รายด่าน = SECONDS_PER_STAGE × เลขด่าน (ด่าน 1 = 30 วิ · ด่าน 9 = 270 วิ)
-	-- `hatchTime` ในตาราง EggTypes **คำนวณจากค่านี้ ไม่ใช่ตัวเลขดิบ**
-	-- เคยเป็นตัวเลขดิบ 9 ตัวเรียงกัน แล้วต้องไล่แก้มือทุกครั้งที่ปรับจังหวะเกม
-	-- (ความผิดแบบเดียวกับ turretDps ที่ย้ายไปเป็นสัดส่วนแล้ว) · `validate()` บังคับว่าต้องตรงสูตร
+	-- ⚠️ `EggTypes[eggId].hatchTime` ของไข่รายด่านยังคงสูตร SECONDS_PER_STAGE × เลขด่านไว้
+	-- (ด่าน 1 = 30 วิ · ด่าน 9 = 270 วิ) และ validate() ยังบังคับสูตรนี้เหมือนเดิม
+	-- แต่ค่านี้ **ไม่ใช่เวลาฟักจริงของไข่รายด่านอีกต่อไป** ตั้งแต่เพิ่มระบบเวลาฟักตามน้ำหนัก+คลาส —
+	-- เก็บไว้เป็น metadata/ประวัติเท่านั้น (ลบออกไปเลยเป็นการรื้อ field ที่ core-locked ไว้
+	-- ใน CLAUDE.md แยกต่างหาก ไม่ได้อยู่ในขอบเขตงานนี้)
 	SECONDS_PER_STAGE = 30,
 
-	-- ไข่ตำนานไม่ผูกด่าน จึงมีเวลาฟักของตัวเอง
-	-- ⚠️ ยาวกว่าด่าน 9 (270) อยู่เล็กน้อย โดยตั้งใจ — จ่าย Robux แล้วไม่ได้ฟักเร็วกว่าด้วย
-	LEGENDARY_SECONDS = 300,
+	-- ⚠️ เวลาฟักจริงของไข่ source="boss" (ไข่รายด่านทั้ง 9) มาจากตารางนี้แทน:
+	-- tier น้ำหนัก 1..7 → เวลาฐาน (วินาที) ของคลาส C แล้วคูณด้วย ClassHatchMultiplier
+	-- ดู Config.getHatchSeconds() · ต้องมี 7 ค่าตรงกับ 7 tier ใน WeightTiers เสมอ · validate() บังคับ
+	HatchTimeByTier = {
+		60, -- tier 1 (100-999 kg)     = 1 นาที
+		300, -- tier 2 (1K-9.9K)        = 5 นาที
+		1800, -- tier 3 (10K-99K)        = 30 นาที
+		7200, -- tier 4 (100K-999K)      = 2 ชม.
+		28800, -- tier 5 (1M-9.9M)        = 8 ชม.
+		57600, -- tier 6 (10M-99M)        = 16 ชม.
+		86400, -- tier 7 (100M คงที่)     = 24 ชม.
+	},
+
+	-- ตัวคูณเวลาฟักตามคลาสที่จะฟักออกมา (รู้ผลตอนวางไข่ลงสวนฟัก ไม่ใช่ตอนฟักเสร็จ —
+	-- ดูคอมเมนต์ที่ EggService.placeEgg) · ต้องมีครบทุกคลาสใน CharacterClasses · validate() บังคับ
+	ClassHatchMultiplier = {
+		C = 1,
+		B = 1.15,
+		A = 1.35,
+		S = 2,
+		SS = 2.6,
+	},
+
+	-- เพดานกันตั้งเลขพลาดใน HatchTimeByTier/ClassHatchMultiplier จนเวลาฟักยาวเวอร์
+	-- (เช่น tier 7 × SS = 24 ชม. × 2.6 = 62.4 ชม. ต้องไม่เกินนี้) · validate() บังคับ
+	MAX_HATCH_SECONDS = 7 * 24 * 3600, -- 7 วัน
+
+	-- ไข่ตำนานไม่ผูกด่านและไม่ผูก tier/คลาส จึงมีเวลาฟักคงที่ของตัวเอง (EggTypes.hatchTime
+	-- ของ egg_legendary ใช้ค่านี้ตรง ๆ) — ⚠️ ตั้งใจให้ "จ่ายเงินจริงซื้อความเร็ว":
+	-- เร็วกว่าไข่ tier 1 (60 วิ) พอดี ไม่ใช่ 300 วิเหมือนก่อนเพิ่มระบบเวลาฟักตามน้ำหนัก+คลาส
+	-- (ตอนนั้น 300 ตั้งใจให้ "ยาวกว่าด่าน 9" — ฐานเปลี่ยนไปแล้วเพราะด่าน 9 ตอนนี้ฟักได้ถึง 62.4 ชม.)
+	LEGENDARY_SECONDS = 60,
 }
 
 --------------------------------------------------------------------------------
@@ -1858,7 +1922,10 @@ end
 -- ⚠️ เรียกตอน "บอสวางไข่ในรัง" ไม่ใช่ตอนฟัก
 -- น้ำหนักถูกล็อกตั้งแต่ไข่โผล่ในรัง แล้วเอาไปกำหนดขนาดโมเดลไข่ให้ผู้เล่นเห็น
 -- (ไข่ใหญ่ = หนัก) การแย่งไข่จึงมีเป้าหมายจริง ไม่ใช่กดสุ่มมั่ว ๆ
--- ส่วนการสุ่ม "ตัวละคร" ทำตอนฟัก ด้วย Config.rollCharacter()
+-- ส่วนการสุ่ม "ตัวละคร" ทำตอน **วางไข่ลงสวนฟัก** ด้วย Config.rollCharacter()
+-- ⚠️ ย้ายจาก "ตอนฟักเสร็จ" มาเป็น "ตอนวางไข่" แล้ว (เดิมสุ่มตอนฟักเสร็จ) เพราะเวลาฟัก
+-- ต้องใช้คลาสของตัวละครมาคำนวณ (Config.getHatchSeconds) — server รู้ผลไว้ก่อนแล้ว
+-- แต่ยังไม่บอก client จนกว่าจะฟักเสร็จจริง ความเซอร์ไพรส์ตอนฟักของผู้เล่นจึงยังอยู่ครบ
 --
 -- ไข่ที่ผูกด่านไว้แล้ว (ไข่จากบอส) ใช้ด่านของตัวเองเสมอ
 -- ไข่ที่ไม่ผูกด่าน (ไข่ Robux) ใช้ค่า stage ที่ผู้เรียกส่งมา
@@ -1868,6 +1935,66 @@ function Config.rollMotherWeightForEgg(eggId: string, rng: Random, stage: number
 		return nil
 	end
 	return Config.rollMotherWeight(rng, egg.stage or stage, egg.guaranteedTier)
+end
+
+--------------------------------------------------------------------------------
+-- ขนาดโมเดล + เวลาฟักตามน้ำหนัก (ใช้ตาราง WeightTiers ฐานเสมอ ไม่ใช่ตารางรายด่าน —
+-- ตารางน้ำหนักใช้ชุดเดียวกันทุกด่านอยู่แล้วตามที่ตัดสินไว้)
+--------------------------------------------------------------------------------
+
+-- น้ำหนัก (kg) → index ของ tier ใน WeightTiers (1..7) — ต่ำกว่า tier 1 ถือเป็น tier 1,
+-- สูงกว่า tier สุดท้ายถือเป็น tier สุดท้าย (กันพังถ้ามีใครส่งค่าผิดช่วงเข้ามา)
+function Config.getWeightTierIndex(weight: number): number
+	for index, tier in WeightTiers do
+		if weight <= tier.max then
+			return index
+		end
+	end
+	return #WeightTiers
+end
+
+-- ตัวคูณขนาดโมเดลตาม tier ของน้ำหนักนี้ — ใช้ร่วมกันทั้งไข่และแม่ (Config.getEggVisualSize /
+-- Config.getMotherVisualSize คูณค่านี้กับฐานคนละค่า)
+function Config.getVisualScaleMultiplier(weight: number): number
+	local tierIndex = Config.getWeightTierIndex(weight)
+	return Config.Balance.VisualScale.WEIGHT_MULTIPLIER[tierIndex]
+end
+
+-- ขนาดโมเดลไข่ตามน้ำหนัก — ไข่แสดงขนาดเดียวกันทุกที่ที่เห็น ไม่มีเวอร์ชันย่อ
+function Config.getEggVisualSize(weight: number): Vector3
+	return scaleVec3(Config.MapDimensions.Blockout.EggSize, Config.getVisualScaleMultiplier(weight))
+end
+
+-- ขนาดโมเดลแม่ตามน้ำหนัก — inPen = true ย่อเหลือ MOTHER_PEN_SHRINK เท่า (แม่ในคอกเล็กกว่า
+-- ตอน "ถือ" หรือ "ส่งรบ" เสมอ ทุก tier เท่ากัน)
+function Config.getMotherVisualSize(weight: number, inPen: boolean): Vector3
+	local multiplier = Config.getVisualScaleMultiplier(weight)
+	if inPen then
+		multiplier *= Config.Balance.VisualScale.MOTHER_PEN_SHRINK
+	end
+	return scaleVec3(Config.MapDimensions.Blockout.MotherSize, multiplier)
+end
+
+-- เวลาฟักจริง (วินาที) ของไข่ source="boss" — คิดจาก tier น้ำหนัก × ตัวคูณคลาสของตัวละคร
+-- ที่จะฟักออกมา
+--
+-- ⚠️ charId ต้องรู้ผลแล้วก่อนเรียกฟังก์ชันนี้ — เท่ากับว่าต้องสุ่มตัวละคร (Config.rollCharacter)
+-- ตั้งแต่ตอน "วางไข่ลงสวนฟัก" ไม่ใช่ตอน "ฟักเสร็จ" เหมือนเดิม (เปลี่ยนจังหวะนี้โดยตั้งใจ —
+-- ยืนยันกับผู้ใช้แล้วว่ายอมรับการเปลี่ยนนี้ ดู EggService.placeEgg) ผลลัพธ์ยังไม่บอก client
+-- จนกว่าจะฟักเสร็จจริง (server เก็บไว้เงียบ ๆ ใน HatchSlot.charId) ความ "เซอร์ไพรส์" ตอนฟัก
+-- จึงยังอยู่ครบสำหรับผู้เล่น ต่างกันแค่ server รู้ผลก่อนเท่านั้น
+--
+-- ไข่ source="robux" (ไข่ตำนาน) **ไม่ใช้ฟังก์ชันนี้** ใช้ eggType.hatchTime ตรง ๆ เสมอ (คงที่)
+function Config.getHatchSeconds(weight: number, charId: string): number
+	local hatchery = Config.Balance.Hatchery
+	local tierIndex = Config.getWeightTierIndex(weight)
+	local base = hatchery.HatchTimeByTier[tierIndex]
+
+	local character = Config.getCharacter(charId)
+	local classId = if character then character.class else "C"
+	local classMultiplier = hatchery.ClassHatchMultiplier[classId] or 1
+
+	return base * classMultiplier
 end
 
 -- ไข่ที่บอสของด่านนั้นวางในรัง (ด่านนอกช่วงถูก clamp)
@@ -2853,6 +2980,66 @@ function Config.validate()
 					.. `(SECONDS_PER_STAGE × ด่าน {egg.stage})`
 			)
 		end
+	end
+
+	-- ⚠️ ตัวคูณขนาดโมเดลต้องมีครบ 1 ค่าต่อ 1 tier น้ำหนัก และต้องไต่ขึ้นเรื่อย ๆ
+	-- (ตัวเล็กแสดงเล็กกว่าตัวใหญ่เสมอ ไม่งั้นขนาดไข่จะบอกน้ำหนักผิด ๆ ขัดกับกลไก "แย่งไข่ที่ใหญ่กว่า")
+	do
+		local multipliers = Balance.VisualScale.WEIGHT_MULTIPLIER
+		assert(
+			#multipliers == #WeightTiers,
+			`Config: VisualScale.WEIGHT_MULTIPLIER มี {#multipliers} ค่า แต่มี {#WeightTiers} tier น้ำหนัก`
+		)
+		for index, multiplier in multipliers do
+			assert(multiplier > 0, `Config: VisualScale.WEIGHT_MULTIPLIER[{index}] ต้องมากกว่า 0`)
+			if index > 1 then
+				assert(
+					multiplier > multipliers[index - 1],
+					`Config: VisualScale.WEIGHT_MULTIPLIER ต้องไต่ขึ้นเรื่อย ๆ ตาม tier `
+						.. `(tier {index} = {multiplier} ไม่มากกว่า tier {index - 1} = {multipliers[index - 1]})`
+				)
+			end
+		end
+		assert(
+			Balance.VisualScale.MOTHER_PEN_SHRINK > 0 and Balance.VisualScale.MOTHER_PEN_SHRINK <= 1,
+			`Config: VisualScale.MOTHER_PEN_SHRINK ต้องอยู่ในช่วง (0, 1]`
+		)
+	end
+
+	-- ⚠️ เวลาฟักตามน้ำหนัก+คลาส (Config.getHatchSeconds) — ตารางต้องครบและเวลาสูงสุด
+	-- ต้องไม่เกินเพดานที่ตั้งไว้ กันตั้งเลขพลาดจนไข่บางฟองฟักนานเกินสมเหตุสมผล
+	do
+		local hatchery = Balance.Hatchery
+		local hatchTimeByTier = hatchery.HatchTimeByTier
+		assert(
+			#hatchTimeByTier == #WeightTiers,
+			`Config: Hatchery.HatchTimeByTier มี {#hatchTimeByTier} ค่า แต่มี {#WeightTiers} tier น้ำหนัก`
+		)
+		for index, seconds in hatchTimeByTier do
+			assert(seconds > 0, `Config: Hatchery.HatchTimeByTier[{index}] ต้องมากกว่า 0`)
+			if index > 1 then
+				assert(
+					seconds > hatchTimeByTier[index - 1],
+					`Config: Hatchery.HatchTimeByTier ต้องไต่ขึ้นเรื่อย ๆ ตาม tier `
+						.. `(tier {index} = {seconds} ไม่มากกว่า tier {index - 1} = {hatchTimeByTier[index - 1]})`
+				)
+			end
+		end
+
+		local maxClassMultiplier = 0
+		for classId in CharacterClasses do
+			local multiplier = hatchery.ClassHatchMultiplier[classId]
+			assert(multiplier ~= nil, `Config: Hatchery.ClassHatchMultiplier ไม่มีคลาส "{classId}"`)
+			assert(multiplier > 0, `Config: Hatchery.ClassHatchMultiplier["{classId}"] ต้องมากกว่า 0`)
+			maxClassMultiplier = math.max(maxClassMultiplier, multiplier)
+		end
+
+		local worstCaseSeconds = hatchTimeByTier[#hatchTimeByTier] * maxClassMultiplier
+		assert(
+			worstCaseSeconds <= hatchery.MAX_HATCH_SECONDS,
+			`Config: เวลาฟักสูงสุดที่เป็นไปได้ {worstCaseSeconds} วิ (tier สูงสุด × ตัวคูณคลาสสูงสุด) `
+				.. `เกินเพดาน MAX_HATCH_SECONDS ({hatchery.MAX_HATCH_SECONDS} วิ)`
+		)
 	end
 
 	for unitId, unit in UnitTypes do

@@ -12,8 +12,13 @@
 --       └─ สุ่ม "น้ำหนัก" ตรงนี้ ด้วย Config.rollMotherWeightForEgg()
 --   ไข่เข้ากระเป๋า (heldEggs) → เข้าสวนฟัก (hatching)
 --       └─ น้ำหนักเดินทางไปด้วยทุกขั้น ห้ามสุ่มใหม่ ห้ามคำนวณใหม่
+--       └─ ⚠️ สุ่ม "ตัวละคร" ตรงนี้ด้วย ด้วย Config.rollCharacter() — เก็บไว้เงียบ ๆ ใน
+--          HatchSlot.charId **ไม่ส่งให้ client เห็น** เหตุผล: เวลาฟัก (Config.getHatchSeconds)
+--          ต้องรู้คลาสก่อนคำนวณ ผู้เล่นยังไม่เห็นผลจนกว่าจะฟักเสร็จจริงเหมือนเดิม
+--          (ไข่ source="robux" ไม่ต้องรู้คลาสก่อน เพราะฟักคงที่เสมอ — ยังคง roll ตรงนี้ทันที
+--          เพื่อให้โครง HatchSlot เหมือนกันทุกไข่)
 --   ครบเวลาฟัก
---       └─ สุ่ม "ตัวละคร" ตรงนี้เท่านั้น ด้วย Config.rollCharacter()
+--       └─ อ่าน "ตัวละคร" จาก slot.charId ที่สุ่มค้างไว้ตั้งแต่ตอนวาง (ไม่สุ่มใหม่)
 --
 --   เหตุผล: ขนาดโมเดลไข่ในรังบอกน้ำหนักให้ผู้เล่นเห็น (Phase 5) การแย่งไข่จึงมีเป้าหมายจริง
 --   ผลที่ตามมา: ไข่ชนิดเดียวกันน้ำหนักต่างกันได้ → เก็บ "รายฟอง" ไม่ใช่ตัวนับ
@@ -266,8 +271,14 @@ local function hatch(player: Player, data: Data, slotIndex: number, slot: HatchS
 	data.hatching[slotIndex] = false
 	PenService.hideEgg(player, slotIndex)
 
-	-- ⚠️ สุ่มแค่ "ตัวละคร" ตรงนี้ · น้ำหนักยกมาจากตัวไข่ ไม่สุ่มใหม่
-	local charId = Config.rollCharacter(slot.eggId, rng)
+	-- ⚠️ ตัวละครสุ่มไว้แล้วตั้งแต่ตอนวางไข่ลงสวนฟัก (EggService.placeEgg) อ่านจาก slot.charId
+	-- ตรง ๆ ไม่สุ่มใหม่ตรงนี้ — สุ่มใหม่จะทำให้เวลาฟักที่คำนวณไว้ตอนวาง (จากคลาสที่สุ่มได้ตอนนั้น)
+	-- ไม่ตรงกับคลาสที่ได้จริงตอนฟัก
+	--
+	-- ⚠️ fallback: ช่องที่ค้างฟักมาจากก่อนเพิ่มฟิลด์นี้ (deploy รุ่นเก่า) จะไม่มี charId ติดมา
+	-- สุ่มให้ตรงนี้แทนเป็นกรณีพิเศษ (เวลาฟักของช่องนั้นคำนวณจากคลาสเก่าไปแล้ว แก้ย้อนหลังไม่ได้
+	-- แต่ไม่กระทบอะไรเพิ่ม เพราะไข่ฟักไปแล้วตอนนี้พอดี)
+	local charId = slot.charId or Config.rollCharacter(slot.eggId, rng)
 	if not charId then
 		warn(`[EggService] ไข่ "{slot.eggId}" ไม่มีตารางคลาส ฟักไม่ได้`)
 		return
@@ -420,17 +431,35 @@ function EggService.placeEgg(player: Player, rawEggId: unknown, rawSlotIndex: un
 		slotIndex = rawSlotIndex
 	end
 
-	-- 5) ผ่านหมดแล้ว ย้ายทั้งฟอง (eggId + weight) เข้าสวน
+	-- 5) สุ่มตัวละครตอนนี้เลย (ก่อนแตะกระเป๋า/สวนฟักจริง กันเซฟข้อมูลค้างถ้าสุ่มไม่ผ่าน)
+	-- ⚠️ ย้ายมาจาก "ตอนฟักเสร็จ" — เวลาฟักต้องใช้คลาสมาคำนวณ (Config.getHatchSeconds)
+	-- server รู้ผลไว้ก่อนแล้ว แต่ยังไม่ส่งให้ client เห็น (ดูคอมเมนต์หัวไฟล์)
+	local charId = Config.rollCharacter(heldEgg.eggId, rng)
+	if not charId then
+		return false, `ไข่ "{heldEgg.eggId}" ไม่มีตารางคลาส ฟักไม่ได้`
+	end
+
+	-- ⚠️ ไข่ source="robux" (ไข่ตำนาน) ฟักคงที่เสมอ ไม่ขึ้นกับ tier/คลาส — ใช้ eggType.hatchTime
+	-- ตรง ๆ · ไข่ source="boss" คำนวณจากน้ำหนัก+คลาสที่เพิ่งสุ่มได้ (Config.getHatchSeconds)
+	local hatchSeconds: number
+	if eggType.source == "robux" then
+		hatchSeconds = eggType.hatchTime
+	else
+		hatchSeconds = Config.getHatchSeconds(heldEgg.weight, charId)
+	end
+
+	-- 6) ผ่านหมดแล้ว ย้ายทั้งฟอง (eggId + weight + charId) เข้าสวน
 	-- ⚠️ ลบออกจากกระเป๋าด้วย id ไม่ใช่ตำแหน่งที่หาเจอเมื่อกี้ — กันกรณีอาเรย์ขยับระหว่างทาง
 	PlayerData.removeHeldEgg(data.heldEggs, rawEggId)
 	data.hatching[slotIndex] = {
 		eggId = heldEgg.eggId,
 		weight = heldEgg.weight, -- ← เดินทางไปด้วย ไม่สุ่มใหม่
+		charId = charId, -- ← สุ่มไว้แล้ว ไม่บอก client จนกว่าจะฟักเสร็จ (ดู hatch())
 		startedAt = now,
-		hatchAt = now + eggType.hatchTime,
+		hatchAt = now + hatchSeconds,
 	}
 
-	PenService.showEgg(player, slotIndex, eggType)
+	PenService.showEgg(player, slotIndex, eggType, heldEgg.weight)
 	EggService.sync(player)
 
 	return true, nil
@@ -668,7 +697,7 @@ function EggService.onPlayerAdded(player: Player): boolean
 		if type(slot) == "table" then
 			local eggType = Config.getEgg(slot.eggId)
 			if eggType then
-				PenService.showEgg(player, slotIndex, eggType)
+				PenService.showEgg(player, slotIndex, eggType, slot.weight)
 			end
 		end
 	end

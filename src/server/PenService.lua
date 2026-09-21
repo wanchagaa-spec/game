@@ -198,7 +198,8 @@ local function findEgg(pen: Pen, slotIndex: number): Part?
 	return pen.eggsFolder:FindFirstChild(`Egg{slotIndex}`) :: Part?
 end
 
-function PenService.showEgg(player: Player, slotIndex: number, egg: Config.EggType)
+-- weight = น้ำหนักของไข่ฟองนี้ (ใช้กำหนดขนาดโมเดล — ไข่ใหญ่ = หนัก, Config.getEggVisualSize)
+function PenService.showEgg(player: Player, slotIndex: number, egg: Config.EggType, weight: number)
 	local pen = penByUserId[player.UserId]
 	if not pen then
 		return
@@ -211,7 +212,7 @@ function PenService.showEgg(player: Player, slotIndex: number, egg: Config.EggTy
 	end
 
 	local spot = randomPointInPen(pen.plot.center)
-	local size = MAP.Blockout.EggSize
+	local size = Config.getEggVisualSize(weight)
 
 	local part = Instance.new("Part")
 	part.Name = `Egg{slotIndex}`
@@ -263,13 +264,16 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 	pen.mothersFolder:ClearAllChildren()
 
 	local now = os.clock()
-	local size = MAP.Blockout.MotherSize
-	-- แม่เป็นทรงกล่อง ครึ่งความสูงจึงเป็น Y/2 ตรง ๆ (ต่างจากไข่ที่เป็นทรงกลม)
-	local restingY = Config.getPenRestingY(size.Y / 2)
 
 	for _, mother in mothers do
 		local character = Config.getCharacter(mother.charId)
 		local class = if character then character.class else "C"
+
+		-- ⚠️ ขนาดต่อตัว ไม่ใช่ค่าคงที่ร่วม — แม่แต่ละตัวหนักไม่เท่ากัน (Config.getMotherVisualSize)
+		-- `inPen = true` ย่อ 1/10 จากขนาดตอนถือ/ส่งรบเสมอ
+		local size = Config.getMotherVisualSize(mother.weight, true)
+		-- แม่เป็นทรงกล่อง ครึ่งความสูงจึงเป็น Y/2 ตรง ๆ (ต่างจากไข่ที่เป็นทรงกลม)
+		local restingY = Config.getPenRestingY(size.Y / 2)
 
 		local spot = randomPointInPen(pen.plot.center)
 

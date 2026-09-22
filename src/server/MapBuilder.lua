@@ -206,7 +206,11 @@ end
 
 -- รั้วครบสี่ด้านของแปลง · ด้านที่หันเข้าทางเดินกลางเว้นช่องประตูไว้ตรงกลาง
 -- ⚠️ คืนค่า Z ของแนวประตู ให้ผู้เรียกเอาไปวางป้ายข้างประตู
-local function buildFence(plot: Model, center: Vector3, sizeX: number, sizeZ: number): number
+-- skipRight: คอกคอลัมน์ขวาสุดมีขอบ (right) ชนกับกำแพงหินขอบแมพพอดี (X เดียวกับ
+-- Config.getPenYardRightX() ที่ MapBuilder.buildBoundary ใช้วางกำแพง EastUpper/EastLower)
+-- ⚠️ เคยเป็นบั๊ก "รั้วไม้ซ้อนทับกำแพงหิน" ตรงปากทางเข้าเลน (คอก 3/6 ที่ติดเลนรบ)
+-- แก้ด้วยการไม่วาดรั้วไม้ด้านนี้ซ้ำ เพราะกำแพงหินทำหน้าที่เป็นขอบเขต + ตัวกันชนแทนอยู่แล้ว
+local function buildFence(plot: Model, center: Vector3, sizeX: number, sizeZ: number, skipRight: boolean): number
 	local halfX, halfZ = sizeX / 2, sizeZ / 2
 	local left, right = center.X - halfX, center.X + halfX
 	local back, front = center.Z - halfZ, center.Z + halfZ
@@ -218,7 +222,9 @@ local function buildFence(plot: Model, center: Vector3, sizeX: number, sizeZ: nu
 	-- ด้านตรงข้ามประตู + สองด้านข้าง = รั้วเต็มไม่มีช่อง
 	fenceRun(plot, "FenceFar", left, right, farZ, true)
 	fenceRun(plot, "FenceLeft", back, front, left, false)
-	fenceRun(plot, "FenceRight", back, front, right, false)
+	if not skipRight then
+		fenceRun(plot, "FenceRight", back, front, right, false)
+	end
 
 	-- ด้านประตู: แบ่งเป็นสองช่วง เว้นช่องกลางกว้าง PEN_GATE_WIDTH
 	local gateHalf = MAP.Pen.GateWidth / 2
@@ -301,7 +307,10 @@ function MapBuilder.buildPlaza(parent: Folder)
 		base.CanCollide = false
 		model.PrimaryPart = base
 
-		local gateZ = buildFence(model, center, sizeX, sizeZ)
+		-- คอลัมน์ขวาสุด (ติดเลนรบ) ให้กำแพงหินขอบแมพทำหน้าที่แทนรั้วไม้ด้านนี้
+		local col = (index - 1) % MAP.Pen.PerRow
+		local isLastColumn = col == MAP.Pen.PerRow - 1
+		local gateZ = buildFence(model, center, sizeX, sizeZ, isLastColumn)
 		local label = buildPenSign(model, center, gateZ, index)
 
 		penPlots[index] = { index = index, model = model, base = base, center = center, label = label }

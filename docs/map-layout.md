@@ -466,7 +466,7 @@ luau tools/dump-map.luau
 | `StageWall` | `Thickness` (ความสูงใช้ `Lane.WallHeight` ร่วมกัน) | 5 |
 | `Shop` | `StallSize` · `StallCount` · `StallHeight` · `Gap` | 12×12 · 2 · 8 · 20 |
 | `BossRoom` | `Size` · `EggRadiusRatio` · `EggPadSize` | 80×80 · 0.3 · 7×0.4×7 |
-| `Boundary` | `Height` · `Margin` · `Thickness` | 50 · 50 · 5 |
+| `Boundary` | `Height` (sync กับ `Lane.WallHeight`) · `Margin` · `Thickness` | 40 · 50 · 5 |
 | `Wander` | `Speed` · `PauseMin` · `PauseMax` · `Tick` | 4 · 1.5 · 5 · 0.1 |
 | `Blockout` | `MotherSize` · `EggSize` | 3.5×3.5×5 · 3×3.8×3 |
 

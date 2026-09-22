@@ -44,11 +44,21 @@ local DIM = Color3.fromRGB(160, 165, 175)
 local ACCENT = Color3.fromRGB(90, 160, 235)
 
 local HEADER_HEIGHT = 36
+local TAB_BAR_HEIGHT = 32
+local ACTION_BUTTON_HEIGHT = 30
+local RESULT_HEIGHT = 32
+local BODY_GAP = 6
+-- ⚠️ ผลรวมความสูงของทุกอย่างใน body ยกเว้น gridScroll — ใช้คำนวณ gridScroll.Size ตรง ๆ
+-- แทน UIFlexItem (FlexMode=Fill) ที่เคยใช้ — บนไคลเอนต์จริงบางเครื่องมันไม่ทำงาน
+-- แล้ว gridScroll ตกกลับไปใช้ fallback Size เต็ม 100% ซ้อนทับพี่น้องตัวอื่นจน body ล้นทะลุแผง
+local FIXED_STACK_HEIGHT = TAB_BAR_HEIGHT + ACTION_BUTTON_HEIGHT + RESULT_HEIGHT + BODY_GAP * 3
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "EggFarmDebugUI"
 gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
+-- ⚠️ true เคยทำให้แผงวาดทับ/อยู่ใต้ไอคอนระบบของ Roblox บนแถบบนสุด (report/chat/mic ฯลฯ)
+-- ซ่อนแถบหัวไปครึ่งหนึ่งจนกดปุ่มย่อ/ขยายไม่โดน — false ให้ Roblox เว้น inset ให้เองอัตโนมัติ
+gui.IgnoreGuiInset = false
 gui.Parent = playerGui
 
 -- ⚠️ ขนาดเป็น scale ไม่ใช่ pixel ตายตัว — กันแผงบังจอเกิน ~40% บนมือถือจอเล็ก
@@ -75,6 +85,9 @@ local sizeConstraint = Instance.new("UISizeConstraint")
 sizeConstraint.MinSize = Vector2.new(220, 4)
 sizeConstraint.MaxSize = Vector2.new(420, 560)
 sizeConstraint.Parent = panel
+
+-- ⚠️ กันเนื้อหาล้นออกนอกกรอบแผง (เคยเกิดจริง — ดูคอมเมนต์ FIXED_STACK_HEIGHT ด้านบน)
+panel.ClipsDescendants = true
 
 --------------------------------------------------------------------------------
 -- แถบหัว: ชื่อ + ปุ่มย่อ/ขยาย (กดแล้วเหลือแค่แถบนี้ ไม่บังจอ)
@@ -142,7 +155,7 @@ local function makeButton(name: string, order: number, text: string): TextButton
 	local button = Instance.new("TextButton")
 	button.Name = name
 	button.LayoutOrder = order
-	button.Size = UDim2.new(1, 0, 0, 30)
+	button.Size = UDim2.new(1, 0, 0, ACTION_BUTTON_HEIGHT)
 	button.BackgroundColor3 = ACCENT
 	button.BorderSizePixel = 0
 	button.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -159,50 +172,99 @@ local function makeButton(name: string, order: number, text: string): TextButton
 	return button
 end
 
-local placeButton = makeButton("PlaceEgg", 1, "เอาไข่ฟองแรกเข้าสวนฟัก")
-local toBagButton = makeButton("ToBag", 2, "ย้ายแม่ตัวแรกในคอก → กระเป๋า")
-local toPenButton = makeButton("ToPen", 3, "ย้ายแม่ตัวแรกในกระเป๋า → คอก")
+--------------------------------------------------------------------------------
+-- แถบแท็บ: แม่ / ไข่ — เลือกดูรายตัว/รายฟองแยกกันคนละแท็บ
+--------------------------------------------------------------------------------
 
--- ⚠️ ลิสต์ทั้งหมด (ไข่ในกระเป๋า/สวนฟัก/คอก/กระเป๋าแม่) รวมอยู่ใน ScrollingFrame เดียว
+local TAB_ACTIVE_COLOR = ACCENT
+local TAB_INACTIVE_COLOR = Color3.fromRGB(50, 54, 62)
+
+local tabBar = Instance.new("Frame")
+tabBar.Name = "TabBar"
+tabBar.LayoutOrder = 1
+tabBar.Size = UDim2.new(1, 0, 0, TAB_BAR_HEIGHT)
+tabBar.BackgroundTransparency = 1
+tabBar.Parent = body
+
+local tabBarLayout = Instance.new("UIListLayout")
+tabBarLayout.FillDirection = Enum.FillDirection.Horizontal
+tabBarLayout.Padding = UDim.new(0, 6)
+tabBarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+tabBarLayout.Parent = tabBar
+
+local function makeTabButton(name: string, order: number, text: string): TextButton
+	local tabButton = Instance.new("TextButton")
+	tabButton.Name = name
+	tabButton.LayoutOrder = order
+	-- ⚠️ -3/-3 หักกันพอดีกับ Padding=6 ของ tabBarLayout ให้ปุ่มสองอันเต็มความกว้าง tabBar
+	-- ไม่เหลือ/ไม่ขาด (เลขคงที่ ผูกกับ Padding ด้านบน ถ้าแก้ Padding ต้องแก้คู่กัน)
+	tabButton.Size = UDim2.new(0.5, -3, 1, 0)
+	tabButton.BackgroundColor3 = TAB_INACTIVE_COLOR
+	tabButton.BorderSizePixel = 0
+	tabButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	tabButton.TextSize = 14
+	tabButton.Font = Enum.Font.SourceSansBold
+	tabButton.Text = text
+	tabButton.AutoButtonColor = true
+	tabButton.Parent = tabBar
+
+	local tabCorner = Instance.new("UICorner")
+	tabCorner.CornerRadius = UDim.new(0, 6)
+	tabCorner.Parent = tabButton
+
+	return tabButton
+end
+
+local motherTabButton = makeTabButton("MotherTab", 1, "แม่")
+local eggTabButton = makeTabButton("EggTab", 2, "ไข่")
+
+local actionButton = makeButton("Action", 2, "กำลังโหลด...")
+
+local DISABLED_ACTION_COLOR = Color3.fromRGB(70, 74, 82)
+
+local function setActionButton(text: string, enabled: boolean)
+	actionButton.Text = text
+	actionButton.Active = enabled
+	actionButton.AutoButtonColor = enabled
+	actionButton.BackgroundColor3 = if enabled then ACCENT else DISABLED_ACTION_COLOR
+end
+
+-- ⚠️ กริดของแม่/ไข่ (ไข่ในกระเป๋า/สวนฟัก/คอก/กระเป๋าแม่) รวมอยู่ใน ScrollingFrame เดียวต่อแท็บ
 -- แทนที่จะแยกกล่อง scroll ซ้อนกันหลายอัน (scroll ซ้อน scroll ใช้งานสับสน เลื่อนผิดกล่อง)
--- ⚠️ UIFlexItem(Fill) ให้กินพื้นที่ที่เหลือทั้งหมดหลังหักปุ่ม/ผลลัพธ์ — ไม่ต้องคำนวณความสูงเอง
--- (Size เต็ม 1,0,1,0 ที่ตั้งไว้เป็นแค่ fallback เผื่อ UIFlexItem ใช้ไม่ได้บนเอนจินเก่ามาก)
-local scrollArea = Instance.new("ScrollingFrame")
-scrollArea.Name = "List"
-scrollArea.LayoutOrder = 4
-scrollArea.Size = UDim2.new(1, 0, 1, 0)
-scrollArea.BackgroundColor3 = Color3.fromRGB(20, 22, 26)
-scrollArea.BackgroundTransparency = 0.2
-scrollArea.BorderSizePixel = 0
-scrollArea.ScrollBarThickness = 6
-scrollArea.CanvasSize = UDim2.new(0, 0, 0, 0)
-scrollArea.AutomaticCanvasSize = Enum.AutomaticSize.Y
-scrollArea.Parent = body
+-- ⚠️ Size คำนวณจาก FIXED_STACK_HEIGHT ตรง ๆ (ดูคอมเมนต์ตอนประกาศค่าคงที่ด้านบนของไฟล์)
+-- ไม่ใช้ UIFlexItem อีกต่อไป เพราะมันคือสาเหตุที่เนื้อหาเคยล้นทะลุแผงจริงในเกม
+local gridScroll = Instance.new("ScrollingFrame")
+gridScroll.Name = "Grid"
+gridScroll.LayoutOrder = 3
+gridScroll.Size = UDim2.new(1, 0, 1, -FIXED_STACK_HEIGHT)
+gridScroll.BackgroundColor3 = Color3.fromRGB(20, 22, 26)
+gridScroll.BackgroundTransparency = 0.2
+gridScroll.BorderSizePixel = 0
+gridScroll.ScrollBarThickness = 6
+gridScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+gridScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+gridScroll.Parent = body
 
-local scrollCorner = Instance.new("UICorner")
-scrollCorner.CornerRadius = UDim.new(0, 6)
-scrollCorner.Parent = scrollArea
+local gridCorner = Instance.new("UICorner")
+gridCorner.CornerRadius = UDim.new(0, 6)
+gridCorner.Parent = gridScroll
 
-local scrollPadding = Instance.new("UIPadding")
-scrollPadding.PaddingTop = UDim.new(0, 4)
-scrollPadding.PaddingBottom = UDim.new(0, 4)
-scrollPadding.PaddingLeft = UDim.new(0, 6)
-scrollPadding.PaddingRight = UDim.new(0, 6)
-scrollPadding.Parent = scrollArea
+local gridPadding = Instance.new("UIPadding")
+gridPadding.PaddingTop = UDim.new(0, 4)
+gridPadding.PaddingBottom = UDim.new(0, 4)
+gridPadding.PaddingLeft = UDim.new(0, 6)
+gridPadding.PaddingRight = UDim.new(0, 6)
+gridPadding.Parent = gridScroll
 
-local scrollLayout = Instance.new("UIListLayout")
-scrollLayout.Padding = UDim.new(0, 2)
-scrollLayout.SortOrder = Enum.SortOrder.LayoutOrder
-scrollLayout.Parent = scrollArea
-
-local scrollFlex = Instance.new("UIFlexItem")
-scrollFlex.FlexMode = Enum.UIFlexMode.Fill
-scrollFlex.Parent = scrollArea
+local gridLayout = Instance.new("UIListLayout")
+gridLayout.Padding = UDim.new(0, 4)
+gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+gridLayout.Parent = gridScroll
 
 local resultLabel = Instance.new("TextLabel")
 resultLabel.Name = "Result"
-resultLabel.LayoutOrder = 5
-resultLabel.Size = UDim2.new(1, 0, 0, 32)
+resultLabel.LayoutOrder = 4
+resultLabel.Size = UDim2.new(1, 0, 0, RESULT_HEIGHT)
 resultLabel.BackgroundTransparency = 1
 resultLabel.TextColor3 = DIM
 resultLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -228,47 +290,140 @@ end
 toggleButton.Activated:Connect(applyCollapsedState)
 
 --------------------------------------------------------------------------------
--- แถวในลิสต์ — การ์ดกะทัดรัด: ชื่อ+น้ำหนัก+คลาสในบรรทัดเดียว ไม่กินพื้นที่แนวตั้งเยอะ
+-- การ์ดในกริด — สีตามคลาส (ชุดเดียวกับ PenService ที่วาดแม่ในโลกจริง เพื่อให้ตรงกัน)
 --------------------------------------------------------------------------------
+
+local CLASS_COLORS: { [string]: Color3 } = {
+	SS = Color3.fromRGB(240, 185, 60),
+	S = Color3.fromRGB(190, 110, 235),
+	A = Color3.fromRGB(230, 110, 90),
+	B = Color3.fromRGB(120, 215, 180),
+	C = Color3.fromRGB(200, 200, 190),
+}
+
+local EGG_CARD_COLOR = Color3.fromRGB(210, 205, 190)
+
+local CARD_SIZE = 72
+local CARD_GAP = 6
+
+type CardSpec = {
+	title: string,
+	subtitle: string,
+	color: Color3,
+	selected: boolean,
+	onClick: () -> (),
+}
+
+local function createCard(spec: CardSpec, parent: Instance, layoutOrder: number): TextButton
+	local card = Instance.new("TextButton")
+	card.Name = "Card"
+	card.LayoutOrder = layoutOrder
+	card.Size = UDim2.new(0, CARD_SIZE, 0, CARD_SIZE)
+	card.BackgroundColor3 = spec.color
+	card.BorderSizePixel = 0
+	card.AutoButtonColor = true
+	card.Text = ""
+	card.Parent = parent
+
+	local cardCorner = Instance.new("UICorner")
+	cardCorner.CornerRadius = UDim.new(0, 6)
+	cardCorner.Parent = card
+
+	if spec.selected then
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = Color3.fromRGB(255, 255, 255)
+		stroke.Thickness = 2
+		stroke.Parent = card
+	end
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Label"
+	label.Size = UDim2.new(1, -6, 1, -6)
+	label.Position = UDim2.new(0, 3, 0, 3)
+	label.BackgroundTransparency = 1
+	label.TextColor3 = Color3.fromRGB(30, 30, 30)
+	label.TextWrapped = true
+	label.TextXAlignment = Enum.TextXAlignment.Center
+	label.TextYAlignment = Enum.TextYAlignment.Center
+	label.Font = Enum.Font.SourceSansBold
+	label.TextScaled = true
+	label.Text = `{spec.title}\n{spec.subtitle}`
+	label.Parent = card
+
+	-- ⚠️ TextScaled ทำให้ตัวอักษรโตได้ไม่จำกัด (ชื่อสั้น) — ล็อกเพดานไว้กันตัวใหญ่เกินการ์ด
+	local textConstraint = Instance.new("UITextSizeConstraint")
+	textConstraint.MaxTextSize = 14
+	textConstraint.Parent = label
+
+	card.Activated:Connect(spec.onClick)
+
+	return card
+end
 
 local rowOrder = 0
 
-local function addSectionHeader(text: string)
+local function addInfoRow(text: string, emphasized: boolean?)
 	rowOrder += 1
 	local label = Instance.new("TextLabel")
 	label.Name = "Row"
 	label.LayoutOrder = rowOrder
 	label.Size = UDim2.new(1, 0, 0, 18)
 	label.BackgroundTransparency = 1
-	label.TextColor3 = DIM
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.TextSize = 13
-	label.Font = Enum.Font.SourceSansBold
-	label.Text = text
-	label.Parent = scrollArea
-end
-
-local function addRow(text: string)
-	rowOrder += 1
-	local label = Instance.new("TextLabel")
-	label.Name = "Row"
-	label.LayoutOrder = rowOrder
-	label.Size = UDim2.new(1, 0, 0, 16)
-	label.BackgroundTransparency = 1
-	label.TextColor3 = FG
+	label.TextColor3 = if emphasized then DIM else FG
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.TextTruncate = Enum.TextTruncate.AtEnd
 	label.TextSize = 13
-	label.Font = Enum.Font.SourceSans
+	label.Font = if emphasized then Enum.Font.SourceSansBold else Enum.Font.SourceSans
 	label.Text = text
-	label.Parent = scrollArea
+	label.Parent = gridScroll
 end
 
--- ล้างแถวเก่าก่อนสร้างใหม่ทุกครั้งที่ sync มา — เหลือแค่ UIPadding/UIListLayout/UIFlexItem ไว้
--- (ตัวที่เป็นแถวข้อมูลทั้งหมดตั้งชื่อ "Row" และเป็น TextLabel เท่านั้น กรองแบบนี้พอ)
-local function clearRows()
-	for _, child in scrollArea:GetChildren() do
-		if child:IsA("TextLabel") then
+-- ⚠️ คำนวณจำนวนคอลัมน์สดจากความกว้างจริงของ gridScroll (AbsoluteSize) ไม่ hardcode
+-- รองรับทั้งจอมือถือเล็กและจอกว้าง — AbsoluteSize อาจยังเป็น 0 ก่อน layout รอบแรกเสร็จ
+-- จึงมี fallback กันหารด้วยค่าติดลบ/ศูนย์
+local function computeColumns(): number
+	local availableWidth = gridScroll.AbsoluteSize.X - gridPadding.PaddingLeft.Offset - gridPadding.PaddingRight.Offset - gridScroll.ScrollBarThickness
+	if availableWidth <= 0 then
+		availableWidth = 220
+	end
+	return math.max(1, math.floor((availableWidth + CARD_GAP) / (CARD_SIZE + CARD_GAP)))
+end
+
+-- ⚠️ ไม่ใช้ UIGridLayout ตรง ๆ เพราะต้องแทรกหัวข้อความกว้างเต็มแถวปนกับกริดที่ wrap ได้
+-- (UIGridLayout ไม่รองรับ "span ทุกคอลัมน์" ให้ label เดียว) จึงห่อการ์ดเป็นแถว ๆ เอง
+-- แล้ววาง "GridRow" (Frame ธรรมดา) แต่ละแถวเข้า UIListLayout แนวตั้งเดิมของ gridScroll แทน
+local function addCardGrid(cards: { CardSpec })
+	if #cards == 0 then
+		return
+	end
+	local columns = computeColumns()
+	local index = 1
+	while index <= #cards do
+		rowOrder += 1
+		local row = Instance.new("Frame")
+		row.Name = "GridRow"
+		row.LayoutOrder = rowOrder
+		row.Size = UDim2.new(1, 0, 0, CARD_SIZE)
+		row.BackgroundTransparency = 1
+		row.Parent = gridScroll
+
+		for col = 0, columns - 1 do
+			local card = cards[index]
+			if not card then
+				break
+			end
+			local cardFrame = createCard(card, row, col + 1)
+			cardFrame.Position = UDim2.new(0, col * (CARD_SIZE + CARD_GAP), 0, 0)
+			index += 1
+		end
+	end
+end
+
+-- ล้างเนื้อหาเก่าก่อนเรนเดอร์ใหม่ทุกครั้ง (สลับแท็บ/เลือกของ/sync มาใหม่) เหลือแค่
+-- UIPadding/UIListLayout ของ gridScroll ไว้ — แถวข้อมูลทั้งหมดตั้งชื่อ "Row"/"GridRow" เท่านั้น
+local function clearGrid()
+	for _, child in gridScroll:GetChildren() do
+		if child.Name == "Row" or child.Name == "GridRow" then
 			child:Destroy()
 		end
 	end
@@ -276,111 +431,220 @@ local function clearRows()
 end
 
 --------------------------------------------------------------------------------
--- สถานะล่าสุดที่ server ส่งมา (ไว้ให้ปุ่มอ้างอิง)
+-- สถานะที่เลือกอยู่ + ข้อมูลล่าสุดจาก server
 --------------------------------------------------------------------------------
 
--- ⚠️ เก็บ **id ประจำฟอง** ไม่ใช่ตำแหน่งในลิสต์
--- ตำแหน่งเลื่อนได้ทุกครั้งที่มีไข่ถูกเอาออกจากกระเป๋า id ไม่เลื่อน
-local firstHeldId: number? = nil
-local firstPenUid: string? = nil
-local firstBagUid: string? = nil
+local activeTab: "mothers" | "eggs" = "mothers"
+-- ⚠️ เก็บ uid/id ประจำตัว ไม่ใช่ตำแหน่งในลิสต์ — ลิสต์เลื่อนได้ทุกครั้งที่มีของเข้า/ออก
+local selectedMotherUid: string? = nil
+local selectedHeldEggId: number? = nil
+-- ⚠️ ต้องรู้ว่าแม่ที่เลือกอยู่ตอนนี้อยู่คอกหรือกระเป๋า ถึงจะรู้ว่าปุ่มย้ายต้องยิงไปทางไหน
+local motherLocationByUid: { [string]: "pen" | "bag" } = {}
+local lastPayload: any = nil
 
---------------------------------------------------------------------------------
--- ต่อสาย
---------------------------------------------------------------------------------
+-- ⚠️ forward-declare: onClick ของการ์ดใน renderMothersTab/renderEggsTab เรียก renderActiveTab
+-- ตอนถูกกด (ไม่ใช่ตอนถูกสร้าง) จึงอ้างถึงตัวแปรนี้ก่อนที่ฟังก์ชันจริงจะถูกเซ็ตได้ตราบใดที่
+-- ประกาศ local ไว้ก่อน — ห้ามใช้ `function renderActiveTab()` เฉย ๆ เพราะจะกลายเป็น global
+-- ซึ่งขัดกับ --!strict
+local renderActiveTab: () -> ()
 
-placeButton.Activated:Connect(function()
-	if not firstHeldId then
+local function renderMothersTab()
+	if not lastPayload then
 		return
 	end
-	-- ⚠️ ส่ง **id ประจำฟอง** ไม่ใช่ชนิดไข่ และไม่ใช่ตำแหน่งในลิสต์
-	--   · ชนิดไข่ระบุไม่ได้ — ไข่ชนิดเดียวกันน้ำหนักต่างกันได้
-	--   · ตำแหน่งระบุไม่ได้ — ไข่ฟักเสร็จคั่นจังหวะแล้วทั้งแถวเลื่อน เราจะวางผิดฟอง
-	placeEggRequest:FireServer(firstHeldId)
-end)
 
-toBagButton.Activated:Connect(function()
-	if firstPenUid then
-		moveMotherRequest:FireServer(firstPenUid, "bag")
+	motherLocationByUid = {}
+	local cards: { CardSpec } = {}
+
+	for _, mother in lastPayload.mothersInPen do
+		motherLocationByUid[mother.uid] = "pen"
+		table.insert(cards, {
+			title = mother.charName,
+			subtitle = `{mother.weightText} · คอก`,
+			color = CLASS_COLORS[mother.class] or CLASS_COLORS.C,
+			selected = mother.uid == selectedMotherUid,
+			onClick = function()
+				selectedMotherUid = mother.uid
+				renderActiveTab()
+			end,
+		})
 	end
-end)
 
-toPenButton.Activated:Connect(function()
-	if firstBagUid then
-		moveMotherRequest:FireServer(firstBagUid, "pen")
+	for _, mother in lastPayload.mothersInBag do
+		motherLocationByUid[mother.uid] = "bag"
+		table.insert(cards, {
+			title = mother.charName,
+			subtitle = `{mother.weightText} · กระเป๋า`,
+			color = CLASS_COLORS[mother.class] or CLASS_COLORS.C,
+			selected = mother.uid == selectedMotherUid,
+			onClick = function()
+				selectedMotherUid = mother.uid
+				renderActiveTab()
+			end,
+		})
 	end
-end)
 
-farmStateSync.OnClientEvent:Connect(function(payload)
-	clearRows()
+	addInfoRow(`คอก {#lastPayload.mothersInPen}/{lastPayload.penCapacity} · กระเป๋า {#lastPayload.mothersInBag}/{lastPayload.bagCapacity}`, true)
+	if #cards == 0 then
+		addInfoRow("  (ยังไม่มีแม่ — ฟักไข่ก่อน)")
+	else
+		addCardGrid(cards)
+	end
+end
 
-	-- ── ไข่ในกระเป๋า ──
+local function renderEggsTab()
+	if not lastPayload then
+		return
+	end
+
 	-- ⚠️ จุดที่ดูออกว่ากฎ "น้ำหนักมาก่อน" ทำงานถูก: ไข่โชว์น้ำหนักตั้งแต่ยังไม่ฟัก
 	--
 	-- ⚠️ `payload.heldEggs` เป็น **อาเรย์แน่นของไข่ที่มีจริง** ไม่ใช่อาเรย์ยาวเท่าความจุแล้ว
 	-- กระเป๋าจุ 10,000 ฟอง — server ส่งมาให้แค่ส่วนแรกเท่าที่ UI แสดงจริง (heldShown/heldCount)
 	-- และแต่ละฟองมี `id` ประจำตัว **ซึ่งเป็นสิ่งเดียวที่ส่งกลับไปหา server ได้**
-	firstHeldId = nil
-	addSectionHeader(`ไข่ในกระเป๋า: {payload.heldCount}/{payload.bagSize}`)
-	if #payload.heldEggs == 0 then
-		addRow("  (ไม่มี — แจกด้วยคำสั่ง server: EggService.grantEgg)")
+	local cards: { CardSpec } = {}
+	for _, egg in lastPayload.heldEggs do
+		table.insert(cards, {
+			title = egg.eggName,
+			subtitle = `#{egg.id} · {egg.weightText}`,
+			color = EGG_CARD_COLOR,
+			selected = egg.id == selectedHeldEggId,
+			onClick = function()
+				selectedHeldEggId = egg.id
+				renderActiveTab()
+			end,
+		})
+	end
+
+	addInfoRow(`ไข่ในกระเป๋า: {lastPayload.heldCount}/{lastPayload.bagSize}`, true)
+	if #cards == 0 then
+		addInfoRow("  (ไม่มี — แจกด้วยคำสั่ง server: EggService.grantEgg)")
 	else
-		for _, egg in payload.heldEggs do
-			if not firstHeldId then
-				firstHeldId = egg.id
-			end
-			addRow(`  #{egg.id} {egg.eggName} — {egg.weightText}`)
-		end
-		local more = payload.heldCount - #payload.heldEggs
+		addCardGrid(cards)
+		local more = lastPayload.heldCount - #lastPayload.heldEggs
 		if more > 0 then
-			addRow(`  ...อีก {more} ฟอง (server ยังไม่ส่งมา กันบวมเน็ต)`)
+			addInfoRow(`  ...อีก {more} ฟอง (server ยังไม่ส่งมา กันบวมเน็ต)`)
 		end
 	end
-	placeButton.Text = if firstHeldId then "เอาไข่ฟองแรกเข้าสวนฟัก" else "ไม่มีไข่ให้วาง"
 
-	-- ── สวนฟัก ──
 	-- ⚠️ slot.stuck = ครบเวลาฟักแล้วแต่คอก+กระเป๋าเต็มพร้อมกัน (ข้อ D) รอที่ว่างอยู่
-	addSectionHeader(`สวนฟัก: {payload.hatchingCount}/{payload.hatcherySize}`)
+	addInfoRow(`สวนฟัก: {lastPayload.hatchingCount}/{lastPayload.hatcherySize}`, true)
 	local anyHatching = false
-	for index = 1, payload.hatcherySize do
-		local slot = payload.hatching[index]
+	for index = 1, lastPayload.hatcherySize do
+		local slot = lastPayload.hatching[index]
 		if slot and slot.occupied then
 			anyHatching = true
 			local status = if slot.stuck then "ค้าง (รอที่ว่าง)" else `เหลือ {math.ceil(slot.remaining)} วิ`
-			addRow(`  [{index}] {slot.eggName} {slot.weightText} — {status}`)
+			addInfoRow(`  [{index}] {slot.eggName} {slot.weightText} — {status}`)
 		end
 	end
 	if not anyHatching then
-		addRow("  (ว่าง)")
+		addInfoRow("  (ว่าง)")
 	end
+end
 
-	-- ── แม่ในคอก ──
-	firstPenUid = nil
-	addSectionHeader(`คอก: {#payload.mothersInPen}/{payload.penCapacity} ตัว`)
-	if #payload.mothersInPen == 0 then
-		addRow("  (ว่าง)")
+local function updateActionButton()
+	if activeTab == "mothers" then
+		if selectedMotherUid and motherLocationByUid[selectedMotherUid] then
+			local destination = if motherLocationByUid[selectedMotherUid] == "pen" then "กระเป๋า" else "คอก"
+			setActionButton(`ย้ายแม่ที่เลือก → {destination}`, true)
+		else
+			selectedMotherUid = nil
+			setActionButton("เลือกแม่ในกริดก่อน", false)
+		end
 	else
+		if selectedHeldEggId then
+			setActionButton(`วางไข่ #{selectedHeldEggId} ลงสวนฟัก`, true)
+		else
+			setActionButton("เลือกไข่ในกริดก่อน", false)
+		end
+	end
+end
+
+renderActiveTab = function()
+	clearGrid()
+	if activeTab == "mothers" then
+		renderMothersTab()
+	else
+		renderEggsTab()
+	end
+	updateActionButton()
+	motherTabButton.BackgroundColor3 = if activeTab == "mothers" then TAB_ACTIVE_COLOR else TAB_INACTIVE_COLOR
+	eggTabButton.BackgroundColor3 = if activeTab == "eggs" then TAB_ACTIVE_COLOR else TAB_INACTIVE_COLOR
+end
+
+--------------------------------------------------------------------------------
+-- ต่อสาย
+--------------------------------------------------------------------------------
+
+motherTabButton.Activated:Connect(function()
+	activeTab = "mothers"
+	renderActiveTab()
+end)
+
+eggTabButton.Activated:Connect(function()
+	activeTab = "eggs"
+	renderActiveTab()
+end)
+
+actionButton.Activated:Connect(function()
+	if activeTab == "mothers" then
+		if not selectedMotherUid then
+			return
+		end
+		local destination = if motherLocationByUid[selectedMotherUid] == "pen" then "bag" else "pen"
+		moveMotherRequest:FireServer(selectedMotherUid, destination)
+	else
+		if not selectedHeldEggId then
+			return
+		end
+		-- ⚠️ ส่ง **id ประจำฟอง** ไม่ใช่ชนิดไข่ และไม่ใช่ตำแหน่งในลิสต์
+		--   · ชนิดไข่ระบุไม่ได้ — ไข่ชนิดเดียวกันน้ำหนักต่างกันได้
+		--   · ตำแหน่งระบุไม่ได้ — ไข่ฟักเสร็จคั่นจังหวะแล้วทั้งแถวเลื่อน เราจะวางผิดฟอง
+		placeEggRequest:FireServer(selectedHeldEggId)
+	end
+end)
+
+farmStateSync.OnClientEvent:Connect(function(payload)
+	lastPayload = payload
+
+	-- ⚠️ ของที่เลือกไว้อาจหายไปจาก payload ใหม่ (ขาย/ย้าย/ฟักไปแล้ว) — ถ้าไม่ตรวจ
+	-- ปุ่มจะยิง action ไปหาของที่ไม่มีอยู่แล้ว ต้องเคลียร์ selection ทิ้งก่อนเรนเดอร์
+	if selectedMotherUid then
+		local stillExists = false
 		for _, mother in payload.mothersInPen do
-			if not firstPenUid then
-				firstPenUid = mother.uid
+			if mother.uid == selectedMotherUid then
+				stillExists = true
+				break
 			end
-			addRow(`  {mother.charName} ({mother.class}) {mother.weightText}`)
+		end
+		if not stillExists then
+			for _, mother in payload.mothersInBag do
+				if mother.uid == selectedMotherUid then
+					stillExists = true
+					break
+				end
+			end
+		end
+		if not stillExists then
+			selectedMotherUid = nil
 		end
 	end
 
-	-- ── แม่ในกระเป๋า ──
-	firstBagUid = nil
-	addSectionHeader(`กระเป๋า: {#payload.mothersInBag}/{payload.bagCapacity} ตัว`)
-	if #payload.mothersInBag == 0 then
-		addRow("  (ว่าง)")
-	else
-		for _, mother in payload.mothersInBag do
-			if not firstBagUid then
-				firstBagUid = mother.uid
+	if selectedHeldEggId then
+		local stillExists = false
+		for _, egg in payload.heldEggs do
+			if egg.id == selectedHeldEggId then
+				stillExists = true
+				break
 			end
-			addRow(`  {mother.charName} ({mother.class}) {mother.weightText}`)
+		end
+		if not stillExists then
+			selectedHeldEggId = nil
 		end
 	end
+
+	renderActiveTab()
 end)
 
 eggHatched.OnClientEvent:Connect(function(payload)

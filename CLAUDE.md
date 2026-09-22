@@ -617,4 +617,9 @@ stack key · uid · บัฟสถานะ · แหล่งที่มา�
 - ✅ มี DataStore แล้ว (Phase 2A) — แต่ **ยังไม่เคยรันกับ DataStore จริงสักครั้ง**
   ⚠️ `Config.DataStore.MAX_PLAYER_DATA_BYTES` วัดด้วยตัว encode ของเราเอง ไม่ใช่ของ Roblox
   จึงตั้งเพดานไว้ 3 MB ไม่ใช่ 4 MB · เคสเต็มพิกัดตอนนี้ = 708 KB (16.9% ของลิมิตจริง)
+- ⚠️⚠️ **TEMP: `Config.Balance.NewPlayer.startingEggs.egg_stage1` ตั้งไว้ที่ 100 ชั่วคราว**
+  (ปกติคือ 1) เอาไว้ทดสอบ Phase 2B บนเกมจริงให้มีแม่/ไข่กระจายครบทุก tier โดยไม่ต้องรอบอส
+  **ต้อง revert กลับเป็น 1 ก่อน publish จริง (Phase 7)** — comment เตือนไว้ที่ต้นทางใน
+  `Config.lua` แล้ว (ตรง `local startingEggs`) และเทสต์ `tests/config.spec.luau` ก็ยึดค่า 100
+  นี้ไว้ชั่วคราวเช่นกัน (ต้องแก้กลับเป็น 1 พร้อมกันตอน revert)
 - รายการที่เคลียร์ตอนถึงเฟสนั้นได้ อยู่ใน `docs/data-schema.md` §13

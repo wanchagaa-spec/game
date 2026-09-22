@@ -621,7 +621,9 @@ return function(t, Config)
 	check("egg_legendary ยังเปิดอยู่", Config.getEgg("egg_legendary").enabled, true)
 	check("ไข่ตำนานไม่ผูกด่าน", Config.getEgg("egg_legendary").stage, nil)
 	check("DEFAULT_EGG_ID เป็นไข่ด่าน 1", Config.DEFAULT_EGG_ID, "egg_stage1")
-	check("ผู้เล่นใหม่ได้ไข่ด่าน 1", Config.Balance.NewPlayer.startingEggs.egg_stage1, 1)
+	-- ⚠️⚠️ TEMP: 100 เป็นค่าทดสอบชั่วคราว (Phase 2B) ต้อง revert กลับเป็น 1 ก่อน publish จริง
+	-- (ดูคอมเมนต์ที่ Config.lua startingEggs และ CLAUDE.md หัวข้อ "โครงหลัก")
+	check("ผู้เล่นใหม่ได้ไข่ด่าน 1", Config.Balance.NewPlayer.startingEggs.egg_stage1, 100)
 
 	print("── ยาม turret ต้องจับค่าที่พังได้จริง ──")
 	-- ⚠️ turretDps ไม่ใช่ตัวเลขดิบแล้ว — คำนวณจาก TOLL × damage/วินาที

@@ -11,7 +11,7 @@
 -- ══ รูปทรง ══
 --   ลานหญ้าเปิดโล่งบนแท่นลอย **ไม่มีกำแพงล้อมรอบแมพ**
 --   มีกำแพงสองข้างทางเฉพาะใน **เลนรบ** ที่เดียว
---   ขอบแมพกันตกด้วย **กำแพงใส** (Transparency = 1, CanCollide = true)
+--   ขอบแมพกันตกด้วย **กำแพงหิน** (Material = Rock, Transparency = 0, CanCollide = true)
 --
 --   ร้านค้า (แผงเล็ก 2 จุด) → ลานคอก 6 แปลง 2×3 → เลนรบ 9 ด่าน
 --
@@ -51,6 +51,7 @@ local COLORS = {
 	marker = Color3.fromRGB(86, 74, 58),
 	spawn = Color3.fromRGB(230, 200, 120),
 	sign = Color3.fromRGB(196, 158, 112),
+	boundary = Color3.fromRGB(118, 112, 104), -- หินเทาอมน้ำตาล ให้ธีมใกล้เคียง WALL_COLOR ใน WallRenderer.lua
 }
 
 local FLOOR_THICKNESS = 2
@@ -573,26 +574,32 @@ function MapBuilder.buildBoundary(parent: Folder)
 	local halfZ = Config.getPlazaHalfDepth() - margin
 	local laneHalf = MAP.Lane.Width / 2
 
-	local function invisible(name: string, size: Vector3, position: Vector3)
-		local part = makePart(name, size, position, Color3.fromRGB(255, 255, 255), folder)
-		part.Transparency = 1
+	-- ⚠️ เดิมกำแพงใส (Transparency=1) กันตกเฉย ๆ มองไม่เห็น — เปลี่ยนเป็นกำแพงหินที่มองเห็น
+	-- ได้จริงตามที่ขอ **ขนาด/ตำแหน่ง/ความหนาไม่แตะเลย** (ยังผูกกับ Config.getMinWallThickness()
+	-- เหมือนเดิมทุกประการ) เปลี่ยนแค่ Material/สี/Transparency ซึ่งเป็นเรื่อง "หน้าตา" ล้วน ๆ
+	-- ไม่กระทบการชน — CanCollide ยังคง true เหมือนเดิม
+	-- ⚠️ CastShadow เดิมปิดไว้เพราะของที่มองไม่เห็นแล้วมีเงาจะดูเป็นบั๊ก (เงาลอยมาจากอากาศ)
+	-- ตอนนี้เป็นกำแพงทึบจริงแล้ว ปล่อยให้ทอดเงาตามปกติ (ค่า default ของ Part) ถึงจะดูเป็นกำแพงหินจริง
+	local function stoneWall(name: string, size: Vector3, position: Vector3)
+		local part = makePart(name, size, position, COLORS.boundary, folder)
+		part.Material = Enum.Material.Rock
+		part.Transparency = 0
 		part.CanCollide = true
-		part.CastShadow = false
 	end
 
 	-- ซ้าย · หน้า · หลัง
-	invisible("West", Vector3.new(t, h, halfZ * 2), Vector3.new(minX, 0, 0))
-	invisible("North", Vector3.new(maxX - minX, h, t), Vector3.new((minX + maxX) / 2, 0, halfZ))
-	invisible("South", Vector3.new(maxX - minX, h, t), Vector3.new((minX + maxX) / 2, 0, -halfZ))
+	stoneWall("West", Vector3.new(t, h, halfZ * 2), Vector3.new(minX, 0, 0))
+	stoneWall("North", Vector3.new(maxX - minX, h, t), Vector3.new((minX + maxX) / 2, 0, halfZ))
+	stoneWall("South", Vector3.new(maxX - minX, h, t), Vector3.new((minX + maxX) / 2, 0, -halfZ))
 
 	-- ฝั่งขวาแบ่งเป็นสองชิ้น เว้นช่องกลางไว้ให้เดินเข้าเลนรบ
 	local gapHalf = laneHalf
-	invisible(
+	stoneWall(
 		"EastUpper",
 		Vector3.new(t, h, halfZ - gapHalf),
 		Vector3.new(maxX, 0, (halfZ + gapHalf) / 2)
 	)
-	invisible(
+	stoneWall(
 		"EastLower",
 		Vector3.new(t, h, halfZ - gapHalf),
 		Vector3.new(maxX, 0, -(halfZ + gapHalf) / 2)
@@ -631,6 +638,11 @@ function MapBuilder.buildSpawns(parent: Folder)
 		pad.CanCollide = false -- ไม่ให้สะดุดตอนเดินผ่าน
 		pad.Neutral = true
 		pad.Duration = 0 -- ไม่ต้องมี ForceField ตอนเกิด
+		-- ⚠️ ซ่อนแผ่นสี่เหลี่ยมของ SpawnLocation ให้กลืนกับพื้นหญ้า — Transparency ไม่กระทบ
+		-- การทำงานเป็นจุดเกิดเลย (ตำแหน่ง/CanCollide/Neutral ยังเหมือนเดิมทุกอย่าง)
+		-- พื้นที่ตรงนี้มี GrassFloor ผืนใหญ่ของ buildPlaza() ครอบคลุมอยู่แล้วพอดี
+		-- ไม่ต้องวางแผ่นหญ้าเพิ่ม
+		pad.Transparency = 1
 		pad.Color = COLORS.spawn
 		pad.Material = Enum.Material.SmoothPlastic
 		pad.TopSurface = Enum.SurfaceType.Smooth

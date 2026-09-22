@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """ทดสอบเครื่องมือ debug ใหม่: debugGrantMother / debugGrantEggWithWeight /
-debugSetWallProgress / debugSetCurrency / debugSnapshot
+debugSetWallProgress / debugSetCurrency / debugSnapshot / debugWipeSavedData
 
     python3 tools/check-debug-commands.py
 
@@ -120,6 +120,11 @@ end
 function fakeStore.GetAsync(_self, key)
 \treturn fakeStore.data[key]
 end
+function fakeStore.RemoveAsync(_self, key)
+\tlocal old = fakeStore.data[key]
+\tfakeStore.data[key] = nil
+\treturn old
+end
 
 DataService.injectForTests({
 \tstore = fakeStore,
@@ -151,7 +156,10 @@ local nextUserId = 700001
 local function freshPlayer(tag)
 \tlocal userId = nextUserId
 \tnextUserId += 1
-\tlocal player = { UserId = userId, Name = tag }
+\tlocal player = { UserId = userId, Name = tag, __kicked = nil }
+\tfunction player:Kick(message)
+\t\tself.__kicked = message
+\tend
 \tlocal okAdd = EggService.onPlayerAdded(player)
 \tassert(okAdd, `เซ็ตอัพเทสต์ผิด — onPlayerAdded ของ {tag} ล้ม`)
 \treturn player, DataService.getCached(userId)
@@ -393,6 +401,76 @@ do
 \tcheck("พิมพ์สถานะ \\"ค้างรอที่ว่าง\\" ของ slot ที่ครบเวลาแล้ว", string.find(joined, "ค้าง", 1, true) ~= nil, true)
 \tcheck("ไม่แก้ข้อมูลอะไรเลย (read-only) — เงินยังเท่าเดิม", data.currency.coins, 777)
 \tcheck("ไม่แก้ข้อมูลอะไรเลย — แม่ในคอกยังอยู่ครบ", #data.mothersInPen, 1)
+end
+
+--------------------------------------------------------------------------------
+-- 6) debugWipeSavedData
+--------------------------------------------------------------------------------
+
+print("\\n━━ debugWipeSavedData: ชื่อยืนยันผิด → ปฏิเสธ ไม่แตะอะไรเลย ━━")
+do
+\tlocal player, data = freshPlayer("Wipe1")
+\tlocal userId = player.UserId
+\tlocal key = DataService.keyFor(userId)
+\tlocal ok, reason = EggService.debugWipeSavedData(player, "ชื่อผิด")
+\tcheck("คืนค่า false", ok, false)
+\tcheck("บอกเหตุผลว่าต้องยืนยันชื่อ", reason, "ต้องยืนยันด้วยชื่อผู้เล่น")
+\tcheck("ข้อมูลยังอยู่ในแคช", DataService.getCached(userId) == data, true)
+\tcheck("ยังมี key อยู่ใน DataStore ปลอม", fakeStore.data[key] ~= nil, true)
+\tcheck("ไม่ถูกเตะ", player.__kicked == nil, true)
+end
+
+print("\\n━━ debugWipeSavedData: ยืนยันถูกต้อง → ลบจริง + เตะออก ━━")
+do
+\tlocal player = freshPlayer("Wipe2")
+\tlocal userId = player.UserId
+\tlocal key = DataService.keyFor(userId)
+\tlocal ok, reason = EggService.debugWipeSavedData(player, player.Name)
+\tcheck("คืนค่า true", ok)
+\tcheck("ไม่มีเหตุผลปฏิเสธ", reason == nil, true)
+\tcheck("แคชถูกเคลียร์", DataService.getCached(userId) == nil, true)
+\tcheck("key หายไปจาก DataStore ปลอม", fakeStore.data[key] == nil, true)
+\tcheck("ถูกเตะออก", player.__kicked ~= nil, true)
+end
+
+print("\\n━━ debugWipeSavedData: rejoin หลังลบ → isNew อีกครั้งจริง ได้ไข่เริ่มต้นใหม่ ━━")
+do
+\tlocal player = freshPlayer("Wipe3")
+\tlocal userId = player.UserId
+
+\t-- ล้างของที่ได้จากตอนสร้าง (freshPlayer เองก็เป็น "ผู้เล่นใหม่" มาก่อนแล้วรอบหนึ่ง)
+\t-- เพื่อให้เห็นชัดว่าไข่ที่กลับมาหลัง rejoin มาจากรอบ isNew รอบใหม่จริง ไม่ใช่ของเก่าที่เหลืออยู่
+\tlocal dataBefore = DataService.getCached(userId)
+\ttable.clear(dataBefore.heldEggs.items)
+
+\tlocal ok = EggService.debugWipeSavedData(player, player.Name)
+\tcheck("ลบสำเร็จ", ok)
+\tcheck("แคชว่างหลังลบ (ยังไม่ rejoin)", DataService.getCached(userId) == nil, true)
+
+\t-- จำลองการเข้าเกมใหม่ด้วย player ตัวเดิม (เหมือนเตะแล้วกด Play ใหม่)
+\tlocal okRejoin = EggService.onPlayerAdded(player)
+\tcheck("rejoin โหลดสำเร็จ", okRejoin)
+
+\tlocal dataAfter = DataService.getCached(userId)
+\tlocal expectedEggs = 0
+\tfor _, amount in Config.Balance.NewPlayer.startingEggs do
+\t\texpectedEggs += amount
+\tend
+\tcheck("rejoin ได้ไข่เริ่มต้นครบตาม NewPlayer.startingEggs (isNew=true อีกครั้งจริง)",
+\t\t#dataAfter.heldEggs.items, expectedEggs)
+end
+
+print("\\n━━ debugWipeSavedData: ผู้เล่นไม่ได้ออนไลน์อยู่ (ไม่มีในแคช) → ปฏิเสธ ━━")
+do
+\tlocal fakePlayer = { UserId = 999999999, Name = "NotOnline" }
+\tfunction fakePlayer:Kick(message)
+\t\tself.__kicked = message
+\tend
+\tlocal ok, reason = EggService.debugWipeSavedData(fakePlayer, fakePlayer.Name)
+\tcheck("คืนค่า false", ok, false)
+\tcheck("บอกเหตุผลว่าไม่มีข้อมูลในแคช",
+\t\tstring.find(reason or "", "หน่วยความจำ", 1, true) ~= nil, true)
+\tcheck("ไม่ถูกเตะ", fakePlayer.__kicked == nil, true)
 end
 
 print(string.format("\\n=== ผ่าน %d / ตก %d ===", passCount, failCount))

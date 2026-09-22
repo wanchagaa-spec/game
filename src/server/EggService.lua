@@ -675,6 +675,7 @@ end
 --     EggService.debugSetWallProgress(game.Players.<ชื่อ>, 7)
 --     EggService.debugSetCurrency(game.Players.<ชื่อ>, 1000000)
 --     EggService.debugSnapshot(game.Players.<ชื่อ>)
+--     EggService.debugWipeSavedData(game.Players.<ชื่อ>, "<ชื่อ>")  -- 🔴 ลบถาวร ดูคำเตือนด้านล่าง
 -- 📄 รายละเอียด + ตัวอย่างใช้ทดสอบครบทุก tier น้ำหนัก อยู่ใน docs/debug-commands.md
 --------------------------------------------------------------------------------
 
@@ -793,6 +794,38 @@ function EggService.debugResetAll(player: Player)
 			.. `ไข่ที่กำลังฟัก {hatchingRemoved} ฟอง · `
 			.. debugSaveNow(player)
 	)
+end
+
+-- 🔴 ลบข้อมูลผู้เล่นออกจาก DataStore แบบถาวร กู้คืนไม่ได้ — ต่างจาก debugResetAll ตรงที่
+-- debugResetAll แค่ล้างของในเกม (คอก/กระเป๋า/สวนฟัก) แต่ "ยังเป็นผู้เล่นเก่า" อยู่เสมอ
+-- (isNew จะเป็น false ตลอดไป) ตัวนี้ลบทั้ง key ออกจาก DataStore เลย ทำให้เข้าเกมครั้งถัดไป
+-- isNew = true จริง ได้ไข่เริ่มต้น (Config.Balance.NewPlayer.startingEggs) + ค่าเริ่มต้นทุกอย่าง
+-- เหมือนผู้เล่นคนใหม่แกะกล่อง — ใช้ตอนต้องทดสอบ flow "ผู้เล่นใหม่" ซ้ำหลายรอบโดยไม่ต้องสลับ account
+--
+-- ⚠️ ต้องส่งชื่อผู้เล่นเป๊ะ ๆ เป็นอาร์กิวเมนต์ที่ 2 เพื่อยืนยัน กันเผลอรันคำสั่งที่ก็อปมาโดยไม่ทันคิด
+-- ⚠️⚠️ เตะผู้เล่นออกทันทีหลังลบสำเร็จเสมอ — **ไม่ใช่บั๊ก ห้ามลบพฤติกรรมนี้ออก**
+-- ข้อมูลของเซสชันปัจจุบันยังค้างอยู่ในหน่วยความจำ (ดูคอมเมนต์ที่ DataService.wipeAsync)
+-- ถ้าปล่อยให้เล่นต่อ autosave รอบถัดไปจะเขียนของเก่ากลับเข้า DataStore ใหม่ทันที
+-- ทำให้ลบไปแล้วก็เหมือนไม่ได้ลบ — ต้องออกจากเกมแล้วเข้าใหม่เท่านั้นถึงจะเห็นผลจริง
+function EggService.debugWipeSavedData(player: Player, confirmName: string?): (boolean, string?)
+	if confirmName ~= player.Name then
+		warn(
+			`[EggService] debugWipeSavedData: ต้องส่งชื่อผู้เล่นเป๊ะ ๆ เป็นอาร์กิวเมนต์ที่ 2 เพื่อยืนยัน `
+				.. `(ลบข้อมูลถาวร กู้คืนไม่ได้) เช่น EggService.debugWipeSavedData(player, "{player.Name}")`
+		)
+		return false, "ต้องยืนยันด้วยชื่อผู้เล่น"
+	end
+
+	local ok, err = DataService.wipeAsync(player.UserId)
+	if not ok then
+		warn(`[EggService] debugWipeSavedData: ลบข้อมูลของ {player.Name} ไม่สำเร็จ: {err}`)
+		return false, err
+	end
+
+	sessionMeta[player.UserId] = nil
+	print(`[EggService] debugWipeSavedData: ลบข้อมูลของ {player.Name} แล้ว — กำลังเตะออกให้เข้าใหม่`)
+	player:Kick("ข้อมูล (debug) ถูกลบเพื่อทดสอบ — เข้าเกมใหม่เพื่อเริ่มเป็นผู้เล่นใหม่")
+	return true, nil
 end
 
 -- สร้างแม่ตรง ๆ ข้ามขั้นตอนฟักทั้งหมด — ใช้ทดสอบขนาดโมเดล/ราคาขาย/ความจุคอกทุก tier

@@ -206,11 +206,7 @@ end
 
 -- รั้วครบสี่ด้านของแปลง · ด้านที่หันเข้าทางเดินกลางเว้นช่องประตูไว้ตรงกลาง
 -- ⚠️ คืนค่า Z ของแนวประตู ให้ผู้เรียกเอาไปวางป้ายข้างประตู
--- skipRight: คอกคอลัมน์ขวาสุดมีขอบ (right) ชนกับกำแพงหินขอบแมพพอดี (X เดียวกับ
--- Config.getPenYardRightX() ที่ MapBuilder.buildBoundary ใช้วางกำแพง EastUpper/EastLower)
--- ⚠️ เคยเป็นบั๊ก "รั้วไม้ซ้อนทับกำแพงหิน" ตรงปากทางเข้าเลน (คอก 3/6 ที่ติดเลนรบ)
--- แก้ด้วยการไม่วาดรั้วไม้ด้านนี้ซ้ำ เพราะกำแพงหินทำหน้าที่เป็นขอบเขต + ตัวกันชนแทนอยู่แล้ว
-local function buildFence(plot: Model, center: Vector3, sizeX: number, sizeZ: number, skipRight: boolean): number
+local function buildFence(plot: Model, center: Vector3, sizeX: number, sizeZ: number): number
 	local halfX, halfZ = sizeX / 2, sizeZ / 2
 	local left, right = center.X - halfX, center.X + halfX
 	local back, front = center.Z - halfZ, center.Z + halfZ
@@ -222,9 +218,7 @@ local function buildFence(plot: Model, center: Vector3, sizeX: number, sizeZ: nu
 	-- ด้านตรงข้ามประตู + สองด้านข้าง = รั้วเต็มไม่มีช่อง
 	fenceRun(plot, "FenceFar", left, right, farZ, true)
 	fenceRun(plot, "FenceLeft", back, front, left, false)
-	if not skipRight then
-		fenceRun(plot, "FenceRight", back, front, right, false)
-	end
+	fenceRun(plot, "FenceRight", back, front, right, false)
 
 	-- ด้านประตู: แบ่งเป็นสองช่วง เว้นช่องกลางกว้าง PEN_GATE_WIDTH
 	local gateHalf = MAP.Pen.GateWidth / 2
@@ -278,6 +272,21 @@ function MapBuilder.buildPlaza(parent: Folder)
 	local halfDepth = Config.getPlazaHalfDepth()
 	makeFloor("GrassFloor", maxX - minX, halfDepth * 2, (minX + maxX) / 2, 0, COLORS.grass, plaza)
 
+	-- ══ พื้นหญ้าปีกฝั่งตะวันออก ══ รองรับกำแพงใสที่ดันออกจากขอบคอก (Config.getEastBoundaryX())
+	-- เพื่อไม่ให้รั้วคอกคอลัมน์ขวาสุดซ้อนกับกำแพง (ดู MapBuilder.buildBoundary)
+	-- ⚠️ ครอบคลุมเฉพาะช่วง Z ที่อยู่นอกเลนรบ (|Z| > laneHalf) เท่านั้น — ช่วง Z ของเลนเอง
+	-- มี LaneFloor ต่อจาก GrassFloor อยู่แล้วที่ X เดิม (getPlazaMaxX) ถ้าพื้นปีกคลุมมาถึง
+	-- ตรงนั้นด้วยจะกลายเป็นพื้นสองผืนซ้อนกันที่ Z เดียวกัน = ภาพกระพริบ (z-fighting)
+	-- เหมือนบั๊กที่เคยแก้ตรงห้องบอสมาแล้ว
+	local eastFloorEndX = Config.getEastFloorEdgeX()
+	local eastWingSizeX = eastFloorEndX - maxX
+	local eastWingCenterX = (maxX + eastFloorEndX) / 2
+	local laneHalf = MAP.Lane.Width / 2
+	local eastWingSizeZ = halfDepth - laneHalf
+	local eastWingCenterZ = (laneHalf + halfDepth) / 2
+	makeFloor("EastWingUpper", eastWingSizeX, eastWingSizeZ, eastWingCenterX, eastWingCenterZ, COLORS.grass, plaza)
+	makeFloor("EastWingLower", eastWingSizeX, eastWingSizeZ, eastWingCenterX, -eastWingCenterZ, COLORS.grass, plaza)
+
 	-- ⚠️ **ไม่มี Part ของทางเดินกลางแล้ว** — ลบทิ้งตอนไล่บั๊กภาพกระพริบ
 	-- มันเคยเป็นแถบเทาที่อ่านเป็น "ถนน" แล้วถูกเปลี่ยนเป็นหญ้าให้กลืนกับพื้น
 	-- พอสีและวัสดุเหมือนพื้นเป๊ะ มันก็ไม่เหลืออะไรให้ดูอีก — เป็นแค่แผ่นบาง ๆ
@@ -307,10 +316,7 @@ function MapBuilder.buildPlaza(parent: Folder)
 		base.CanCollide = false
 		model.PrimaryPart = base
 
-		-- คอลัมน์ขวาสุด (ติดเลนรบ) ให้กำแพงหินขอบแมพทำหน้าที่แทนรั้วไม้ด้านนี้
-		local col = (index - 1) % MAP.Pen.PerRow
-		local isLastColumn = col == MAP.Pen.PerRow - 1
-		local gateZ = buildFence(model, center, sizeX, sizeZ, isLastColumn)
+		local gateZ = buildFence(model, center, sizeX, sizeZ)
 		local label = buildPenSign(model, center, gateZ, index)
 
 		penPlots[index] = { index = index, model = model, base = base, center = center, label = label }
@@ -579,7 +585,11 @@ function MapBuilder.buildBoundary(parent: Folder)
 	local margin = MAP.Boundary.Margin
 
 	local minX = Config.getPlazaMinX() + margin
-	local maxX = Config.getPlazaMaxX()
+	-- ⚠️ ไม่ใช้ getPlazaMaxX() ตรง ๆ — จุดนั้นชนกับขอบคอกคอลัมน์ขวาสุดพอดี (รั้วไม้ก็วาง
+	-- อยู่ตรงนั้นเป๊ะ) ใช้ Config.getEastBoundaryX() แทนซึ่งดันออกมาอีก Shop.Gap studs
+	-- ให้ได้ระยะห่างจากรั้วเท่ากับฝั่ง North/South · MapBuilder.buildPlaza ต่อพื้นหญ้าปีก
+	-- รองรับพื้นที่ที่ขยายออกมาไว้แล้ว (คนละช่วง Z กับเลน จึงไม่ทับพื้นเลน)
+	local maxX = Config.getEastBoundaryX()
 	local halfZ = Config.getPlazaHalfDepth() - margin
 	local laneHalf = MAP.Lane.Width / 2
 

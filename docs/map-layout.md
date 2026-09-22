@@ -483,6 +483,7 @@ luau tools/dump-map.luau
 | กึ่งกลางคอกแปลงที่ N | `Config.getPenPlotCenter(index)` |
 | ขนาด/ขอบลานคอก | `Config.getPenYardWidth()` · `getPenYardDepth()` · `getPenYardLeftX()` · `getPenYardRightX()` |
 | ขอบพื้นหญ้าทั้งผืน | `Config.getPlazaMinX()` · `getPlazaMaxX()` · `getPlazaHalfDepth()` |
+| กำแพงใสฝั่งตะวันออก (ติดปากทางเข้าเลน) / ขอบพื้นปีกฝั่งนั้น | `Config.getEastBoundaryX()` · `getEastFloorEdgeX()` |
 | ต้นเลน / ปลายเลน / ความยาว | `Config.getLaneStartX()` · `getLaneEndX()` · `getLaneLength()` |
 | ความกว้างเลนตรงจุดนั้น | `Config.getLaneHalfWidthAt(x)` ← **ผายออกตรงห้องบอส** |
 | ต้นช่วงของด่าน | `Config.getStageStartX(stage)` |

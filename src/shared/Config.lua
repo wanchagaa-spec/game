@@ -2509,8 +2509,30 @@ function Config.getPlazaMinX(): number
 	return Config.getShopCenter().X - map.Shop.StallSize.X / 2 - map.Shop.Gap - map.Boundary.Margin
 end
 
+-- ⚠️ **ไม่บวก margin แบบสามด้านที่เหลือ** เพราะจุดนี้ = ขอบคอกพอดี = ต้นเลนรบ
+-- (Lane.StartGap = 0 บังคับให้พื้นลานกับพื้นเลนต่อกันสนิทไม่มีช่องว่าง)
+-- ดังนั้น "ขอบพื้นฝั่งตะวันออก" กับ "ต้นเลน" ต้องเป็นจุดเดียวกันเป๊ะ ห้ามบวกอะไรเข้าไปตรงนี้
+-- ระยะห่างระหว่างรั้วคอกกับกำแพงใสฝั่งนี้คำนวณแยกไว้ที่ Config.getEastBoundaryX() แทน
 function Config.getPlazaMaxX(): number
 	return Config.getPenYardRightX()
+end
+
+-- ══ กำแพงใสฝั่งตะวันออก (ติดปากทางเข้าเลนรบ) ══
+-- ⚠️ ห้ามใช้ getPlazaMaxX() ตรง ๆ เป็นตำแหน่งกำแพง — จุดนั้นชนกับขอบคอกคอลัมน์ขวาสุดพอดี
+-- (รั้วไม้ของคอกวางอยู่ที่ขอบเป๊ะเหมือนกัน) เคยเป็นบั๊ก "รั้วซ้อนกำแพง" ตรงจุดปล่อยทหารด่าน 1
+-- ดันออกมาอีก Shop.Gap studs ให้ได้ระยะห่างเท่ากับที่กำแพง North/South มีจากคอกอยู่แล้ว
+-- (getPlazaHalfDepth ก็บวก Shop.Gap ก่อนบวก Margin ด้วยเหตุผลเดียวกัน)
+-- ⚠️ ใช้ฟังก์ชันนี้ทั้งฝั่งวางกำแพง (MapBuilder.buildBoundary) และฝั่งต่อพื้นหญ้าปีก
+-- (MapBuilder.buildPlaza) ห้ามคำนวณเลขนี้แยกกันสองที่ — เคยพลาดแบบเดียวกันมาแล้วกับ
+-- Y ของพื้นคอก (ดู Config.getPenRestingY)
+function Config.getEastBoundaryX(): number
+	return Config.getPlazaMaxX() + Config.MapDimensions.Shop.Gap
+end
+
+-- ขอบพื้นจริงฝั่งตะวันออก — แถบหญ้าที่มองเห็นได้แต่เดินไปไม่ถึง เท่ากับสามด้านที่เหลือ
+-- (กำแพงถอยเข้ามาจากขอบพื้นเท่ากับ Boundary.Margin เหมือนกันทุกด้าน)
+function Config.getEastFloorEdgeX(): number
+	return Config.getEastBoundaryX() + Config.MapDimensions.Boundary.Margin
 end
 
 -- ความลึกของลานต้องคลุมทั้งคอกและแผงร้าน + แถบหญ้านอกกำแพงใส
@@ -3350,6 +3372,9 @@ function Config.validate()
 	-- และตัดแผงร้านออกไปอยู่นอกกำแพง โดยที่ไม่มียามตัวไหนจับได้เลย
 	local wallHalfZ = Config.getPlazaHalfDepth() - dim.Boundary.Margin
 	local wallMinX = Config.getPlazaMinX() + dim.Boundary.Margin
+	-- ⚠️ ฝั่งตะวันออกเคยเป็นบั๊กจริง: กำแพงวางชิดขอบคอกคอลัมน์ขวาสุดจนรั้วไม้ซ้อนทับกำแพง
+	-- (ไม่มียามตัวไหนจับได้ตอนนั้นเหมือนกัน) เพิ่มยามนี้กันไม่ให้กลับมาเป็นซ้ำ
+	local eastWallInnerX = Config.getEastBoundaryX() - dim.Boundary.Thickness / 2
 	for penIndex = 1, Config.World.MAX_PENS do
 		local center = Config.getPenPlotCenter(penIndex)
 		local outerZ = math.abs(center.Z) + dim.Pen.Size.Y / 2
@@ -3361,6 +3386,10 @@ function Config.validate()
 		assert(
 			wallMinX <= center.X - dim.Pen.Size.X / 2,
 			`Config: กำแพงใสอยู่ที่ X = {wallMinX} ซึ่งกินเข้าไปในคอก {penIndex}`
+		)
+		assert(
+			center.X + dim.Pen.Size.X / 2 <= eastWallInnerX,
+			`Config: กำแพงใสฝั่งตะวันออกอยู่ที่ X = {eastWallInnerX} ซึ่งกินเข้าไปในคอก {penIndex}`
 		)
 	end
 	for stallIndex = 1, dim.Shop.StallCount do

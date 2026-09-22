@@ -78,23 +78,26 @@ gui.IgnoreGuiInset = false
 gui.Parent = playerGui
 
 --------------------------------------------------------------------------------
--- ยอดเงินมุมบนขวา — อยู่นอกแผงที่ย่อ/ปิดได้ ต้องเห็นตลอดเวลา เป็นลูกของ `gui` ตรง ๆ
+-- ยอดเงินกึ่งกลางด้านบน — อยู่นอกแผงที่ย่อ/ปิดได้ ต้องเห็นตลอดเวลา เป็นลูกของ `gui` ตรง ๆ
 -- ไม่ใช่ของ `panel` ที่ย่อได้ (panel.Visible ไม่กระทบตัวนี้เลย)
 --
--- ⚠️ ขัด UI ตามที่ขอ: วางให้อยู่**เหนือ**ป้ายชื่อผู้เล่นของ Roblox เอง (แถบชื่อ/สถานะที่ตัวเกม
--- วาดเองอยู่แล้วแถวใต้ไอคอนระบบมุมขวาบน) จึงชิดขอบบนสุดของพื้นที่ปลอดภัย (inset) เท่าที่ทำได้
--- แทนที่จะเว้นระยะลงมาเหมือนเดิม, ไม่มีกล่อง/พื้นหลัง (BackgroundTransparency = 1) ตัวเลขใหญ่ขึ้น
+-- ⚠️⚠️ เคยวางไว้มุมขวาบน (ชิดขอบบนสุดของ inset) แล้วชนกับ UI ของ Roblox เอง — มุมขวาบนของ
+-- Roblox ไม่ได้มีแค่ไอคอนระบบ (report/chat/mic) ที่ IgnoreGuiInset คำนวณให้ ยังมีป้ายชื่อ
+-- ผู้เล่น + ยอด Robux ที่ Roblox วาดต่อกันเป็นชุดซ้อนอยู่ในมุมเดียวกันอีกชั้น ซึ่งกินพื้นที่
+-- มากกว่า inset เฉย ๆ และไม่มีทางรู้ความสูงที่แน่นอนล่วงหน้า (ไม่ใช่ค่าคงที่ ขึ้นกับบัญชี/แพลตฟอร์ม)
+-- ย้ายมาไว้ **กึ่งกลางด้านบน** แทน เพราะ Roblox แทบไม่วาง UI ระบบไว้ตรงนี้ หลีกเลี่ยงปัญหาชนกัน
+-- ได้ทั้งหมดโดยไม่ต้องเดาตัวเลข ไม่มีกล่อง/พื้นหลัง (BackgroundTransparency = 1) ตัวเลขใหญ่ขึ้น
 -- และมีเงาเส้นขอบ (TextStroke) แทนกล่องพื้นหลัง กันอ่านไม่ออกตอนพื้นหลังเป็นท้องฟ้า/หญ้าสว่าง
 --------------------------------------------------------------------------------
 
 local coinLabel = Instance.new("TextLabel")
 coinLabel.Name = "CoinLabel"
-coinLabel.AnchorPoint = Vector2.new(1, 0)
-coinLabel.Position = UDim2.new(1, -12, 0, 4)
+coinLabel.AnchorPoint = Vector2.new(0.5, 0)
+coinLabel.Position = UDim2.new(0.5, 0, 0, 8)
 coinLabel.Size = UDim2.new(0, 280, 0, 36)
 coinLabel.BackgroundTransparency = 1
 coinLabel.TextColor3 = Color3.fromRGB(255, 220, 90)
-coinLabel.TextXAlignment = Enum.TextXAlignment.Right
+coinLabel.TextXAlignment = Enum.TextXAlignment.Center
 coinLabel.TextSize = 26
 coinLabel.Font = Enum.Font.SourceSansBold
 coinLabel.TextStrokeTransparency = 0.4

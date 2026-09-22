@@ -496,6 +496,10 @@ Config.RemoteNames = {
 	-- ⚠️ ไม่มีพารามิเตอร์ราคา — ราคาคำนวณฝั่ง server เสมอ ไม่มีช่องให้ client ส่งราคามาเอง
 	SELL_MOTHER_REQUEST = "SellMotherRequest",
 
+	-- client → server : FireServer() — ไม่มีพารามิเตอร์ จัดแม่จากกระเป๋าเข้าคอกอัตโนมัติ
+	-- (เลือกตัวรายได้เงิน/นาทีสูงสุดก่อน) เติมเฉพาะช่องว่างที่เหลือ ไม่เคยเตะแม่ในคอกออก
+	AUTO_FILL_PEN_REQUEST = "AutoFillPenRequest",
+
 	-- server → client : { slotIndex, eggId, charId, charName, class, weight, placedIn }
 	EGG_HATCHED = "EggHatched",
 

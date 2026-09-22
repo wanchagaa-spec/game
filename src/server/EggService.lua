@@ -76,6 +76,7 @@ local placeEggRequest: RemoteEvent
 local moveMotherRequest: RemoteEvent
 local upgradePenRequest: RemoteEvent
 local sellMotherRequest: RemoteEvent
+local autoFillPenRequest: RemoteEvent
 local eggHatched: RemoteEvent
 local farmStateSync: RemoteEvent
 local actionResult: RemoteEvent
@@ -592,6 +593,60 @@ function EggService.moveMother(player: Player, rawUid: unknown, rawTarget: unkno
 end
 
 --------------------------------------------------------------------------------
+-- จัดแม่เข้าคอกอัตโนมัติ — ฟีเจอร์ถาวร (ไม่ใช่ TEMP)
+--------------------------------------------------------------------------------
+
+-- ⚠️ เติมเฉพาะ "ช่องว่างที่เหลือ" เท่านั้น — ห้ามเตะแม่ที่อยู่ในคอกอยู่แล้วออกไม่ว่ากรณีไหน
+-- (โค้ดนี้ไม่มี path ไหนแตะ data.mothersInPen นอกจากการ table.insert เพิ่มเข้าไปเลย)
+-- เกณฑ์ "ดีที่สุด" = รายได้เงิน/นาทีสูงสุด ใช้ Config.getCoinsPerMinute() สูตรเดียวกับที่ทั้งเกม
+-- ใช้จริงตรง ๆ (ไม่ใช้น้ำหนักเทียบตรง ๆ) เพราะสถานะ (Phase 7 — ยังไม่เปิดใช้) มีผลต่อรายได้ด้วย
+-- แต่ไม่มีผลต่อน้ำหนัก ใช้สูตรจริงเผื่อผลลัพธ์ไม่เพี้ยนตอนสถานะเปิดใช้งานจริงทีหลัง
+function EggService.autoFillPen(player: Player): (boolean, string?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น"
+	end
+
+	local freeSlots = Config.getPenCapacity(data.penLevel) - #data.mothersInPen
+	if freeSlots <= 0 then
+		return false, "คอกเต็มแล้ว"
+	end
+	if #data.mothersInBag == 0 then
+		return false, "ไม่มีแม่ให้จัด"
+	end
+
+	-- เรียงกระเป๋าจากรายได้/นาทีมากไปน้อย แล้วหยิบจากหัวลิสต์ไปเรื่อย ๆ จนเต็มช่องว่างหรือกระเป๋าหมด
+	table.sort(data.mothersInBag, function(a, b)
+		return Config.getCoinsPerMinute(a.weight, data.wallProgress, a.statuses)
+			> Config.getCoinsPerMinute(b.weight, data.wallProgress, b.statuses)
+	end)
+
+	local moved = 0
+	while moved < freeSlots and #data.mothersInBag > 0 do
+		local mother = table.remove(data.mothersInBag, 1)
+		if not mother then
+			-- ⚠️ เข้าไม่ถึงจริงเพราะเช็ค #data.mothersInBag > 0 ไว้แล้วในเงื่อนไข while
+			-- แต่ table.remove() คืน T? เสมอตามชนิดของมัน ต้องเช็คให้ type checker ยอมผ่าน
+			break
+		end
+		-- เริ่มนับเวลาผลิตใหม่ตั้งแต่วินาทีที่เข้าคอก (เหมือน moveMother ตอนย้ายเข้าคอก)
+		mother.lastProducedAt = os.time()
+		table.insert(data.mothersInPen, mother)
+		moved += 1
+	end
+
+	-- ⚠️ เหตุผลเดียวกับ moveMother — เปิดที่ว่างในกระเป๋าแล้ว ลองย้ายแม่ที่ค้างในสวนฟักมาเข้าทันที
+	-- เผื่อพอดีมีของรออยู่ (ข้อ D — data-schema §13)
+	processReadyHatchSlots(player, data, os.time())
+
+	PenService.refreshMothers(player, data.mothersInPen)
+	EggService.sync(player)
+
+	print(`[EggService] {player.Name} จัดแม่เข้าคอกอัตโนมัติ {moved} ตัว`)
+	return true, nil
+end
+
+--------------------------------------------------------------------------------
 -- อัปเกรดคอก
 --------------------------------------------------------------------------------
 
@@ -835,9 +890,18 @@ function EggService.debugWipeSavedData(player: Player, confirmName: string?): (b
 	return true, nil
 end
 
+-- ⚠️ ใช้เป็นตารางคลาสอ้างอิงตอน debugGrantMother ต้องสุ่มคลาสเอง (charId = nil) — เครื่องมือนี้
+-- ไม่ผูกกับด่านไหนอยู่แล้ว (ให้ระบุน้ำหนักได้ทุก tier อิสระจากด่าน) จึงต้องเลือกไข่สักชนิดมาใช้
+-- ตารางคลาสของมัน · egg_stage1 รับประกันมีอยู่จริงและเปิดใช้เสมอ (validate() บังคับทุกด่านต้องมี
+-- ไข่ของตัวเองที่เปิดใช้อยู่) จึงปลอดภัยสุดที่จะ hardcode ไว้ตรงนี้
+local DEBUG_RANDOM_CLASS_EGG_ID = "egg_stage1"
+
 -- สร้างแม่ตรง ๆ ข้ามขั้นตอนฟักทั้งหมด — ใช้ทดสอบขนาดโมเดล/ราคาขาย/ความจุคอกทุก tier
 -- โดยไม่ต้องพึ่งการสุ่มธรรมชาติ (tier 7 = 100,000,000 kg ออกแค่ 1 ในล้านฟองจริง ทดสอบด้วยการ
 -- สุ่มเล่น ๆ ไม่ทันแน่นอน)
+--
+-- charId = nil แปลว่า "สุ่มคลาสเอง เหมือนฟักไข่ปกติ" — ใช้ Config.rollCharacter() ตัวเดียวกับที่
+-- placeEgg()/hatch() ใช้จริง ไม่เขียนตรรกะสุ่มคลาสซ้ำเอง (ดู DEBUG_RANDOM_CLASS_EGG_ID ด้านบน)
 --
 -- destination: "pen" | "bag" — ⚠️ ถ้า "pen" แต่คอกเต็ม **ปฏิเสธตรง ๆ ไม่ fallback ไปกระเป๋าเงียบ ๆ**
 -- เพราะ fallback แบบนั้นจะทำให้เทสต์ "คอกเต็มพอดี" (ข้อ D) ที่ตั้งใจตั้งไว้เพี้ยนไปเป็นอย่างอื่น
@@ -845,7 +909,7 @@ end
 function EggService.debugGrantMother(
 	player: Player,
 	weight: number,
-	charId: string,
+	charId: string?,
 	destination: string
 ): (boolean, string?)
 	local data = dataOf(player)
@@ -854,10 +918,22 @@ function EggService.debugGrantMother(
 		return false, "ยังไม่มีข้อมูลผู้เล่น"
 	end
 
-	local character = Config.getCharacter(charId)
+	local resolvedCharId: string
+	if charId then
+		resolvedCharId = charId
+	else
+		local rolled = Config.rollCharacter(DEBUG_RANDOM_CLASS_EGG_ID, rng)
+		if not rolled then
+			warn(`[EggService] debugGrantMother: สุ่มคลาสไม่สำเร็จ (ไม่มีตัวละครที่เปิดใช้อยู่เลย)`)
+			return false, "สุ่มคลาสไม่สำเร็จ"
+		end
+		resolvedCharId = rolled
+	end
+
+	local character = Config.getCharacter(resolvedCharId)
 	if not character then
-		warn(`[EggService] debugGrantMother: ไม่มีตัวละคร "{charId}" ใน Config`)
-		return false, `ไม่มีตัวละคร "{charId}"`
+		warn(`[EggService] debugGrantMother: ไม่มีตัวละคร "{resolvedCharId}" ใน Config`)
+		return false, `ไม่มีตัวละคร "{resolvedCharId}"`
 	end
 
 	if destination ~= "pen" and destination ~= "bag" then
@@ -885,7 +961,7 @@ function EggService.debugGrantMother(
 
 	local mother: Mother = {
 		uid = Config.makeUid(player.UserId, data.nextUid),
-		charId = charId,
+		charId = resolvedCharId,
 		weight = flooredWeight,
 		statuses = {},
 		obtainedAt = os.time(),
@@ -1139,6 +1215,7 @@ function EggService.start()
 	moveMotherRequest = Remotes.waitFor(Config.RemoteNames.MOVE_MOTHER_REQUEST)
 	upgradePenRequest = Remotes.waitFor(Config.RemoteNames.UPGRADE_PEN_REQUEST)
 	sellMotherRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHER_REQUEST)
+	autoFillPenRequest = Remotes.waitFor(Config.RemoteNames.AUTO_FILL_PEN_REQUEST)
 	eggHatched = Remotes.waitFor(Config.RemoteNames.EGG_HATCHED)
 	farmStateSync = Remotes.waitFor(Config.RemoteNames.FARM_STATE_SYNC)
 	actionResult = Remotes.waitFor(Config.RemoteNames.ACTION_RESULT)
@@ -1187,6 +1264,19 @@ function EggService.start()
 		else
 			local coinsAfter = if data then data.currency.coins else coinsBefore
 			reportResult(player, true, `ขายแม่สำเร็จ +{coinsAfter - coinsBefore} coins`)
+		end
+	end)
+
+	autoFillPenRequest.OnServerEvent:Connect(function(player)
+		local data = dataOf(player)
+		local penBefore = if data then #data.mothersInPen else 0
+		local ok, reason = EggService.autoFillPen(player)
+		if not ok then
+			print(`[EggService] จัดแม่เข้าคอกอัตโนมัติของ {player.Name} ไม่ทำอะไร: {reason}`)
+			reportResult(player, false, reason or "จัดแม่เข้าคอกไม่สำเร็จ")
+		else
+			local penAfter = if data then #data.mothersInPen else penBefore
+			reportResult(player, true, `จัดแม่เข้าคอกสำเร็จ +{penAfter - penBefore} ตัว`)
 		end
 	end)
 

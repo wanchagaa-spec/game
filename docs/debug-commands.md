@@ -34,6 +34,7 @@ local player = game.Players.<ชื่อผู้เล่น>  -- หรือ
 ```lua
 EggService.debugGrantMother(player, 100000000, "yulai", "pen")  -- แม่ tier 7 คลาส SS เข้าคอกทันที
 EggService.debugGrantMother(player, 1500, "wukong", "bag")       -- แม่เล็ก ๆ เข้ากระเป๋า
+EggService.debugGrantMother(player, 1500, nil, "bag")            -- แม่เล็ก ๆ สุ่มคลาสเอง (เหมือนฟักปกติ)
 ```
 
 - `destination` ต้องเป็น `"pen"` หรือ `"bag"` เท่านั้น
@@ -41,7 +42,11 @@ EggService.debugGrantMother(player, 1500, "wukong", "bag")       -- แม่เ
   (เจตนา: กันไม่ให้เทสต์ "คอกเต็มพอดี" ที่ตั้งใจตั้งไว้เพี้ยนไปโดยไม่รู้ตัว)
 - `weight` ต้องเป็นจำนวนเต็มบวก (ปัดเศษให้อัตโนมัติด้วย `math.floor` — น้ำหนักแม่ต้องเป็น
   จำนวนเต็มเสมอเพราะเป็นส่วนหนึ่งของ stack key)
-- `charId` ต้องมีอยู่จริงใน `Config.Characters` (ดูรายชื่อในตาราง §ด้านล่าง)
+- `charId` ต้องมีอยู่จริงใน `Config.Characters` (ดูรายชื่อในตาราง §ด้านล่าง) **หรือส่ง `nil`
+  ให้สุ่มคลาสเอง** ผ่าน `Config.rollCharacter()` ตัวเดียวกับตอนฟักไข่ปกติ (อิงตารางคลาสของ
+  `egg_stage1` เป็นค่าอ้างอิง — เครื่องมือนี้ไม่ผูกกับด่านไหนอยู่แล้ว)
+  ⚠️ เคยพัง: ส่ง `nil` แล้วโดน `"ไม่มีตัวละคร \"nil\""` เพราะโค้ดเดิมเอา `nil` ไปค้นหาตรง ๆ
+  ไม่มี branch สุ่มให้ — แก้แล้ว
 - คืนค่า `(boolean, string?)` — `true` = สำเร็จ, `false, เหตุผล` = ถูกปฏิเสธ
 - print สรุปเสมอไม่ว่าสำเร็จหรือไม่
 

@@ -203,6 +203,21 @@ do
 \tcheck("แม่ในกระเป๋าไม่มี lastProducedAt (ไม่ผลิต)", data.mothersInBag[1].lastProducedAt == nil, true)
 end
 
+print("\\n━━ debugGrantMother: charId เป็น nil → สุ่มคลาสเอง เหมือนฟักปกติ ไม่ error ━━")
+do
+\tlocal player, data = freshPlayer("Grant2b")
+\ttable.clear(data.mothersInBag)
+\tlocal ok, reason = EggService.debugGrantMother(player, 500, nil, "bag")
+\tcheck("คืนค่า true (ไม่ error)", ok)
+\tcheck("ไม่มีเหตุผลปฏิเสธ", reason == nil, true)
+\tcheck("มีแม่ 1 ตัวในกระเป๋า", #data.mothersInBag, 1)
+\tlocal m = data.mothersInBag[1]
+\tcheck("charId ไม่ใช่ nil (สุ่มมาได้จริง)", m.charId ~= nil, true)
+\tlocal character = m.charId and Config.getCharacter(m.charId)
+\tcheck("charId ที่สุ่มได้มีตัวละครจริงใน Config", character ~= nil, true)
+\tcheck("ตัวละครที่สุ่มได้เปิดใช้งานอยู่ (enabled)", character ~= nil and character.enabled, true)
+end
+
 print("\\n━━ debugGrantMother: คอกเต็ม → ปฏิเสธตรง ๆ ไม่ fallback ไปกระเป๋า ━━")
 do
 \tlocal player, data = freshPlayer("Grant3")

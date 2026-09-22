@@ -105,8 +105,10 @@ EggService.start()
 
 local upgradePenHandler = capturedHandlers[Config.RemoteNames.UPGRADE_PEN_REQUEST]
 local sellMotherHandler = capturedHandlers[Config.RemoteNames.SELL_MOTHER_REQUEST]
+local autoFillPenHandler = capturedHandlers[Config.RemoteNames.AUTO_FILL_PEN_REQUEST]
 assert(upgradePenHandler, "เซ็ตอัพเทสต์ผิด — ไม่ผูก callback ให้ UpgradePenRequest")
 assert(sellMotherHandler, "เซ็ตอัพเทสต์ผิด — ไม่ผูก callback ให้ SellMotherRequest")
+assert(autoFillPenHandler, "เซ็ตอัพเทสต์ผิด — ไม่ผูก callback ให้ AutoFillPenRequest")
 
 local fakeStore = { data = {} }
 function fakeStore.UpdateAsync(_self, key, transform)
@@ -455,6 +457,84 @@ do
 \t\tend
 \tend
 \tcheck("มีของค้างครบ 2 ฟองตามที่ตั้งไว้ (ฟองที่ยังไม่ครบเวลาไม่ถูกนับ)", stuckCount, 2)
+end
+
+--------------------------------------------------------------------------------
+-- 4) จัดแม่เข้าคอกอัตโนมัติ (AutoFillPenRequest)
+--------------------------------------------------------------------------------
+
+print("\\n━━ จัดแม่เข้าคอกอัตโนมัติ: เลือกรายได้/นาทีสูงสุดก่อน เติมจนเต็มช่องว่าง ━━")
+do
+\tlocal player, data = freshPlayer("AutoFill1")
+\ttable.clear(data.mothersInPen)
+\ttable.clear(data.mothersInBag)
+\tlocal penCap = Config.getPenCapacity(data.penLevel)
+\t-- เว้นที่ว่างในคอกไว้ 2 ช่อง ที่เหลือเติมแม่เดิมไปก่อน (ต้องไม่ถูกเตะออก)
+\tfor i = 1, penCap - 2 do
+\t\ttable.insert(data.mothersInPen, makeMother(`existing-pen-{i}`, "monkey", 100, { lastProducedAt = os.time() }))
+\tend
+\t-- กระเป๋ามีแม่ 3 ตัว น้ำหนักต่างกันชัดเจน (รายได้/นาทีแปรตาม sqrt น้ำหนัก คลาสไม่มีผล)
+\ttable.insert(data.mothersInBag, makeMother("low", "monkey", 100))
+\ttable.insert(data.mothersInBag, makeMother("mid", "monkey", 10000))
+\ttable.insert(data.mothersInBag, makeMother("high", "monkey", 1000000))
+
+\tlocal ok = pcall(autoFillPenHandler, player)
+\tcheck("ไม่ error/crash", ok)
+\tcheck("คอกเต็มพอดี (เติมแค่ 2 ช่องว่างที่มี)", #data.mothersInPen, penCap)
+\tcheck("กระเป๋าเหลือ 1 ตัว (ตัวที่แย่ที่สุดที่เหลือที่ไม่พอ)", #data.mothersInBag, 1)
+\tcheck("ตัวที่เหลือในกระเป๋าคือ \\"low\\" (รายได้ต่ำสุด)", data.mothersInBag[1].uid, "low")
+
+\tlocal penUids = {}
+\tfor _, m in data.mothersInPen do
+\t\tpenUids[m.uid] = true
+\tend
+\tcheck("\\"high\\" (รายได้สูงสุด) ถูกย้ายเข้าคอก", penUids["high"], true)
+\tcheck("\\"mid\\" ถูกย้ายเข้าคอกด้วย (ที่ว่างพอสำหรับ 2 ตัว)", penUids["mid"], true)
+\tcheck("\\"low\\" ไม่ถูกย้าย (แย่ที่สุด เหลือที่ไม่พอ)", penUids["low"] == nil, true)
+
+\tlocal allOriginalStillThere = true
+\tfor i = 1, penCap - 2 do
+\t\tif not penUids[`existing-pen-{i}`] then
+\t\t\tallOriginalStillThere = false
+\t\tend
+\tend
+\tcheck("แม่เดิมในคอกทั้งหมดยังอยู่ครบ ไม่มีตัวไหนถูกเตะออก", allOriginalStillThere, true)
+end
+
+print("\\n━━ จัดแม่เข้าคอกอัตโนมัติ: คอกเต็มแล้ว → ปฏิเสธ ไม่มีอะไรเปลี่ยน ━━")
+do
+\tlocal player, data = freshPlayer("AutoFill2")
+\tfillPenAndBag(data) -- เติมคอก+กระเป๋าให้เต็มพอดีตามความจุปัจจุบัน
+\tlocal penCountBefore, bagCountBefore = #data.mothersInPen, #data.mothersInBag
+\tlocal ok = pcall(autoFillPenHandler, player)
+\tcheck("ไม่ error/crash", ok)
+\tcheck("คอกไม่เปลี่ยน", #data.mothersInPen, penCountBefore)
+\tcheck("กระเป๋าไม่เปลี่ยน", #data.mothersInBag, bagCountBefore)
+end
+
+print("\\n━━ จัดแม่เข้าคอกอัตโนมัติ: กระเป๋าว่างเปล่า → ไม่มีอะไรเกิดขึ้น ━━")
+do
+\tlocal player, data = freshPlayer("AutoFill3")
+\ttable.clear(data.mothersInPen)
+\ttable.clear(data.mothersInBag)
+\ttable.insert(data.mothersInPen, makeMother("solo-pen", "monkey", 100, { lastProducedAt = os.time() }))
+\tlocal ok = pcall(autoFillPenHandler, player)
+\tcheck("ไม่ error/crash", ok)
+\tcheck("คอกไม่เปลี่ยน (ยังมีแค่ 1 ตัวเดิม)", #data.mothersInPen, 1)
+\tcheck("กระเป๋ายังว่างเปล่า", #data.mothersInBag, 0)
+end
+
+print("\\n━━ จัดแม่เข้าคอกอัตโนมัติ: กระเป๋ามีน้อยกว่าที่ว่าง → ย้ายหมดทุกตัว กระเป๋าว่าง ━━")
+do
+\tlocal player, data = freshPlayer("AutoFill4")
+\ttable.clear(data.mothersInPen)
+\ttable.clear(data.mothersInBag)
+\ttable.insert(data.mothersInBag, makeMother("only1", "monkey", 500))
+\ttable.insert(data.mothersInBag, makeMother("only2", "monkey", 800))
+\tlocal ok = pcall(autoFillPenHandler, player)
+\tcheck("ไม่ error/crash", ok)
+\tcheck("คอกได้แม่ทั้งสองตัว", #data.mothersInPen, 2)
+\tcheck("กระเป๋าว่างเปล่าหลังจากนั้น (ที่ว่างเหลือเยอะกว่าที่มี)", #data.mothersInBag, 0)
 end
 
 print(string.format("\\n=== ผ่าน %d / ตก %d ===", passCount, failCount))

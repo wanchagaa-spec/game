@@ -29,9 +29,10 @@ local placeEggRequest = Remotes.waitFor(Config.RemoteNames.PLACE_EGG_IN_HATCHERY
 local moveMotherRequest = Remotes.waitFor(Config.RemoteNames.MOVE_MOTHER_REQUEST)
 local upgradePenRequest = Remotes.waitFor(Config.RemoteNames.UPGRADE_PEN_REQUEST)
 local sellMotherRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHER_REQUEST)
+local autoFillPenRequest = Remotes.waitFor(Config.RemoteNames.AUTO_FILL_PEN_REQUEST)
 local eggHatched = Remotes.waitFor(Config.RemoteNames.EGG_HATCHED)
 local farmStateSync = Remotes.waitFor(Config.RemoteNames.FARM_STATE_SYNC)
--- ⚠️ ใหม่: server ส่งผลลัพธ์ (สำเร็จ/ล้มเหลว + เหตุผล) ของคำขอ 4 ตัวด้านบนกลับมาทางนี้
+-- ⚠️ server ส่งผลลัพธ์ (สำเร็จ/ล้มเหลว + เหตุผล) ของคำขอด้านบนกลับมาทางนี้
 -- ก่อนหน้านี้ผลลัพธ์ไปโผล่แค่ print ใน server console เท่านั้น ผู้เล่นไม่เห็นอะไรเลย
 local actionResult = Remotes.waitFor(Config.RemoteNames.ACTION_RESULT)
 
@@ -40,7 +41,7 @@ local actionResult = Remotes.waitFor(Config.RemoteNames.ACTION_RESULT)
 --------------------------------------------------------------------------------
 
 -- ⚠️ Phase 1.5–2B: ยังเป็นแผงเทสต์ ไม่ใช่ UI จริง (Phase 3 ค่อยทำ UI จริงแบบมีไอคอนสัตว์)
--- แต่ต้อง "ใช้งานได้จริงระหว่างทดสอบ" — ย่อ/ขยายได้ + รายการ scroll ได้ + ไม่บังจอเกิน ~40%
+-- แต่ต้อง "ใช้งานได้จริงระหว่างทดสอบ" — ย่อ/ขยายได้ + รายการ scroll ได้ + ขยายแล้วอ่าน/กดสบาย
 -- (เคยเป็นกล่องข้อความเต็มจอความสูงคงที่ พอแม่/ไข่เยอะขึ้นบังแมพจนมองไม่เห็นอะไรเลย)
 
 local BG = Color3.fromRGB(28, 30, 36)
@@ -49,28 +50,24 @@ local DIM = Color3.fromRGB(160, 165, 175)
 local ACCENT = Color3.fromRGB(90, 160, 235)
 local SUCCESS_COLOR = Color3.fromRGB(140, 220, 140)
 local ERROR_COLOR = Color3.fromRGB(235, 130, 130)
--- ⚠️ สีเตือน (ส้ม) เฉพาะปุ่ม "ทดสอบชั่วคราว" (ข้อ 6) ให้ดูต่างจากปุ่มปกติชัดเจน
--- เพราะเป็นปุ่มที่ทำสิ่งที่ย้อนกลับไม่ได้ (ขายแม่) และของจริงต้องย้ายไปร้านค้า ไม่ใช่ตรงนี้
+-- ⚠️ สีเตือน (ส้ม) เฉพาะปุ่ม "ทดสอบชั่วคราว" ให้ดูต่างจากปุ่มปกติชัดเจน เพราะเป็นปุ่มที่ทำสิ่งที่
+-- ย้อนกลับไม่ได้ (ขายแม่) และของจริงต้องย้ายไปร้านค้า ไม่ใช่ตรงนี้
 local TEMP_BUTTON_COLOR = Color3.fromRGB(200, 140, 60)
+local DISABLED_ACTION_COLOR = Color3.fromRGB(70, 74, 82)
 
 local HEADER_HEIGHT = 36
 local TAB_BAR_HEIGHT = 32
 local UPGRADE_BUTTON_HEIGHT = 26
 local ACTION_BUTTON_HEIGHT = 30
-local SELL_ROW_HEIGHT = 26
 local RESULT_HEIGHT = 32
 local BODY_GAP = 6
 -- ⚠️ ผลรวมความสูงของทุกอย่างใน body ยกเว้น gridScroll — ใช้คำนวณ gridScroll.Size ตรง ๆ
 -- แทน UIFlexItem (FlexMode=Fill) ที่เคยใช้ — บนไคลเอนต์จริงบางเครื่องมันไม่ทำงาน
 -- แล้ว gridScroll ตกกลับไปใช้ fallback Size เต็ม 100% ซ้อนทับพี่น้องตัวอื่นจน body ล้นทะลุแผง
--- ⚠️ ตอนนี้ body มี 6 ชิ้น (tabBar, upgradePenButton, actionButton, sellRow, gridScroll,
--- resultLabel) เว้นวรรคด้วย BODY_GAP 5 ครั้ง (ระหว่างแต่ละคู่) — แก้จำนวนแถวแล้วต้องแก้เลข 5 นี้ด้วย
-local FIXED_STACK_HEIGHT = TAB_BAR_HEIGHT
-	+ UPGRADE_BUTTON_HEIGHT
-	+ ACTION_BUTTON_HEIGHT
-	+ SELL_ROW_HEIGHT
-	+ RESULT_HEIGHT
-	+ BODY_GAP * 5
+-- ⚠️ body มี 4 ชิ้นคงที่ (tabBar, upgradePenButton, actionButton, resultLabel) + gridScroll
+-- เว้นวรรคด้วย BODY_GAP 4 ครั้ง (ระหว่างแต่ละคู่ในทั้งหมด 5 ชิ้น) — แก้จำนวนแถวแล้วต้องแก้เลข 4 นี้ด้วย
+-- (ปุ่มขาย/จัดแม่อัตโนมัติย้ายเข้าไปเป็นแถวข้างในแท็บ "กระเป๋า" แทน ไม่ใช่แถวคงที่นอกกริดอีกต่อไป)
+local FIXED_STACK_HEIGHT = TAB_BAR_HEIGHT + UPGRADE_BUTTON_HEIGHT + ACTION_BUTTON_HEIGHT + RESULT_HEIGHT + BODY_GAP * 4
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "EggFarmDebugUI"
@@ -81,34 +78,47 @@ gui.IgnoreGuiInset = false
 gui.Parent = playerGui
 
 --------------------------------------------------------------------------------
--- ยอดเงินมุมบนขวา — ⚠️ ข้อ 7: อยู่นอกแผงที่ย่อ/ปิดได้ ต้องเห็นตลอดเวลา
--- เป็นลูกของ `gui` ตรง ๆ ไม่ใช่ลูกของ `panel` ที่ย่อได้ (panel.Visible ไม่กระทบตัวนี้เลย)
+-- ยอดเงินมุมบนขวา — อยู่นอกแผงที่ย่อ/ปิดได้ ต้องเห็นตลอดเวลา เป็นลูกของ `gui` ตรง ๆ
+-- ไม่ใช่ของ `panel` ที่ย่อได้ (panel.Visible ไม่กระทบตัวนี้เลย)
+--
+-- ⚠️ ขัด UI ตามที่ขอ: วางให้อยู่**เหนือ**ป้ายชื่อผู้เล่นของ Roblox เอง (แถบชื่อ/สถานะที่ตัวเกม
+-- วาดเองอยู่แล้วแถวใต้ไอคอนระบบมุมขวาบน) จึงชิดขอบบนสุดของพื้นที่ปลอดภัย (inset) เท่าที่ทำได้
+-- แทนที่จะเว้นระยะลงมาเหมือนเดิม, ไม่มีกล่อง/พื้นหลัง (BackgroundTransparency = 1) ตัวเลขใหญ่ขึ้น
+-- และมีเงาเส้นขอบ (TextStroke) แทนกล่องพื้นหลัง กันอ่านไม่ออกตอนพื้นหลังเป็นท้องฟ้า/หญ้าสว่าง
 --------------------------------------------------------------------------------
 
 local coinLabel = Instance.new("TextLabel")
 coinLabel.Name = "CoinLabel"
 coinLabel.AnchorPoint = Vector2.new(1, 0)
-coinLabel.Position = UDim2.new(1, -16, 0, 16)
-coinLabel.Size = UDim2.new(0, 200, 0, 36)
-coinLabel.BackgroundColor3 = BG
-coinLabel.BackgroundTransparency = 0.1
-coinLabel.BorderSizePixel = 0
-coinLabel.TextColor3 = Color3.fromRGB(255, 215, 90)
-coinLabel.TextXAlignment = Enum.TextXAlignment.Center
-coinLabel.TextSize = 18
+coinLabel.Position = UDim2.new(1, -12, 0, 4)
+coinLabel.Size = UDim2.new(0, 280, 0, 36)
+coinLabel.BackgroundTransparency = 1
+coinLabel.TextColor3 = Color3.fromRGB(255, 220, 90)
+coinLabel.TextXAlignment = Enum.TextXAlignment.Right
+coinLabel.TextSize = 26
 coinLabel.Font = Enum.Font.SourceSansBold
-coinLabel.Text = "เหรียญ: -"
+coinLabel.TextStrokeTransparency = 0.4
+coinLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+coinLabel.Text = "-"
 coinLabel.Parent = gui
 
-local coinCorner = Instance.new("UICorner")
-coinCorner.CornerRadius = UDim.new(0, 8)
-coinCorner.Parent = coinLabel
+-- ⚠️ ใส่ comma คั่นหลักพันเอง (ไม่มีให้ในตัวภาษา) — เฉพาะจำนวนเต็ม ไม่ต้องรองรับทศนิยม เพราะ
+-- currency.coins ทั้งเกมเป็นจำนวนเต็มเสมอ (math.floor ตอนคำนวณราคาทุกจุด) — ข้อ 4: โชว์เต็ม ไม่ย่อ
+local function formatCommaNumber(value: number): string
+	local sign = if value < 0 then "-" else ""
+	local intPart = string.format("%d", math.abs(math.floor(value)))
+	local reversed = string.reverse(intPart)
+	local grouped = string.gsub(reversed, "(%d%d%d)", "%1,")
+	local formatted = string.reverse(grouped)
+	formatted = string.gsub(formatted, "^,", "")
+	return sign .. formatted
+end
 
--- ⚠️ ขนาดเป็น scale ไม่ใช่ pixel ตายตัว — กันแผงบังจอเกิน ~40% บนมือถือจอเล็ก
--- UISizeConstraint คุมอีกชั้นกันจอใหญ่มาก (4K/ultrawide) ไม่ให้แผงขยายใหญ่เกินเหตุ
+-- ⚠️ ขนาดเป็น scale ไม่ใช่ pixel ตายตัว — MaxSize คุมอีกชั้นกันจอใหญ่มาก (4K/ultrawide)
+-- ไม่ให้แผงขยายใหญ่เกินเหตุ (ยกขึ้นมากตามข้อ 5 — ตอนนี้ปุ่มย่อกดปิดได้จริงแล้ว ไม่ต้องกลัวบังจอ)
 -- ⚠️ MinSize.Y ตั้งต่ำมาก (แค่กันค่าติดลบ) ไม่ใช่ 200+ เพราะตอนย่อแผงเหลือแค่แถบหัว (HEADER_HEIGHT)
 -- ถ้าตั้ง MinSize.Y สูงกว่านั้น UISizeConstraint จะดันความสูงตอนย่อกลับขึ้นมาเอง ย่อไม่ได้จริง
-local EXPANDED_SIZE = UDim2.fromScale(0.36, 0.4)
+local EXPANDED_SIZE = UDim2.fromScale(0.7, 0.8)
 local COLLAPSED_SIZE = UDim2.new(0.36, 0, 0, HEADER_HEIGHT)
 
 local panel = Instance.new("Frame")
@@ -126,7 +136,7 @@ corner.Parent = panel
 
 local sizeConstraint = Instance.new("UISizeConstraint")
 sizeConstraint.MinSize = Vector2.new(220, 4)
-sizeConstraint.MaxSize = Vector2.new(420, 560)
+sizeConstraint.MaxSize = Vector2.new(1000, 800)
 sizeConstraint.Parent = panel
 
 -- ⚠️ กันเนื้อหาล้นออกนอกกรอบแผง (เคยเกิดจริง — ดูคอมเมนต์ FIXED_STACK_HEIGHT ด้านบน)
@@ -194,8 +204,7 @@ bodyLayout.Padding = UDim.new(0, BODY_GAP)
 bodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
 bodyLayout.Parent = body
 
--- `parent` ปล่อยว่างไว้ = ใส่ตรงเข้า body (ปุ่มส่วนใหญ่) ใส่มาเอง = ใส่ในแถวย่อย เช่น sellRow
-local function makeButton(name: string, order: number, text: string, parent: Instance?): TextButton
+local function makeButton(name: string, order: number, text: string): TextButton
 	local button = Instance.new("TextButton")
 	button.Name = name
 	button.LayoutOrder = order
@@ -207,7 +216,7 @@ local function makeButton(name: string, order: number, text: string, parent: Ins
 	button.Font = Enum.Font.SourceSansBold
 	button.Text = text
 	button.AutoButtonColor = true
-	button.Parent = parent or body
+	button.Parent = body
 
 	local buttonCorner = Instance.new("UICorner")
 	buttonCorner.CornerRadius = UDim.new(0, 6)
@@ -216,20 +225,21 @@ local function makeButton(name: string, order: number, text: string, parent: Ins
 	return button
 end
 
--- ⚠️ ใช้คำนวณความกว้างปุ่มที่แบ่งเท่า ๆ กันในแถวเดียว (tabBar 3 ปุ่ม, sellRow 2 ปุ่ม)
--- โดยไม่ hardcode เลขชดเชย — offset ต้องหักส่วนที่ padding ระหว่างปุ่มกินไปให้พอดี
--- ผลรวม scale ของทุกปุ่ม = 1.0 เสมอ และผลรวม offset ของทุกปุ่ม = -(gap รวมทั้งหมด) เสมอ
+-- ⚠️ ใช้คำนวณความกว้างปุ่มที่แบ่งเท่า ๆ กันในแถบแท็บ โดยไม่ hardcode เลขชดเชย — offset ต้องหัก
+-- ส่วนที่ padding ระหว่างปุ่มกินไปให้พอดี ผลรวม scale ของทุกปุ่ม = 1.0 เสมอ และผลรวม offset
+-- ของทุกปุ่ม = -(gap รวมทั้งหมด) เสมอ
 local function equalSplitOffset(count: number, gap: number): number
 	return -(gap * (count - 1) / count)
 end
 
 --------------------------------------------------------------------------------
--- แถบแท็บ: แม่ / ไข่ / ลูก — เลือกดูรายตัว/รายฟอง/รายกองแยกกันคนละแท็บ
+-- แถบแท็บ: คอก / กระเป๋า / ไข่ / ลูก
+-- ⚠️ เดิมแท็บ "แม่" รวมคอก+กระเป๋าไว้ด้วยกัน (แยกแค่หัวข้อภายใน) แยกเป็นคนละแท็บจริงตามที่ขอ
 --------------------------------------------------------------------------------
 
 local TAB_ACTIVE_COLOR = ACCENT
 local TAB_INACTIVE_COLOR = Color3.fromRGB(50, 54, 62)
-local TAB_COUNT = 3
+local TAB_COUNT = 4
 local TAB_GAP = 6
 
 local tabBar = Instance.new("Frame")
@@ -269,12 +279,13 @@ local function makeTabButton(name: string, order: number, text: string): TextBut
 	return tabButton
 end
 
-local motherTabButton = makeTabButton("MotherTab", 1, "แม่")
-local eggTabButton = makeTabButton("EggTab", 2, "ไข่")
-local childrenTabButton = makeTabButton("ChildrenTab", 3, "ลูก")
+local penTabButton = makeTabButton("PenTab", 1, "คอก")
+local bagTabButton = makeTabButton("BagTab", 2, "กระเป๋า")
+local eggTabButton = makeTabButton("EggTab", 3, "ไข่")
+local childrenTabButton = makeTabButton("ChildrenTab", 4, "ลูก")
 
 --------------------------------------------------------------------------------
--- ปุ่มอัปเกรดคอก — ⚠️ ข้อ 5: อยู่ตลอด ไม่ขึ้นกับแท็บ/การเลือก เพราะเป็นค่าของบัญชี ไม่ใช่ของแม่ตัวไหน
+-- ปุ่มอัปเกรดคอก — อยู่ตลอด ไม่ขึ้นกับแท็บ/การเลือก เพราะเป็นค่าของบัญชี ไม่ใช่ของแม่ตัวไหน
 --------------------------------------------------------------------------------
 
 local upgradePenButton = makeButton("UpgradePen", 2, "กำลังโหลด...")
@@ -283,8 +294,6 @@ upgradePenButton.TextSize = 12
 
 local actionButton = makeButton("Action", 3, "กำลังโหลด...")
 
-local DISABLED_ACTION_COLOR = Color3.fromRGB(70, 74, 82)
-
 local function setActionButton(text: string, enabled: boolean)
 	actionButton.Text = text
 	actionButton.Active = enabled
@@ -292,44 +301,13 @@ local function setActionButton(text: string, enabled: boolean)
 	actionButton.BackgroundColor3 = if enabled then ACCENT else DISABLED_ACTION_COLOR
 end
 
---------------------------------------------------------------------------------
--- ⚠️⚠️ TEMP: ปุ่มขายด่วนสำหรับทดสอบเท่านั้น ไม่ใช่ flow จริงของเกม
--- ของจริงต้องไปขายที่ระบบร้านค้า (ยังไม่ได้ทำ — รอ Phase หลัง) สองปุ่มนี้มีไว้แค่ให้เคลียร์
--- กระเป๋าแม่เร็ว ๆ ระหว่างทดสอบระบบอื่นเท่านั้น — ข้อ 6
---------------------------------------------------------------------------------
-
-local sellRow = Instance.new("Frame")
-sellRow.Name = "SellRow"
-sellRow.LayoutOrder = 4
-sellRow.Size = UDim2.new(1, 0, 0, SELL_ROW_HEIGHT)
-sellRow.BackgroundTransparency = 1
-sellRow.Parent = body
-
-local sellRowLayout = Instance.new("UIListLayout")
-sellRowLayout.FillDirection = Enum.FillDirection.Horizontal
-sellRowLayout.Padding = UDim.new(0, 6)
-sellRowLayout.SortOrder = Enum.SortOrder.LayoutOrder
-sellRowLayout.Parent = sellRow
-
-local SELL_BUTTON_OFFSET = equalSplitOffset(2, 6)
-
--- TEMP: ขายเฉพาะแม่ที่เลือกอยู่ (ต้องเป็นแม่ในกระเป๋าเท่านั้น ตามกฎเดิม — แม่ในคอกขายไม่ได้)
-local sellButton = makeButton("SellSelected", 1, "เลือกแม่ในกระเป๋าเพื่อขาย", sellRow)
-sellButton.Size = UDim2.new(0.5, SELL_BUTTON_OFFSET, 1, 0)
-sellButton.TextSize = 12
-
--- TEMP: ขายแม่ทุกตัวในกระเป๋าทีเดียว สำหรับเคลียร์กระเป๋าไว ๆ ระหว่างทดสอบ
-local sellAllButton = makeButton("SellAll", 2, "กระเป๋าไม่มีแม่ให้ขาย", sellRow)
-sellAllButton.Size = UDim2.new(0.5, SELL_BUTTON_OFFSET, 1, 0)
-sellAllButton.TextSize = 12
-
--- ⚠️ กริดของแม่/ไข่/ลูก (ไข่ในกระเป๋า/สวนฟัก/คอก/กระเป๋าแม่/กองลูก) รวมอยู่ใน ScrollingFrame เดียวต่อแท็บ
--- แทนที่จะแยกกล่อง scroll ซ้อนกันหลายอัน (scroll ซ้อน scroll ใช้งานสับสน เลื่อนผิดกล่อง)
+-- ⚠️ กริดของคอก/กระเป๋า/ไข่/ลูก รวมอยู่ใน ScrollingFrame เดียวต่อแท็บ แทนที่จะแยกกล่อง scroll
+-- ซ้อนกันหลายอัน (scroll ซ้อน scroll ใช้งานสับสน เลื่อนผิดกล่อง)
 -- ⚠️ Size คำนวณจาก FIXED_STACK_HEIGHT ตรง ๆ (ดูคอมเมนต์ตอนประกาศค่าคงที่ด้านบนของไฟล์)
 -- ไม่ใช้ UIFlexItem อีกต่อไป เพราะมันคือสาเหตุที่เนื้อหาเคยล้นทะลุแผงจริงในเกม
 local gridScroll = Instance.new("ScrollingFrame")
 gridScroll.Name = "Grid"
-gridScroll.LayoutOrder = 5
+gridScroll.LayoutOrder = 4
 gridScroll.Size = UDim2.new(1, 0, 1, -FIXED_STACK_HEIGHT)
 gridScroll.BackgroundColor3 = Color3.fromRGB(20, 22, 26)
 gridScroll.BackgroundTransparency = 0.2
@@ -357,7 +335,7 @@ gridLayout.Parent = gridScroll
 
 local resultLabel = Instance.new("TextLabel")
 resultLabel.Name = "Result"
-resultLabel.LayoutOrder = 6
+resultLabel.LayoutOrder = 5
 resultLabel.Size = UDim2.new(1, 0, 0, RESULT_HEIGHT)
 resultLabel.BackgroundTransparency = 1
 resultLabel.TextColor3 = DIM
@@ -399,12 +377,13 @@ local CLASS_COLORS: { [string]: Color3 } = {
 }
 
 local EGG_CARD_COLOR = Color3.fromRGB(210, 205, 190)
--- ⚠️ ข้อ 1: ไข่ที่กำลังฟักใช้สีคนละชุดจากไข่ในกระเป๋า กันสับสนว่าเป็นคนละสถานะกัน
+-- ⚠️ ไข่ที่กำลังฟักใช้สีคนละชุดจากไข่ในกระเป๋า กันสับสนว่าเป็นคนละสถานะกัน
 local HATCH_CARD_COLOR = Color3.fromRGB(235, 200, 140)
 local HATCH_STUCK_COLOR = Color3.fromRGB(165, 165, 170)
 
 local CARD_SIZE = 72
 local CARD_GAP = 6
+local BUTTON_ROW_HEIGHT = 28
 
 type CardSpec = {
 	title: string,
@@ -478,6 +457,33 @@ local function addInfoRow(text: string, emphasized: boolean?)
 	label.Parent = gridScroll
 end
 
+-- แถวปุ่มกดได้เต็มความกว้าง ใช้กับปุ่มเฉพาะแท็บ (จัดแม่อัตโนมัติ/ขาย) ที่อยู่ในเนื้อหาของแท็บ
+-- "กระเป๋า" เท่านั้น แทนที่จะเป็นแถวถาวรนอกกริดที่โผล่ทุกแท็บ — ใช้ชื่อ "Row" เหมือน addInfoRow
+-- เพื่อให้ clearGrid() ล้างออกพร้อมกันได้ (เช็คแค่ชื่อ ไม่ได้เช็ค ClassName)
+local function addButtonRow(text: string, enabled: boolean, color: Color3, onClick: () -> ())
+	rowOrder += 1
+	local row = Instance.new("TextButton")
+	row.Name = "Row"
+	row.LayoutOrder = rowOrder
+	row.Size = UDim2.new(1, 0, 0, BUTTON_ROW_HEIGHT)
+	row.BackgroundColor3 = if enabled then color else DISABLED_ACTION_COLOR
+	row.BorderSizePixel = 0
+	row.TextColor3 = Color3.fromRGB(255, 255, 255)
+	row.TextSize = 13
+	row.TextWrapped = true
+	row.Font = Enum.Font.SourceSansBold
+	row.Text = text
+	row.Active = enabled
+	row.AutoButtonColor = enabled
+	row.Parent = gridScroll
+
+	local rowCorner = Instance.new("UICorner")
+	rowCorner.CornerRadius = UDim.new(0, 6)
+	rowCorner.Parent = row
+
+	row.Activated:Connect(onClick)
+end
+
 -- ⚠️ คำนวณจำนวนคอลัมน์สดจากความกว้างจริงของ gridScroll (AbsoluteSize) ไม่ hardcode
 -- รองรับทั้งจอมือถือเล็กและจอกว้าง — AbsoluteSize อาจยังเป็น 0 ก่อน layout รอบแรกเสร็จ
 -- จึงมี fallback กันหารด้วยค่าติดลบ/ศูนย์
@@ -534,18 +540,20 @@ end
 -- สถานะที่เลือกอยู่ + ข้อมูลล่าสุดจาก server
 --------------------------------------------------------------------------------
 
-local activeTab: "mothers" | "eggs" | "children" = "mothers"
+local activeTab: "pen" | "bag" | "eggs" | "children" = "pen"
 -- ⚠️ เก็บ uid/id ประจำตัว ไม่ใช่ตำแหน่งในลิสต์ — ลิสต์เลื่อนได้ทุกครั้งที่มีของเข้า/ออก
 local selectedMotherUid: string? = nil
 local selectedHeldEggId: number? = nil
--- ⚠️ ต้องรู้ว่าแม่ที่เลือกอยู่ตอนนี้อยู่คอกหรือกระเป๋า ถึงจะรู้ว่าปุ่มย้าย/ขายต้องทำอะไร
+-- ⚠️ คอก/กระเป๋าแยกกันคนละแท็บแล้ว แต่ละแท็บ render แค่ของฝั่งตัวเอง map นี้เลยมีแค่ entry
+-- ของแท็บที่กำลังแสดงอยู่จริงเท่านั้น (renderPenTab ใส่แค่ "pen", renderBagTab ใส่แค่ "bag")
+-- ใช้ตรวจว่า selectedMotherUid ที่ค้างมาจากแท็บอื่นยังใช้กับแท็บปัจจุบันได้ไหม
 local motherLocationByUid: { [string]: "pen" | "bag" } = {}
 local lastPayload: any = nil
 
--- ⚠️ forward-declare: onClick ของการ์ดใน renderMothersTab/renderEggsTab เรียก renderActiveTab
--- ตอนถูกกด (ไม่ใช่ตอนถูกสร้าง) จึงอ้างถึงตัวแปรนี้ก่อนที่ฟังก์ชันจริงจะถูกเซ็ตได้ตราบใดที่
--- ประกาศ local ไว้ก่อน — ห้ามใช้ `function renderActiveTab()` เฉย ๆ เพราะจะกลายเป็น global
--- ซึ่งขัดกับ --!strict
+-- ⚠️ forward-declare: onClick ของการ์ดใน renderPenTab/renderBagTab/renderEggsTab เรียก
+-- renderActiveTab ตอนถูกกด (ไม่ใช่ตอนถูกสร้าง) จึงอ้างถึงตัวแปรนี้ก่อนที่ฟังก์ชันจริงจะถูกเซ็ต
+-- ได้ตราบใดที่ประกาศ local ไว้ก่อน — ห้ามใช้ `function renderActiveTab()` เฉย ๆ เพราะจะกลายเป็น
+-- global ซึ่งขัดกับ --!strict
 --
 -- ⚠️ รับ `preserveScroll` เพราะ farmStateSync ยิงมาหาเราถี่มาก (ทุก WORLD.SYNC_INTERVAL
 -- วินาที = ทุก 1 วิ ดู EggService.lua) ทุกครั้งที่ sync มาเราต้อง clearGrid()+สร้างการ์ดใหม่ทั้งชุด
@@ -556,7 +564,7 @@ local lastPayload: any = nil
 -- (คนละลิสต์กันแล้ว ควรเริ่มดูจากบนสุดใหม่)
 local renderActiveTab: (boolean?) -> ()
 
-local function renderMothersTab()
+local function renderPenTab()
 	if not lastPayload then
 		return
 	end
@@ -568,7 +576,7 @@ local function renderMothersTab()
 		motherLocationByUid[mother.uid] = "pen"
 		table.insert(cards, {
 			title = mother.charName,
-			subtitle = `{mother.weightText} · คอก`,
+			subtitle = mother.weightText,
 			color = CLASS_COLORS[mother.class] or CLASS_COLORS.C,
 			selected = mother.uid == selectedMotherUid,
 			onClick = function()
@@ -577,12 +585,28 @@ local function renderMothersTab()
 			end,
 		})
 	end
+
+	addInfoRow(`คอก {#lastPayload.mothersInPen}/{lastPayload.penCapacity}`, true)
+	if #cards == 0 then
+		addInfoRow("  (ยังไม่มีแม่ — ฟักไข่ก่อน หรือกด \"จัดแม่เข้าคอกอัตโนมัติ\" ในแท็บกระเป๋า)")
+	else
+		addCardGrid(cards)
+	end
+end
+
+local function renderBagTab()
+	if not lastPayload then
+		return
+	end
+
+	motherLocationByUid = {}
+	local cards: { CardSpec } = {}
 
 	for _, mother in lastPayload.mothersInBag do
 		motherLocationByUid[mother.uid] = "bag"
 		table.insert(cards, {
 			title = mother.charName,
-			subtitle = `{mother.weightText} · กระเป๋า`,
+			subtitle = mother.weightText,
 			color = CLASS_COLORS[mother.class] or CLASS_COLORS.C,
 			selected = mother.uid == selectedMotherUid,
 			onClick = function()
@@ -592,9 +616,44 @@ local function renderMothersTab()
 		})
 	end
 
-	addInfoRow(`คอก {#lastPayload.mothersInPen}/{lastPayload.penCapacity} · กระเป๋า {#lastPayload.mothersInBag}/{lastPayload.bagCapacity}`, true)
+	-- ⚠️ ปุ่มถาวร (ไม่ใช่ TEMP): จัดแม่จากกระเป๋าเข้าคอกอัตโนมัติ — server เป็นคนเลือก/ย้ายจริง
+	-- ทั้งหมด (AutoFillPenRequest) client แค่กดเรียก ไม่คำนวณว่าตัวไหนดีที่สุดเอง
+	local freeSlots = lastPayload.penCapacity - #lastPayload.mothersInPen
+	if freeSlots <= 0 then
+		addButtonRow("คอกเต็มแล้ว จัดเพิ่มไม่ได้", false, ACCENT, function() end)
+	elseif #lastPayload.mothersInBag == 0 then
+		addButtonRow("ไม่มีแม่ให้จัด", false, ACCENT, function() end)
+	else
+		addButtonRow(`จัดแม่เข้าคอกอัตโนมัติ (เหลือที่ว่าง {freeSlots})`, true, ACCENT, function()
+			autoFillPenRequest:FireServer()
+		end)
+	end
+
+	-- ⚠️⚠️ TEMP: ปุ่มขายด่วนสำหรับทดสอบเท่านั้น ไม่ใช่ flow จริงของเกม — ของจริงต้องไปขายที่
+	-- ระบบร้านค้า (ยังไม่ได้ทำ) มีไว้แค่ให้เคลียร์กระเป๋าแม่เร็ว ๆ ระหว่างทดสอบระบบอื่นเท่านั้น
+	if selectedMotherUid and motherLocationByUid[selectedMotherUid] == "bag" then
+		addButtonRow("ขายที่เลือก (TEMP)", true, TEMP_BUTTON_COLOR, function()
+			sellMotherRequest:FireServer(selectedMotherUid)
+		end)
+	else
+		addButtonRow("เลือกแม่ด้านล่างเพื่อขาย (TEMP)", false, TEMP_BUTTON_COLOR, function() end)
+	end
+
+	if #lastPayload.mothersInBag > 0 then
+		addButtonRow(`ขายทั้งหมดในกระเป๋า ({#lastPayload.mothersInBag}) (TEMP)`, true, TEMP_BUTTON_COLOR, function()
+			-- ⚠️⚠️ TEMP: วน FireServer ทีละตัวจนครบ — ไม่มีคำขอ "ขายทั้งหมด" แบบ batch ฝั่ง
+			-- server เลย (ไม่ต้องมี ของจริงย้ายไปร้านค้าอยู่ดี) server ตัดสินแต่ละคำขอเองอิสระ
+			for _, mother in lastPayload.mothersInBag do
+				sellMotherRequest:FireServer(mother.uid)
+			end
+		end)
+	else
+		addButtonRow("กระเป๋าไม่มีแม่ให้ขาย (TEMP)", false, TEMP_BUTTON_COLOR, function() end)
+	end
+
+	addInfoRow(`กระเป๋า {#lastPayload.mothersInBag}/{lastPayload.bagCapacity}`, true)
 	if #cards == 0 then
-		addInfoRow("  (ยังไม่มีแม่ — ฟักไข่ก่อน)")
+		addInfoRow("  (ว่าง)")
 	else
 		addCardGrid(cards)
 	end
@@ -635,10 +694,9 @@ local function renderEggsTab()
 		end
 	end
 
-	-- ⚠️ ข้อ 1: การ์ดไข่ที่กำลังฟัก — โชว์เวลานับถอยหลังเด่น ๆ ไม่ใช่แค่น้ำหนัก
-	-- (อัปเดตทุกครั้งที่ sync มา ~ทุก 1 วิ ไม่ใช่นับสดในเครื่อง client เอง — พอสำหรับทดสอบ)
-	-- slot.stuck = ครบเวลาฟักแล้วแต่คอก+กระเป๋าเต็มพร้อมกัน (ข้อ D) รอที่ว่างอยู่ ใช้สีแยกจาก
-	-- ที่กำลังนับถอยหลังปกติ กันเข้าใจผิดว่ายังไม่ครบเวลา
+	-- ⚠️ การ์ดไข่ที่กำลังฟัก — โชว์เวลานับถอยหลังเด่น ๆ ไม่ใช่แค่น้ำหนัก (อัปเดตทุกครั้งที่ sync
+	-- มา ~ทุก 1 วิ ไม่ใช่นับสดในเครื่อง client เอง — พอสำหรับทดสอบ) slot.stuck = ครบเวลาฟักแล้ว
+	-- แต่คอก+กระเป๋าเต็มพร้อมกัน (ข้อ D) รอที่ว่างอยู่ ใช้สีแยกจากที่กำลังนับถอยหลังปกติ
 	local hatchCards: { CardSpec } = {}
 	for index = 1, lastPayload.hatcherySize do
 		local slot = lastPayload.hatching[index]
@@ -662,8 +720,8 @@ local function renderEggsTab()
 	end
 end
 
--- ⚠️ ข้อ 3: แท็บลูก — ดูอย่างเดียว ไม่มีปุ่มกระทำการ (ปล่อยทหารเป็นงานเฟสหลัง) แค่ไว้เช็คว่า
--- กองลูก (stack) รวมกันถูกต้องไหม — ลูกที่ตัวละคร+น้ำหนัก+สถานะเหมือนกันต้องรวมเป็นกองเดียว
+-- ⚠️ แท็บลูก — ดูอย่างเดียว ไม่มีปุ่มกระทำการ (ปล่อยทหารเป็นงานเฟสหลัง) แค่ไว้เช็คว่ากองลูก
+-- (stack) รวมกันถูกต้องไหม — ลูกที่ตัวละคร+น้ำหนัก+สถานะเหมือนกันต้องรวมเป็นกองเดียว
 local function renderChildrenTab()
 	if not lastPayload then
 		return
@@ -689,10 +747,16 @@ local function renderChildrenTab()
 end
 
 local function updateActionButton()
-	if activeTab == "mothers" then
-		if selectedMotherUid and motherLocationByUid[selectedMotherUid] then
-			local destination = if motherLocationByUid[selectedMotherUid] == "pen" then "กระเป๋า" else "คอก"
-			setActionButton(`ย้ายแม่ที่เลือก → {destination}`, true)
+	if activeTab == "pen" then
+		if selectedMotherUid and motherLocationByUid[selectedMotherUid] == "pen" then
+			setActionButton("ย้ายแม่ที่เลือก → กระเป๋า", true)
+		else
+			selectedMotherUid = nil
+			setActionButton("เลือกแม่ในกริดก่อน", false)
+		end
+	elseif activeTab == "bag" then
+		if selectedMotherUid and motherLocationByUid[selectedMotherUid] == "bag" then
+			setActionButton("ย้ายแม่ที่เลือก → คอก", true)
 		else
 			selectedMotherUid = nil
 			setActionButton("เลือกแม่ในกริดก่อน", false)
@@ -708,14 +772,14 @@ local function updateActionButton()
 	end
 end
 
--- ⚠️ ข้อ 5: ปุ่มอัปเกรดคอก — ไม่ขึ้นกับแท็บ/การเลือก อ่านตรงจาก payload ล่าสุดเสมอ
+-- ⚠️ ปุ่มอัปเกรดคอก — ไม่ขึ้นกับแท็บ/การเลือก อ่านตรงจาก payload ล่าสุดเสมอ
 -- penUpgradeCost เป็น nil เมื่อคอกเต็มเพดานแล้ว (ดู Config.getPenUpgradeCost)
 local function updateUpgradePenButton()
 	if not lastPayload then
 		return
 	end
 	if lastPayload.penUpgradeCost then
-		upgradePenButton.Text = `อัปเกรดคอก Lv{lastPayload.penLevel} → Lv{lastPayload.penLevel + 1} (฿{Config.formatWeight(lastPayload.penUpgradeCost)})`
+		upgradePenButton.Text = `อัปเกรดคอก Lv{lastPayload.penLevel} → Lv{lastPayload.penLevel + 1} (฿{formatCommaNumber(lastPayload.penUpgradeCost)})`
 		upgradePenButton.Active = true
 		upgradePenButton.AutoButtonColor = true
 		upgradePenButton.BackgroundColor3 = ACCENT
@@ -727,49 +791,15 @@ local function updateUpgradePenButton()
 	end
 end
 
--- ⚠️⚠️ TEMP: ปุ่มขายด่วนสำหรับทดสอบ — ของจริงย้ายไปที่ระบบร้านค้า (ข้อ 6)
-local function updateSellButtons()
-	if not lastPayload then
-		return
-	end
-
-	if activeTab == "mothers" and selectedMotherUid and motherLocationByUid[selectedMotherUid] == "bag" then
-		sellButton.Text = "ขายที่เลือก (TEMP)"
-		sellButton.Active = true
-		sellButton.AutoButtonColor = true
-		sellButton.BackgroundColor3 = TEMP_BUTTON_COLOR
-	elseif activeTab == "mothers" and selectedMotherUid and motherLocationByUid[selectedMotherUid] == "pen" then
-		sellButton.Text = "แม่ในคอกขายไม่ได้ ย้ายก่อน"
-		sellButton.Active = false
-		sellButton.AutoButtonColor = false
-		sellButton.BackgroundColor3 = DISABLED_ACTION_COLOR
-	else
-		sellButton.Text = "เลือกแม่ในกระเป๋าเพื่อขาย"
-		sellButton.Active = false
-		sellButton.AutoButtonColor = false
-		sellButton.BackgroundColor3 = DISABLED_ACTION_COLOR
-	end
-
-	if #lastPayload.mothersInBag > 0 then
-		sellAllButton.Text = `ขายทั้งหมดในกระเป๋า ({#lastPayload.mothersInBag}) (TEMP)`
-		sellAllButton.Active = true
-		sellAllButton.AutoButtonColor = true
-		sellAllButton.BackgroundColor3 = TEMP_BUTTON_COLOR
-	else
-		sellAllButton.Text = "กระเป๋าไม่มีแม่ให้ขาย"
-		sellAllButton.Active = false
-		sellAllButton.AutoButtonColor = false
-		sellAllButton.BackgroundColor3 = DISABLED_ACTION_COLOR
-	end
-end
-
 renderActiveTab = function(preserveScroll: boolean?)
 	local keepScroll = preserveScroll ~= false
 	local savedCanvasPosition = gridScroll.CanvasPosition
 
 	clearGrid()
-	if activeTab == "mothers" then
-		renderMothersTab()
+	if activeTab == "pen" then
+		renderPenTab()
+	elseif activeTab == "bag" then
+		renderBagTab()
 	elseif activeTab == "eggs" then
 		renderEggsTab()
 	else
@@ -777,8 +807,8 @@ renderActiveTab = function(preserveScroll: boolean?)
 	end
 	updateActionButton()
 	updateUpgradePenButton()
-	updateSellButtons()
-	motherTabButton.BackgroundColor3 = if activeTab == "mothers" then TAB_ACTIVE_COLOR else TAB_INACTIVE_COLOR
+	penTabButton.BackgroundColor3 = if activeTab == "pen" then TAB_ACTIVE_COLOR else TAB_INACTIVE_COLOR
+	bagTabButton.BackgroundColor3 = if activeTab == "bag" then TAB_ACTIVE_COLOR else TAB_INACTIVE_COLOR
 	eggTabButton.BackgroundColor3 = if activeTab == "eggs" then TAB_ACTIVE_COLOR else TAB_INACTIVE_COLOR
 	childrenTabButton.BackgroundColor3 = if activeTab == "children" then TAB_ACTIVE_COLOR else TAB_INACTIVE_COLOR
 
@@ -799,8 +829,13 @@ end
 -- ต่อสาย
 --------------------------------------------------------------------------------
 
-motherTabButton.Activated:Connect(function()
-	activeTab = "mothers"
+penTabButton.Activated:Connect(function()
+	activeTab = "pen"
+	renderActiveTab(false)
+end)
+
+bagTabButton.Activated:Connect(function()
+	activeTab = "bag"
 	renderActiveTab(false)
 end)
 
@@ -819,12 +854,16 @@ upgradePenButton.Activated:Connect(function()
 end)
 
 actionButton.Activated:Connect(function()
-	if activeTab == "mothers" then
+	if activeTab == "pen" then
 		if not selectedMotherUid then
 			return
 		end
-		local destination = if motherLocationByUid[selectedMotherUid] == "pen" then "bag" else "pen"
-		moveMotherRequest:FireServer(selectedMotherUid, destination)
+		moveMotherRequest:FireServer(selectedMotherUid, "bag")
+	elseif activeTab == "bag" then
+		if not selectedMotherUid then
+			return
+		end
+		moveMotherRequest:FireServer(selectedMotherUid, "pen")
 	elseif activeTab == "eggs" then
 		if not selectedHeldEggId then
 			return
@@ -836,28 +875,9 @@ actionButton.Activated:Connect(function()
 	end
 end)
 
--- ⚠️⚠️ TEMP: ปุ่มขายด่วนสำหรับทดสอบ ของจริงย้ายไปที่ระบบร้านค้า — ข้อ 6
-sellButton.Activated:Connect(function()
-	if selectedMotherUid and motherLocationByUid[selectedMotherUid] == "bag" then
-		sellMotherRequest:FireServer(selectedMotherUid)
-	end
-end)
-
--- ⚠️⚠️ TEMP: ปุ่มขายด่วนสำหรับทดสอบ ของจริงย้ายไปที่ระบบร้านค้า — ข้อ 6
--- ยิง SellMotherRequest ทีละตัวจนครบทุกตัวในกระเป๋า (server ตรวจสอบ/ตัดสินแต่ละคำขอเองอิสระ
--- ไม่มีคำขอ "ขายทั้งหมด" แบบ batch ฝั่ง server เลย — ฝั่ง client แค่วนยิงคำขอเดิมซ้ำ ๆ)
-sellAllButton.Activated:Connect(function()
-	if not lastPayload then
-		return
-	end
-	for _, mother in lastPayload.mothersInBag do
-		sellMotherRequest:FireServer(mother.uid)
-	end
-end)
-
 farmStateSync.OnClientEvent:Connect(function(payload)
 	lastPayload = payload
-	coinLabel.Text = `เหรียญ: {Config.formatWeight(payload.coins)}`
+	coinLabel.Text = formatCommaNumber(payload.coins)
 
 	-- ⚠️ ของที่เลือกไว้อาจหายไปจาก payload ใหม่ (ขาย/ย้าย/ฟักไปแล้ว) — ถ้าไม่ตรวจ
 	-- ปุ่มจะยิง action ไปหาของที่ไม่มีอยู่แล้ว ต้องเคลียร์ selection ทิ้งก่อนเรนเดอร์
@@ -898,7 +918,7 @@ farmStateSync.OnClientEvent:Connect(function(payload)
 	renderActiveTab()
 end)
 
--- ⚠️ ข้อ 5/6: ผลลัพธ์ของ PlaceEgg/MoveMother/UpgradePen/SellMother — ก่อนหน้านี้เห็นแค่ผ่าน
+-- ⚠️ ผลลัพธ์ของ PlaceEgg/MoveMother/UpgradePen/SellMother/AutoFillPen — ก่อนหน้านี้เห็นแค่ผ่าน
 -- print ใน server console เท่านั้น ผู้เล่นไม่เห็นอะไรเลยว่าทำไมกดแล้วไม่มีอะไรเกิดขึ้น
 actionResult.OnClientEvent:Connect(function(ok: boolean, message: string)
 	resultLabel.Text = message

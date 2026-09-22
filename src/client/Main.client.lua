@@ -78,27 +78,27 @@ gui.IgnoreGuiInset = false
 gui.Parent = playerGui
 
 --------------------------------------------------------------------------------
--- ยอดเงินกึ่งกลางด้านบน — อยู่นอกแผงที่ย่อ/ปิดได้ ต้องเห็นตลอดเวลา เป็นลูกของ `gui` ตรง ๆ
+-- ยอดเงินมุมล่างขวา — อยู่นอกแผงที่ย่อ/ปิดได้ ต้องเห็นตลอดเวลา เป็นลูกของ `gui` ตรง ๆ
 -- ไม่ใช่ของ `panel` ที่ย่อได้ (panel.Visible ไม่กระทบตัวนี้เลย)
 --
--- ⚠️⚠️ เคยวางไว้มุมขวาบน (ชิดขอบบนสุดของ inset) แล้วชนกับ UI ของ Roblox เอง — มุมขวาบนของ
--- Roblox ไม่ได้มีแค่ไอคอนระบบ (report/chat/mic) ที่ IgnoreGuiInset คำนวณให้ ยังมีป้ายชื่อ
--- ผู้เล่น + ยอด Robux ที่ Roblox วาดต่อกันเป็นชุดซ้อนอยู่ในมุมเดียวกันอีกชั้น ซึ่งกินพื้นที่
--- มากกว่า inset เฉย ๆ และไม่มีทางรู้ความสูงที่แน่นอนล่วงหน้า (ไม่ใช่ค่าคงที่ ขึ้นกับบัญชี/แพลตฟอร์ม)
--- ย้ายมาไว้ **กึ่งกลางด้านบน** แทน เพราะ Roblox แทบไม่วาง UI ระบบไว้ตรงนี้ หลีกเลี่ยงปัญหาชนกัน
--- ได้ทั้งหมดโดยไม่ต้องเดาตัวเลข ไม่มีกล่อง/พื้นหลัง (BackgroundTransparency = 1) ตัวเลขใหญ่ขึ้น
--- และมีเงาเส้นขอบ (TextStroke) แทนกล่องพื้นหลัง กันอ่านไม่ออกตอนพื้นหลังเป็นท้องฟ้า/หญ้าสว่าง
+-- ⚠️⚠️ เคยวางไว้มุมขวาบนก่อน แล้วชนกับ UI ของ Roblox เอง (ป้ายชื่อผู้เล่น + ยอด Robux ที่
+-- Roblox วาดต่อกันเป็นชุดในมุมนั้น กินพื้นที่มากกว่าแค่ไอคอนระบบที่ IgnoreGuiInset คำนวณให้)
+-- ย้ายไปกึ่งกลางบนแทน แต่จุดนั้นเอาไว้ใส่ของอย่างอื่นแล้ว จึงย้ายมา**มุมล่างขวา**แทน — Roblox
+-- ไม่วาง UI ระบบไว้แถวนี้เลย ปลอดภัยจากปัญหาชนกันแบบเดียวกัน
+-- ⚠️ ขนาดใหญ่ขึ้นอีก ×2 จากรอบก่อน (กล่อง 280×36 → 560×72 · ตัวอักษร 26 → 52) ตามที่ขอ
+-- ไม่มีกล่อง/พื้นหลัง (BackgroundTransparency = 1) มีเงาเส้นขอบ (TextStroke) แทน กันอ่านไม่ออก
+-- ตอนพื้นหลังเป็นท้องฟ้า/หญ้าสว่าง
 --------------------------------------------------------------------------------
 
 local coinLabel = Instance.new("TextLabel")
 coinLabel.Name = "CoinLabel"
-coinLabel.AnchorPoint = Vector2.new(0.5, 0)
-coinLabel.Position = UDim2.new(0.5, 0, 0, 8)
-coinLabel.Size = UDim2.new(0, 280, 0, 36)
+coinLabel.AnchorPoint = Vector2.new(1, 1)
+coinLabel.Position = UDim2.new(1, -16, 1, -16)
+coinLabel.Size = UDim2.new(0, 560, 0, 72)
 coinLabel.BackgroundTransparency = 1
 coinLabel.TextColor3 = Color3.fromRGB(255, 220, 90)
-coinLabel.TextXAlignment = Enum.TextXAlignment.Center
-coinLabel.TextSize = 26
+coinLabel.TextXAlignment = Enum.TextXAlignment.Right
+coinLabel.TextSize = 52
 coinLabel.Font = Enum.Font.SourceSansBold
 coinLabel.TextStrokeTransparency = 0.4
 coinLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)

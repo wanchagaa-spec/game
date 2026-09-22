@@ -501,6 +501,13 @@ Config.RemoteNames = {
 
 	-- server → client : { heldEggs, hatching, mothersInPen, mothersInBag, penCapacity, ... }
 	FARM_STATE_SYNC = "FarmStateSync",
+
+	-- server → client : FireClient(ok: boolean, message: string)
+	-- ผลลัพธ์ล่าสุดของ PlaceEggInHatcheryRequest / MoveMotherRequest / UpgradePenRequest /
+	-- SellMotherRequest — ก่อนมี remote นี้ผลลัพธ์เห็นได้แค่ผ่าน print ใน server console เท่านั้น
+	-- ⚠️ เป็น "ผลล่าสุดแบบ broadcast" ไม่ผูกกับ request ไหนเจาะจง (พอสำหรับ UI ทดสอบตอนนี้ที่
+	-- ยิงคำขอทีละอันอยู่แล้ว ไม่มีคำขอค้างซ้อนกันจนสับสนว่าอันไหนตอบอันไหน)
+	ACTION_RESULT = "ActionResult",
 }
 
 --------------------------------------------------------------------------------

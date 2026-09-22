@@ -23,6 +23,7 @@ local EVENT_NAMES: { string } = {
 	NAMES.SELL_MOTHER_REQUEST,
 	NAMES.EGG_HATCHED,
 	NAMES.FARM_STATE_SYNC,
+	NAMES.ACTION_RESULT,
 }
 
 -- เรียกจากฝั่ง server ตอนบูตเท่านั้น สร้าง Folder + RemoteEvent ให้ครบ

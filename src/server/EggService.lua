@@ -78,6 +78,13 @@ local upgradePenRequest: RemoteEvent
 local sellMotherRequest: RemoteEvent
 local eggHatched: RemoteEvent
 local farmStateSync: RemoteEvent
+local actionResult: RemoteEvent
+
+-- ⚠️ ส่งผลลัพธ์ (สำเร็จ/ล้มเหลว + เหตุผล) ของคำขอกลับไปหาผู้เล่นคนที่ยิงคำขอมาเท่านั้น
+-- ก่อนหน้านี้ผลลัพธ์ไปโผล่แค่ print ใน server console เท่านั้น ผู้เล่นไม่เห็นอะไรเลย
+local function reportResult(player: Player, ok: boolean, message: string)
+	actionResult:FireClient(player, ok, message)
+end
 
 local function dataOf(player: Player): Data?
 	return DataService.getCached(player.UserId)
@@ -1134,18 +1141,26 @@ function EggService.start()
 	sellMotherRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHER_REQUEST)
 	eggHatched = Remotes.waitFor(Config.RemoteNames.EGG_HATCHED)
 	farmStateSync = Remotes.waitFor(Config.RemoteNames.FARM_STATE_SYNC)
+	actionResult = Remotes.waitFor(Config.RemoteNames.ACTION_RESULT)
 
 	placeEggRequest.OnServerEvent:Connect(function(player, rawEggId, rawSlotIndex)
 		local ok, reason = EggService.placeEgg(player, rawEggId, rawSlotIndex)
 		if not ok then
 			print(`[EggService] ปฏิเสธคำขอวางไข่ของ {player.Name}: {reason}`)
+			reportResult(player, false, reason or "วางไข่ไม่สำเร็จ")
 		end
+		-- ⚠️ ไม่ส่งข้อความสำเร็จตรงนี้ — "วางลงสวนฟักสำเร็จ" ≠ "ฟักเสร็จ" (ยังต้องรอเวลา)
+		-- eggHatched มีข้อความของตัวเองอยู่แล้วตอนฟักเสร็จจริง ส่งซ้อนกันจะงงเปล่า ๆ
 	end)
 
 	moveMotherRequest.OnServerEvent:Connect(function(player, rawUid, rawTarget)
 		local ok, reason = EggService.moveMother(player, rawUid, rawTarget)
 		if not ok then
 			print(`[EggService] ปฏิเสธคำขอย้ายแม่ของ {player.Name}: {reason}`)
+			reportResult(player, false, reason or "ย้ายแม่ไม่สำเร็จ")
+		else
+			local destText = if rawTarget == "pen" then "คอก" else "กระเป๋า"
+			reportResult(player, true, `ย้ายแม่ → {destText} สำเร็จ`)
 		end
 	end)
 
@@ -1153,13 +1168,25 @@ function EggService.start()
 		local ok, reason = EggService.upgradePen(player)
 		if not ok then
 			print(`[EggService] ปฏิเสธคำขออัปเกรดคอกของ {player.Name}: {reason}`)
+			reportResult(player, false, reason or "อัปเกรดคอกไม่สำเร็จ")
+		else
+			local data = dataOf(player)
+			local level = if data then data.penLevel else nil
+			local capacity = if level then Config.getPenCapacity(level) else nil
+			reportResult(player, true, `อัปเกรดคอกสำเร็จ → Lv{level} (จุแม่ได้ {capacity} ตัว)`)
 		end
 	end)
 
 	sellMotherRequest.OnServerEvent:Connect(function(player, rawUid)
+		local data = dataOf(player)
+		local coinsBefore = if data then data.currency.coins else 0
 		local ok, reason = EggService.sellMother(player, rawUid)
 		if not ok then
 			print(`[EggService] ปฏิเสธคำขอขายแม่ของ {player.Name}: {reason}`)
+			reportResult(player, false, reason or "ขายแม่ไม่สำเร็จ")
+		else
+			local coinsAfter = if data then data.currency.coins else coinsBefore
+			reportResult(player, true, `ขายแม่สำเร็จ +{coinsAfter - coinsBefore} coins`)
 		end
 	end)
 

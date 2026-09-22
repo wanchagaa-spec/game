@@ -446,7 +446,15 @@ local lastPayload: any = nil
 -- ตอนถูกกด (ไม่ใช่ตอนถูกสร้าง) จึงอ้างถึงตัวแปรนี้ก่อนที่ฟังก์ชันจริงจะถูกเซ็ตได้ตราบใดที่
 -- ประกาศ local ไว้ก่อน — ห้ามใช้ `function renderActiveTab()` เฉย ๆ เพราะจะกลายเป็น global
 -- ซึ่งขัดกับ --!strict
-local renderActiveTab: () -> ()
+--
+-- ⚠️ รับ `preserveScroll` เพราะ farmStateSync ยิงมาหาเราถี่มาก (ทุก WORLD.SYNC_INTERVAL
+-- วินาที = ทุก 1 วิ ดู EggService.lua) ทุกครั้งที่ sync มาเราต้อง clearGrid()+สร้างการ์ดใหม่ทั้งชุด
+-- (ไม่มี diff เฉพาะรายการที่เปลี่ยน) ถ้าไม่เก็บ/คืนตำแหน่ง scroll เอง ScrollingFrame จะเด้ง
+-- กลับขึ้นบนสุดทุกครั้งที่ sync มา ระหว่างที่ผู้เล่นกำลังเลื่อนดูไข่/แม่อยู่พอดี — ค่า default
+-- (ไม่ส่ง argument มา) คือ "เก็บตำแหน่งเดิมไว้" เพราะ caller ส่วนใหญ่ (sync, กดเลือกการ์ด)
+-- อยากให้ยังอยู่ตำแหน่งเดิม มีแค่ตอนสลับแท็บเท่านั้นที่ส่ง false ให้เลื่อนกลับขึ้นบนสุด
+-- (คนละลิสต์กันแล้ว ควรเริ่มดูจากบนสุดใหม่)
+local renderActiveTab: (boolean?) -> ()
 
 local function renderMothersTab()
 	if not lastPayload then
@@ -561,7 +569,10 @@ local function updateActionButton()
 	end
 end
 
-renderActiveTab = function()
+renderActiveTab = function(preserveScroll: boolean?)
+	local keepScroll = preserveScroll ~= false
+	local savedCanvasPosition = gridScroll.CanvasPosition
+
 	clearGrid()
 	if activeTab == "mothers" then
 		renderMothersTab()
@@ -571,6 +582,18 @@ renderActiveTab = function()
 	updateActionButton()
 	motherTabButton.BackgroundColor3 = if activeTab == "mothers" then TAB_ACTIVE_COLOR else TAB_INACTIVE_COLOR
 	eggTabButton.BackgroundColor3 = if activeTab == "eggs" then TAB_ACTIVE_COLOR else TAB_INACTIVE_COLOR
+
+	if keepScroll then
+		-- ⚠️ AutomaticCanvasSize ยังไม่คำนวณ CanvasSize ใหม่ในเฟรมเดียวกับที่เพิ่ง
+		-- Destroy/สร้างการ์ดใหม่ (ยังอิงขนาดเก่าอยู่) ตั้ง CanvasPosition ทันทีเลยเสี่ยงโดน
+		-- ปัดกลับเป็น 0 เพราะดูเหมือนเกินขอบเขตของ canvas เก่าที่ยังไม่อัปเดต
+		-- เลื่อนไปตั้งใน task.defer (รอให้ layout รอบนี้จบก่อน) กันปัญหานี้
+		task.defer(function()
+			gridScroll.CanvasPosition = savedCanvasPosition
+		end)
+	else
+		gridScroll.CanvasPosition = Vector2.zero
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -579,12 +602,12 @@ end
 
 motherTabButton.Activated:Connect(function()
 	activeTab = "mothers"
-	renderActiveTab()
+	renderActiveTab(false)
 end)
 
 eggTabButton.Activated:Connect(function()
 	activeTab = "eggs"
-	renderActiveTab()
+	renderActiveTab(false)
 end)
 
 actionButton.Activated:Connect(function()

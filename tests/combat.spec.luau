@@ -304,6 +304,70 @@ return function(t, Config)
 	end
 
 	----------------------------------------------------------------------------
+	-- wallProgress เชื่อมกับ stageProgress ที่ตีผ่านจริง (แพตช์ 3A)
+	----------------------------------------------------------------------------
+	-- ด่าน 1: defenders=0, wallHp=0 → "พังเรียบร้อย" ฟรีตั้งแต่ tick แรก แต่ไม่มีกำแพงจริงให้พัง
+	-- จึงไม่นับเป็นความคืบหน้าเพิ่มจากค่าเริ่มต้น (wallProgress ยังคง 1 เท่าเดิม)
+	-- ด่าน 2: defenders=100×100HP=10,000 · wallHp=10,000×0.5=5,000 รวม 15,000 — มีกำแพงจริง
+	-- พังด่านนี้ครั้งแรกจึงทำให้ wallProgress ขยับจาก 1 เป็น 2 จริง
+	print("── wallProgress เชื่อมกับ stageProgress ที่ตีผ่านจริง (แพตช์ 3A) ──")
+
+	do
+		local data = freshData()
+		local meta = freshMeta()
+		local key = Config.makeStackKey("wukong", 10000, {}) -- power 360/ตัว (damageLevel=0)
+		data.children[key] = 100000
+
+		check("ผู้เล่นใหม่ wallProgress = ค่าเริ่มต้น", data.wallProgress, Config.Balance.NewPlayer.wallProgress)
+
+		-- ด่าน 1 ไม่มีทหารฝ่ายรับ/กำแพง (0,0) → พังเรียบร้อยทันทีที่ tick แรกที่ปล่อยได้จริง
+		CombatService.tick(data, meta, 1)
+		check("ด่าน 1 พังเรียบร้อยแล้ว (ไม่มีกำแพงให้พังตั้งแต่แรก)", CombatService.getActiveStage(data), 2)
+		check(
+			"จำลองตีด่าน 1 จนพังสมบูรณ์ → wallProgress ต้องเป็น 1 (ด่าน 1 ไม่มีกำแพงจริง ไม่นับเพิ่ม)",
+			data.wallProgress,
+			1
+		)
+
+		-- ด่าน 2 ต้องการ 15,000 HP รวม — ปล่อย 50 ตัว × 360 = 18,000 เกินพอในตาเดียว
+		CombatService.tick(data, meta, 50)
+		check("ด่าน 2 พังเรียบร้อยจริง (ไม่ใช่แค่ wallProgress ขยับลอย ๆ)", CombatService.getActiveStage(data), 3)
+		check("ตีด่าน 2 ต่อจนพัง → wallProgress ต้องเป็น 2", data.wallProgress, 2)
+
+		-- integration: เงิน/เพดานอัปเกรดที่ผูกกับ wallProgress ต้องเปลี่ยนค่าจริงตามด้วย
+		-- ไม่ใช่แค่ตัวเลข wallProgress เปลี่ยนลอย ๆ โดยไม่มีผลอะไรต่อ
+		check(
+			"getCoinsPerMinute ใช้ wallProgress ใหม่จริง (คูณ ×10 จากตอน wallProgress=1)",
+			Config.getCoinsPerMinute(100, data.wallProgress, {}),
+			Config.getCoinsPerMinute(100, 1, {}) * 10
+		)
+		check(
+			"เพดานซื้อตัวคูณ damage ใช้ wallProgress ใหม่จริง (โตขึ้นตาม STEPS_PER_STAGE)",
+			Config.getMaxDamageLevel(data.wallProgress),
+			Config.getMaxDamageLevel(1) + Config.Balance.DamageUpgrade.STEPS_PER_STAGE
+		)
+	end
+
+	print("── ทหารฝ่ายรับหมดแต่กำแพงยังไม่หมด HP → wallProgress ต้องไม่ขยับ ──")
+
+	do
+		local data = freshData()
+		local meta = freshMeta()
+		-- จำลองว่าผ่านด่าน 1 มาแล้ว (ฟรี ไม่มีกำแพง) ตั้งด่าน 2 ให้ทหารฝ่ายรับเหลือ 1 HP
+		-- (ตายตาต่อไปพอดี) แต่กำแพงยังเต็ม — ห้ามให้ damage ทะลุไปโดนกำแพงเด็ดขาดในเทสต์นี้
+		data.stageProgress[1] = { defendersRemaining = 0, wallHpRemaining = 0 }
+		data.stageProgress[2] = { defendersRemaining = 1, wallHpRemaining = Config.getStageWallHp(2) }
+		data.wallProgress = 1
+
+		CombatService.applyDamageToStage(data, meta, 2, 1)
+		check("ทหารฝ่ายรับด่าน 2 หมดพอดี", data.stageProgress[2].defendersRemaining, 0)
+		check("กำแพงด่าน 2 ยังเต็ม ไม่โดนแตะเลย", data.stageProgress[2].wallHpRemaining, Config.getStageWallHp(2))
+
+		CombatService.recomputeWallProgress(data)
+		check("ทหารฝ่ายรับหมดแต่กำแพงยังไม่หมด HP → wallProgress ไม่ขยับ", data.wallProgress, 1)
+	end
+
+	----------------------------------------------------------------------------
 	-- Persistence: ออก-เข้าใหม่ → stageProgress/releaseOrder/currency อยู่ครบ
 	----------------------------------------------------------------------------
 	print("── Persistence: stageProgress/releaseOrder/combatAutoPaused ผ่าน encode/decode ครบ ──")
@@ -315,6 +379,9 @@ return function(t, Config)
 		data.combatAutoPaused = true
 		data.summonEnabled = false
 		data.currency.coins += 12345
+		-- ⚠️ จำลองว่าเคยตีผ่านมาแล้ว 3 ด่าน (ดูชุดเทสต์ "wallProgress เชื่อมกับ stageProgress"
+		-- ด้านบนสำหรับเทสต์ตัว recomputeWallProgress เอง — ตรงนี้เช็คแค่ว่า encode/decode ไม่ทำค่าหาย)
+		data.wallProgress = 3
 
 		PlayerData.sanitizeForSave(data) -- ต้องไม่ throw (encode ได้ตามกฎ §9.3)
 
@@ -326,6 +393,7 @@ return function(t, Config)
 		check("combatAutoPaused กลับมาครบ", back.combatAutoPaused, true)
 		check("summonEnabled กลับมาครบ", back.summonEnabled, false)
 		check("currency.coins กลับมาครบ", back.currency.coins, data.currency.coins)
+		check("wallProgress ที่ตีผ่านมาแล้วกลับมาครบ (ออก-เข้าใหม่ไม่หาย)", back.wallProgress, 3)
 	end
 
 	----------------------------------------------------------------------------

@@ -210,6 +210,36 @@ function CombatService.applyDamageToStage(
 end
 
 --------------------------------------------------------------------------------
+-- wallProgress — เชื่อมกับ stageProgress ที่ตีผ่านจริง (แพตช์ 3A)
+--------------------------------------------------------------------------------
+-- ⚠️ `data.wallProgress` (ตัวคูณเงิน `10^(wallProgress-1)` + เพดานซื้อตัวคูณ damage
+-- `wallProgress × STEPS_PER_STAGE`) เดิมไม่เคยถูกอัปเดตตอนตีด่านผ่านจริงเลย ค้างที่ค่าเริ่มต้น
+-- (Config.Balance.NewPlayer.wallProgress = 1) ตลอดไปแม้กำแพง/ทหารจะหายไปแล้วจริง (stageProgress)
+--
+-- สูตร: wallProgress = จำนวนด่านที่พังเรียบร้อยติดต่อกันนับจากด่าน 1 (ตีเรียงลำดับเท่านั้น
+-- ไม่มีการข้ามด่าน จึงสแกนจากด่าน 1 หยุดที่ด่านแรกที่ยังไม่พังเรียบร้อยได้เลย) ไม่ต่ำกว่า 1 เสมอ
+-- (ด่าน 1 ไม่มีกำแพงให้พัง — "พังเรียบร้อย" ของด่าน 1 เกิดฟรีตั้งแต่ตาแรกที่แตะ ไม่ควรนับเป็น
+-- ความคืบหน้าเพิ่มเติมเหนือค่าเริ่มต้น พอด่าน 2 ซึ่งมีกำแพงจริงพังตามมา ค่าถึงขยับขึ้นจริง)
+-- ⚠️ ห้ามลดค่าลง (math.max กับของเดิม) — ถึงจะไม่มีทางเกิดในโค้ดปกติ (ตีเรียงลำดับ ไม่ถอยหลัง)
+-- แต่กันไว้เผื่อ data เพี้ยนมาจากที่อื่น (เช่น debugSetWallProgress ตั้งไว้สูงกว่าความจริงชั่วคราว)
+function CombatService.recomputeWallProgress(data: Data)
+	local cleared = 0
+	for stage = 1, Config.Balance.Stage.COUNT do
+		local progress = data.stageProgress[stage]
+		if type(progress) == "table" and progress.defendersRemaining <= 0 and progress.wallHpRemaining <= 0 then
+			cleared += 1
+		else
+			break
+		end
+	end
+
+	local computed = math.min(math.max(1, cleared), Config.Balance.Stage.COUNT)
+	if computed > data.wallProgress then
+		data.wallProgress = computed
+	end
+end
+
+--------------------------------------------------------------------------------
 -- tick หลัก — เรียกทุกครั้งที่ผู้เล่นออนไลน์ (loop จริงอยู่ใน CombatService.start())
 --------------------------------------------------------------------------------
 
@@ -286,6 +316,12 @@ function CombatService.tick(data: Data, meta: CombatMeta, elapsedSeconds: number
 		coinsEarned = coins
 		stageCleared = cleared
 		progressMade = dmgToDefenders + dmgToWall
+
+		-- ⚠️ อัปเดตทันทีในตาที่พังใหม่ ไม่ต้องรอ tick ถัดไป — ระบบเงิน/เพดานอัปเกรดที่ผูกกับ
+		-- wallProgress (เช่น Config.getCoinsPerMinute/getMaxDamageLevel) จะได้ใช้ค่าล่าสุดทันที
+		if stageCleared then
+			CombatService.recomputeWallProgress(data)
+		end
 	end
 
 	local autoPaused = CombatService.registerProgress(data, meta, unitsReleased, progressMade)

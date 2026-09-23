@@ -76,16 +76,40 @@ EggService.debugGrantEggWithWeight(player, "egg_stage1", 500000)     -- ไข�
 EggService.debugSetWallProgress(player, 7)  -- จำลองว่าพังกำแพงถึงด่าน 7 แล้ว
 ```
 
-⚠️ **คนละตัวกับกำแพงที่ `WallRenderer` วาดฝั่ง client** — ตั้งค่านี้แล้วกำแพงในเกมจะยังดูไม่พัง
-เพราะ (ตั้งแต่ Phase 3A/3B-1) ภาพกำแพงอ่านจาก `data.stageProgress` (ที่ `CombatService` คำนวณจาก
-การตีจริง) ไม่ใช่จาก `wallProgress` ตัวนี้ — สองค่านี้**ยังไม่มีอะไรเชื่อมกันเลย** (ดู CLAUDE.md
-"ช่องว่างที่ยังไม่ได้เชื่อม") ต้องดูผลจาก**สูตรเงิน**ที่เปลี่ยนไปเท่านั้น ไม่ใช่จากภาพกำแพง
-· อยากทดสอบภาพกำแพงตรง ๆ (ไม่ผ่านการตีจริง) ใช้ `WallRenderer.setWallProgress(n)` ฝั่ง **client**
-แทน (ดูคอมเมนต์ในไฟล์นั้น) — sync รอบถัดไปจะเขียนทับค่าทดสอบนี้เสมอ
+⚠️ **ตั้งแล้วไม่แตะ `data.stageProgress` เลย** — ภาพกำแพงที่ `WallRenderer` วาดฝั่ง client
+(รวมรอยแตก 5 ระดับจาก 3B-2) อ่านจาก `data.stageProgress` เท่านั้น ไม่ใช่จาก `wallProgress`
+ตัวนี้ ตั้งค่านี้แล้วกำแพงในเกมจะยังดูไม่พัง ต้องดูผลจาก**สูตรเงิน/เพดาน damage upgrade**
+ที่เปลี่ยนไปเท่านั้น · อยากทดสอบภาพกำแพงตรง ๆ ใช้ `EggService.debugSetStageProgress` ข้างล่าง
+แทน (ตั้ง `stageProgress` ตรง ๆ แล้วให้ `wallProgress` sync ตามจริงให้เอง)
+⚠️ ตั้งค่านี้ทิ้งไว้เฉย ๆ = `stageProgress` กับ `wallProgress` เพี้ยนไปจากกันชั่วคราว จนกว่าจะ
+ตีด่านใหม่จริงจนแซงค่าที่ตั้งไว้ (หรือเรียก `debugResetAll` ล้างทั้งคู่กลับเป็นค่าเริ่มต้น)
 
 - `n` ถูก clamp อยู่ในช่วง `1..Config.Balance.Stage.COUNT` (1–9) เสมอ — ใส่ 0 หรือติดลบ
   จะได้ 1, ใส่เกิน 9 จะได้ 9
 - print ค่าก่อน/หลังเสมอ
+
+### `EggService.debugSetStageProgress(player, stage, defendersRemaining, wallHpRemaining)`
+
+ตั้งค่าความคืบหน้าของด่านหนึ่งตรง ๆ ข้ามการตีจริงทั้งหมด — ใช้ทดสอบ**ภาพกำแพงแตก 5 ระดับ +
+เลขความเสียหายลอย** (Phase 3B-2) โดยไม่ต้องตีทหารฝ่ายรับนับพันล้าน HP จริงในด่านสูง ๆ
+
+```lua
+-- ด่าน 5 เหลือทหารฝ่ายรับ 0 แต่กำแพงเหลือ 25% ของ HP เต็ม — ดูรอยแตกระดับ 4 (25-1%)
+local wallHpFull = Config.getStageWallHp(5)
+EggService.debugSetStageProgress(player, 5, 0, math.floor(wallHpFull * 0.25))
+
+-- พังทั้งด่าน 5 เลย — กำแพงหายไป + wallProgress ขยับตามจริงให้เอง
+EggService.debugSetStageProgress(player, 5, 0, 0)
+```
+
+- `stage` ถูก clamp อยู่ในช่วง `1..Config.Balance.Stage.COUNT` (1–9) เสมอ (กันดัชนีหลุด
+  array ยาวคงที่ 9 ช่องของ `stageProgress`)
+- `defendersRemaining`/`wallHpRemaining` **ไม่ validate กับ HP เต็มของด่านนั้นเลย** (ตั้งเกินจริง
+  ก็ได้ เป็นเครื่องมือ Studio-only เหมือน `debugSetWallProgress`) — clamp แค่ไม่ให้ติดลบ
+- ⚠️ **ถ้าตั้งเป็น "พังทั้งด่าน" (`defendersRemaining=0` และ `wallHpRemaining=0`)** จะเรียก
+  `CombatService.recomputeWallProgress(data)` ต่อท้ายให้เอง — `wallProgress` (เงิน + เพดาน
+  damage upgrade) จะ sync ตามจริงทันที ไม่ต้องตั้ง `wallProgress` แยกเองอีกที
+- print ค่าที่ตั้ง + `wallProgress` ก่อน/หลังเสมอ
 
 ### `EggService.debugSetCurrency(player, coins)`
 

@@ -1156,9 +1156,15 @@ function EggService.debugGrantEggWithWeight(player: Player, eggId: string, weigh
 	return true, nil
 end
 
--- ตั้งค่า wallProgress ที่เก็บฝั่ง server ตรง ๆ — ⚠️ คนละตัวกับกำแพงที่ WallRenderer วาดฝั่ง
--- client (client ยังไม่ได้รับค่านี้ผ่าน sync ในเฟสนี้ ตั้งแล้วต้องดูผลจากสูตร ไม่ใช่จากภาพกำแพง)
--- ใช้ทดสอบสูตรเงิน (Config.getCoinsPerMinute) และเพดาน damage upgrade ที่ผูกกับ wallProgress
+-- ตั้งค่า wallProgress ที่เก็บฝั่ง server ตรง ๆ — ⚠️ ตั้งแล้ว**ไม่แตะ** data.stageProgress เลย
+-- (client ได้รับ wallProgress ผ่าน sync จริงตั้งแต่มีปุ่มซื้อ damage/speed upgrade แล้ว แต่
+-- WallRenderer วาดกำแพงจาก stageProgress เท่านั้น ไม่ได้อ่านค่านี้) ใช้ทดสอบสูตรเงิน
+-- (Config.getCoinsPerMinute) และเพดาน damage upgrade ที่ผูกกับ wallProgress โดยไม่ต้องตีด่านจริง
+-- ⚠️ ตั้งค่าตรงนี้แล้วปล่อยไว้ = stageProgress กับ wallProgress เพี้ยนไปจากกันชั่วคราว
+-- (recomputeWallProgress ไม่เรียกจากตรงนี้ เพราะไม่รู้ว่า stageProgress ควรเป็นค่าไหน) จะกลับมา
+-- ตรงกันเองก็ต่อเมื่อตีด่านใหม่จริงจนแซงค่าที่ตั้งไว้ (docs/data-schema.md — ดู debugResetAll
+-- ถ้าต้องการล้างทั้งคู่กลับเป็นค่าเริ่มต้น หรือ debugSetStageProgress ถ้าอยากตั้ง stageProgress
+-- ตรง ๆ แทนแล้วให้ wallProgress sync ตามจริง)
 function EggService.debugSetWallProgress(player: Player, n: number)
 	local data = dataOf(player)
 	if not data then
@@ -1177,6 +1183,54 @@ function EggService.debugSetWallProgress(player: Player, n: number)
 	print(
 		`[EggService] debugSetWallProgress: {player.Name} {before} → {clamped}`
 			.. `{if clamped ~= n then ` (ปัด/clamp จาก {n})` else ""} · `
+			.. debugSaveNow(player)
+	)
+end
+
+-- ตั้งค่า defendersRemaining/wallHpRemaining ของด่านหนึ่งตรง ๆ ข้ามการตีจริงทั้งหมด — ใช้ทดสอบ
+-- ภาพกำแพงแตก 5 ระดับ + เลขความเสียหายลอย (3B-2) โดยไม่ต้องตีทหารฝ่ายรับนับพันล้าน HP จริงในด่านสูง
+-- ⚠️ ไม่ validate ค่าเกินจริงของ HP เต็มด่านนั้นเลย (เป็นเครื่องมือ Studio-only เหมือน
+-- debugSetWallProgress — อยากตั้งเกิน HP จริงเพื่อดูว่าอะไรพังก็ทำได้) clamp แค่ไม่ให้ติดลบ
+-- และ clamp `stage` ให้อยู่ในช่วง 1..Config.Balance.Stage.COUNT เท่านั้น (ดัชนีนอกช่วงนี้จะ
+-- เขียนทับ array ยาวคงที่ 9 ช่องของ stageProgress ให้เพี้ยนไปจากโครงที่ PlayerData คาดไว้)
+--
+-- ⚠️ ถ้าตั้งเป็น "พังทั้งด่าน" (defendersRemaining=0 และ wallHpRemaining=0) จะเรียก
+-- CombatService.recomputeWallProgress(data) ต่อท้ายทันที — เหตุผลเดียวกับที่ CombatService.tick()
+-- เรียกตัวนี้เองตอนตีพังจริง (docs/data-schema.md §7) ไม่งั้นเครื่องมือนี้จะสร้างสภาพที่
+-- stageProgress บอกว่าพังแล้วแต่ wallProgress (เงิน + เพดาน damage upgrade) ไม่ขยับตาม
+function EggService.debugSetStageProgress(
+	player: Player,
+	stage: number,
+	defendersRemaining: number,
+	wallHpRemaining: number
+)
+	local data = dataOf(player)
+	if not data then
+		warn(`[EggService] debugSetStageProgress: {player.Name} ยังไม่มีข้อมูลผู้เล่น`)
+		return
+	end
+
+	local clampedStage = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
+	local clampedDefenders = math.max(0, math.floor(defendersRemaining))
+	local clampedWallHp = math.max(0, math.floor(wallHpRemaining))
+
+	data.stageProgress[clampedStage] = {
+		defendersRemaining = clampedDefenders,
+		wallHpRemaining = clampedWallHp,
+	}
+
+	local wallProgressBefore = data.wallProgress
+	if clampedDefenders <= 0 and clampedWallHp <= 0 then
+		CombatService.recomputeWallProgress(data)
+	end
+
+	EggService.sync(player)
+
+	print(
+		`[EggService] debugSetStageProgress: {player.Name} ด่าน {clampedStage}`
+			.. `{if clampedStage ~= stage then ` (clamp จาก {stage})` else ""} → `
+			.. `defendersRemaining={clampedDefenders} wallHpRemaining={clampedWallHp} · `
+			.. `wallProgress {wallProgressBefore} → {data.wallProgress} · `
 			.. debugSaveNow(player)
 	)
 end

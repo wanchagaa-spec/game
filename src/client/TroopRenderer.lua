@@ -149,7 +149,12 @@ local function getStageTargetX(stage: number): number
 end
 
 --------------------------------------------------------------------------------
--- ทหารฝ่ายเรา — สปอนที่จุดปล่อย เดินไปกำแพงด่านที่กำลังตี ถึงแล้วหายไป
+-- ทหารฝ่ายเรา — สปอนที่จุดปล่อย เดินเข้าไปหาด่านที่กำลังตี
+--
+-- ⚠️ ถ้ามีทหารฝ่ายรับ "ยืนรอ" อยู่ (idle ใน defenderModels) ตอนสปอน จะดึงมาเดินออกมาพบกันกึ่งกลาง
+-- เลนแทนที่จะเดินยาวไปกำแพงตรง ๆ — ทั้งคู่หายไปตอนถึงจุดชน (ดูรายละเอียดที่ spawnOurTroop
+-- และ updateOurTroops) ถ้าไม่มีทหารฝ่ายรับเหลือให้ดึง (targetCount = 0 หรือดึงไปหมดแล้วชั่วคราว)
+-- เดินยาวไปกำแพงเลยเหมือน 3B-1 เดิม ไม่มีอะไรผิดปกติ — เป็นพฤติกรรมที่ตั้งใจ
 --------------------------------------------------------------------------------
 
 type OurTroop = {
@@ -157,10 +162,21 @@ type OurTroop = {
 	from: Vector3,
 	to: Vector3,
 	spawnedAt: number, -- os.clock()
+	-- ⚠️ ทหารฝ่ายรับที่ถูกดึงมาเดินออกมาชนคู่กับทหารตัวนี้ (nil = ไม่มีคู่ เดินยาวไปกำแพงเลย)
+	-- เดิน/หายไปพร้อมกันโดยใช้ alpha เดียวกับทหารเรา (ดู updateOurTroops) ไม่ต้องมี array
+	-- ติดตามแยกต่างหาก
+	pairedDefender: Model?,
+	defenderFrom: Vector3?, -- ตำแหน่งยืนเดิมของ pairedDefender ก่อนถูกดึงออกมาเดิน
 }
 
 local ourTroops: { OurTroop } = {}
 local spawnCarry = 0
+
+-- ⚠️ ประกาศล่วงหน้าตรงนี้ (แทนที่จะประกาศในหัวข้อ "ทหารฝ่ายรับ" ข้างล่างเหมือนเดิม) เพราะ
+-- spawnOurTroop ต้องดึงโมเดลจากพูลนี้มาจับคู่เดินออกมาชน — รายละเอียดวิธีใช้อยู่ในหัวข้อ
+-- "ทหารฝ่ายรับ" ตามเดิม ย้ายมาแค่จุดประกาศตัวแปรเท่านั้น
+local defenderModels: { Model } = {}
+local lastDefenderStage: number? = nil
 
 local function totalStockpile(payload: any): number
 	local total = 0
@@ -174,18 +190,52 @@ local function spawnOurTroop(stage: number)
 	local oursFolder = ensureSubFolder("Ours")
 
 	local startX = Config.getLaneStartX() + MAP.Lane.ReleasePadSize.X / 2
-	-- ⚠️ เว้นขอบจากผนังเลนทั้งสองข้าง กันโมเดลโผล่ทะลุกำแพงข้างเลน
+	-- ⚠️ เว้นขอบจากผนังเลนทั้งสองข้างกันโมเดลโผล่ทะลุกำแพงข้างเลน
 	local laneHalf = math.max(MAP.Lane.Width / 2 - 6, 1)
 	local z = (math.random() * 2 - 1) * laneHalf
 
+	local wallX = getStageTargetX(stage)
 	local from = Vector3.new(startX, 0, z)
-	local to = Vector3.new(getStageTargetX(stage), 0, z)
+	local to = Vector3.new(wallX, 0, z)
+
+	-- ⚠️ ดึงทหารฝ่ายรับที่ยืนรออยู่ (ถ้ามี) ออกจากพูล defenderModels มาเดินออกมาชนกึ่งกลางเลน
+	-- — ดึงออกจากพูลเดิม ไม่ใช่สร้างเพิ่ม ไม่งั้นจำนวนที่โชว์รวมกันจะเกินสัดส่วน defendersRemaining
+	-- จริง พูลที่พร่องไปจะถูกเติมกลับเองในรอบ sync ถัดไปถ้า targetCount ยังไม่ถึง 0 (updateDefenders)
+	local pairedDefender: Model? = nil
+	local defenderFrom: Vector3? = nil
+	if #defenderModels > 0 then
+		local defenderModel = table.remove(defenderModels)
+		if defenderModel then
+			pairedDefender = defenderModel
+			defenderFrom = defenderModel:GetPivot().Position
+			-- ⚠️ จุด "ชนกัน" กึ่งกลางระหว่าง release pad กับกำแพงด่านที่กำลังตี — ปรับตามความยาว
+			-- เลนจริงของด่านนั้นเองเพราะ wallX เปลี่ยนไปตามด่าน (ด่าน 2 ใกล้กว่าด่าน 9 มาก)
+			to = Vector3.new((startX + wallX) / 2, 0, z)
+		end
+	end
 
 	local model = buildPersonModel(OUR_COLOR, "Troop")
 	model.Parent = oursFolder
 	model:PivotTo(CFrame.new(from))
 
-	table.insert(ourTroops, { model = model, from = from, to = to, spawnedAt = os.clock() })
+	table.insert(ourTroops, {
+		model = model,
+		from = from,
+		to = to,
+		spawnedAt = os.clock(),
+		pairedDefender = pairedDefender,
+		defenderFrom = defenderFrom,
+	})
+end
+
+-- ⚠️ ถึงจุดชน (หรือถึงกำแพงถ้าไม่มีคู่) แล้วทำลาย pairedDefender ไปด้วยเงียบ ๆ ไม่มี burst —
+-- จำลองว่าปะทะกันตาย ต่างจาก pattern เดิมใน 3B-2 (CombatEffects.onDefenderDeath) ที่ใช้กับกรณี
+-- defendersRemaining ลดจริงจาก sync เท่านั้น ไม่ใช่กรณีจำลองการชนแบบ visual ล้วน ๆ นี้
+local function destroyTroopPair(troop: OurTroop)
+	troop.model:Destroy()
+	if troop.pairedDefender and troop.pairedDefender.Parent then
+		troop.pairedDefender:Destroy()
+	end
 end
 
 local function updateOurTroops()
@@ -193,13 +243,16 @@ local function updateOurTroops()
 	for index = #ourTroops, 1, -1 do
 		local troop = ourTroops[index]
 		if troop.model.Parent == nil then
+			if troop.pairedDefender and troop.pairedDefender.Parent then
+				troop.pairedDefender:Destroy()
+			end
 			table.remove(ourTroops, index)
 			continue
 		end
 
 		local alpha = (now - troop.spawnedAt) / WALK_SECONDS
 		if alpha >= 1 then
-			troop.model:Destroy()
+			destroyTroopPair(troop)
 			table.remove(ourTroops, index)
 		else
 			local position = troop.from:Lerp(troop.to, alpha)
@@ -208,6 +261,17 @@ local function updateOurTroops()
 				then CFrame.lookAt(position, position + direction.Unit)
 				else CFrame.new(position)
 			troop.model:PivotTo(cf)
+
+			-- ⚠️ ใช้ alpha เดียวกับทหารเรา — เดินจากจุดยืนเดิมมาบรรจบที่จุดชนเดียวกันพอดี
+			-- ทั้งสองฝั่งถึงพร้อมกันเป๊ะ (alpha=1 พร้อมกัน) โดยไม่ต้องเช็คระยะห่างจริงเลย
+			if troop.pairedDefender and troop.defenderFrom and troop.pairedDefender.Parent then
+				local defenderPosition = troop.defenderFrom:Lerp(troop.to, alpha)
+				local defenderDirection = troop.to - troop.defenderFrom
+				local defenderCf = if defenderDirection.Magnitude > 0.01
+					then CFrame.lookAt(defenderPosition, defenderPosition + defenderDirection.Unit)
+					else CFrame.new(defenderPosition)
+				troop.pairedDefender:PivotTo(defenderCf)
+			end
 		end
 	end
 end
@@ -240,11 +304,13 @@ local function updateSpawning(payload: any?, delta: number)
 end
 
 --------------------------------------------------------------------------------
--- ทหารฝ่ายรับ — ยืนนิ่งหน้ากำแพงด่านที่กำลังถูกตี จำนวนลดตามสัดส่วน defendersRemaining
+-- ทหารฝ่ายรับ — พูล "ยืนรอ" หน้ากำแพงด่านที่กำลังถูกตี จำนวนในพูลลดตามสัดส่วน defendersRemaining
+--
+-- ⚠️ ตัวที่ยืนรออยู่ในพูลนี้ (defenderModels — ประกาศไว้ก่อน spawnOurTroop ข้างบนแล้ว) อาจถูก
+-- spawnOurTroop ดึงออกไปเดินออกมาชนกับทหารเราได้ตลอดเวลา (ดูหัวข้อ "ทหารฝ่ายเรา") จำนวนที่
+-- พร่องไปจากการดึงจะถูกเติมกลับเองที่นี่ในรอบ sync ถัดไป ตราบใดที่ targetCount (คำนวณจาก
+-- defendersRemaining จริง) ยังไม่ถึง 0 — ไม่ต้องมี logic พิเศษเพิ่มสำหรับกรณีนี้เลย
 --------------------------------------------------------------------------------
-
-local defenderModels: { Model } = {}
-local lastDefenderStage: number? = nil
 
 local function defenderRatio(payload: any, stage: number): number
 	local info = payload.stageProgress[stage]
@@ -312,9 +378,10 @@ end
 
 local currentPayload: any = nil
 
--- ⚠️ เรียกทุกครั้งที่ FarmStateSync มาใหม่ (ดู Main.client.lua) — อัปเดตทหารฝ่ายรับทันที
--- (นิ่งอยู่แล้ว รีเฟรชตามจำนวนล่าสุดได้เลย) ส่วนทหารฝ่ายเราใช้ payload นี้แค่ตัดสินว่าควร
--- สปอนต่อไหม (ดู updateSpawning ที่ทำงานในลูป Heartbeat แยกต่างหาก)
+-- ⚠️ เรียกทุกครั้งที่ FarmStateSync มาใหม่ (ดู Main.client.lua) — อัปเดตพูล "ยืนรอ" ของ
+-- ทหารฝ่ายรับทันทีตามจำนวนล่าสุด (ตัวที่ถูกดึงไปเดินออกมาชนแล้วไม่ถูกแตะตรงนี้ — จบเองใน
+-- updateOurTroops) ส่วนทหารฝ่ายเราใช้ payload นี้แค่ตัดสินว่าควรสปอนต่อไหม (ดู updateSpawning
+-- ที่ทำงานในลูป Heartbeat แยกต่างหาก)
 function TroopRenderer.updateFromPayload(payload: any)
 	currentPayload = payload
 	updateDefenders(payload)

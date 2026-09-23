@@ -929,8 +929,12 @@ function EggService.debugClearBag(player: Player)
 	)
 end
 
--- ล้างทุกอย่าง: แม่ในคอก + แม่ในกระเป๋า + ไข่ในกระเป๋า + ไข่ที่กำลังฟัก
+-- ล้างทุกอย่าง: แม่ในคอก + แม่ในกระเป๋า + ไข่ในกระเป๋า + ไข่ที่กำลังฟัก + stageProgress + wallProgress
 -- เหมือนเริ่มเกมใหม่ (แต่ไม่แจกไข่เริ่มต้นให้อัตโนมัติ — ต้องเรียก grantEgg เอง)
+-- ⚠️ stageProgress/wallProgress เพิ่งเพิ่มเข้ามาทีหลัง (เดิมล้างแค่แม่/ไข่ ปล่อยสภาพที่ตั้งเอง
+-- ผ่าน debugSetWallProgress หรือตีด่านทดสอบค้างไว้) ไม่แตะ CombatService เลย เพราะฟิลด์ทั้งสอง
+-- เป็นแค่ข้อมูลใน PlayerData ธรรมดา (recompute logic ของ CombatService จะอ่านค่าที่ล้างแล้วเองในตาถัดไป)
+-- ⚠️ ยังไม่ล้าง `currency`/`children`/`releaseOrder` — ไม่ใช่ "สภาพเริ่มต้นจริง" ทั้ง 100% (ยังไม่ได้ขอ)
 function EggService.debugResetAll(player: Player)
 	local data = dataOf(player)
 	if not data then
@@ -957,6 +961,19 @@ function EggService.debugResetAll(player: Player)
 	table.clear(data.mothersInBag)
 	table.clear(data.heldEggs.items)
 
+	-- ⚠️ ล้าง stageProgress ทุกด่านกลับเป็น false (รูปแบบเดียวกับ PlayerData.createNew()) แล้วดัน
+	-- wallProgress กลับไปที่ค่าเริ่มต้นของผู้เล่นใหม่ — ไม่ใช่ 1 ดิบ ๆ เพราะ Config.Balance.NewPlayer
+	-- คือแหล่งความจริงเดียวของค่าเริ่มต้น (เหตุผลเดียวกับที่ createNew() อ่านจากตรงนั้น)
+	local wallProgressBefore = data.wallProgress
+	local stageProgressCleared = 0
+	for stage = 1, Config.Balance.Stage.COUNT do
+		if data.stageProgress[stage] ~= false then
+			stageProgressCleared += 1
+		end
+		data.stageProgress[stage] = false
+	end
+	data.wallProgress = Config.Balance.NewPlayer.wallProgress
+
 	-- ⚠️ แม่ในคอกก็มีโมเดลเดินอยู่จริง ต้อง refreshMothers ให้คอกว่างตามข้อมูล
 	PenService.refreshMothers(player, data.mothersInPen)
 	EggService.sync(player)
@@ -965,6 +982,8 @@ function EggService.debugResetAll(player: Player)
 		`[EggService] debugResetAll: {player.Name} ล้างแม่ในคอก {motherPenRemoved} ตัว · `
 			.. `แม่ในกระเป๋า {motherBagRemoved} ตัว · ไข่ในกระเป๋า {eggsRemoved} ฟอง · `
 			.. `ไข่ที่กำลังฟัก {hatchingRemoved} ฟอง · `
+			.. `stageProgress ที่ล้าง {stageProgressCleared}/{Config.Balance.Stage.COUNT} ด่าน · `
+			.. `wallProgress {wallProgressBefore} → {data.wallProgress} · `
 			.. debugSaveNow(player)
 	)
 end

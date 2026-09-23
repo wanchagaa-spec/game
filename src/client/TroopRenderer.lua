@@ -52,10 +52,19 @@ local LIMB_SIZE = Vector3.new(1, 2, 1)
 local TORSO_SIZE = Vector3.new(2, 2, 1)
 local HEAD_SIZE = Vector3.new(1.2, 1.2, 1.2)
 
--- ความสูงจากพื้น (Y=0) ของจุดศูนย์กลางแต่ละชิ้น — ขาวางแตะพื้นพอดี
+-- ⚠️ ช่องว่างระหว่างชิ้นส่วน — เดิมไม่มีเลย (ขาสองข้างชนกันพอดีที่กึ่งกลาง แขนชิดผิวลำตัว
+-- พอดีเป๊ะที่ความสูงเดียวกับลำตัว ขาชนสะโพกพอดีไม่มีรอยต่อ) ทำให้ Torso+ArmL+ArmR+LegL+LegR
+-- กลืนเป็นแท่งทึบก้อนเดียว เห็นแค่หัว (ทรงกลม) แยกออกมาชัด — ใส่ช่องว่างเล็ก ๆ ตรงนี้แทน
+-- เพื่อให้ตาแยกออกว่าเป็นหัว-ลำตัว-แขน 2-ขา 2 จริง ไม่ต้องเป๊ะเหมือนโมเดลจริง
+local LEG_GAP = 0.2 -- ช่องว่างระหว่างขาซ้าย-ขวา (แนวนอน)
+local ARM_GAP = 0.2 -- ช่องว่างระหว่างขอบลำตัวกับแขน (แนวนอน)
+local HIP_GAP = 0.2 -- ช่องว่างระหว่างขอบบนขากับขอบล่างลำตัว (แนวตั้ง — รอยต่อ "สะโพก")
+
+-- ความสูงจากพื้น (Y=0) ของจุดศูนย์กลางแต่ละชิ้น — ขายังวางแตะพื้นพอดีเป๊ะเหมือนเดิม
+-- (LEG_CENTER_Y ไม่เปลี่ยน — HIP_GAP เพิ่มระยะห่างด้วยการยกลำตัว/หัวขึ้นแทน ไม่ใช่ยืด/หดขา)
 local LEG_CENTER_Y = LIMB_SIZE.Y / 2
-local TORSO_CENTER_Y = LIMB_SIZE.Y + TORSO_SIZE.Y / 2
-local HEAD_CENTER_Y = LIMB_SIZE.Y + TORSO_SIZE.Y + HEAD_SIZE.Y / 2
+local TORSO_CENTER_Y = LIMB_SIZE.Y + HIP_GAP + TORSO_SIZE.Y / 2
+local HEAD_CENTER_Y = LIMB_SIZE.Y + HIP_GAP + TORSO_SIZE.Y + HEAD_SIZE.Y / 2
 
 --------------------------------------------------------------------------------
 -- โฟลเดอร์ — แบบเดียวกับ WallRenderer (กัน StarterPlayerScripts→PlayerScripts ก็อปซ้อน)
@@ -125,10 +134,12 @@ local function buildPersonModel(color: Color3, name: string): Model
 	local head = part("Head", HEAD_SIZE, 0, HEAD_CENTER_Y)
 	head.Shape = Enum.PartType.Ball -- ⚠️ Shape=Ball ต้องตั้งขนาดเท่ากันทั้งสามแกน (กฎเดียวกับไข่)
 
-	part("ArmL", LIMB_SIZE, -(TORSO_SIZE.X / 2 + LIMB_SIZE.X / 2), TORSO_CENTER_Y)
-	part("ArmR", LIMB_SIZE, TORSO_SIZE.X / 2 + LIMB_SIZE.X / 2, TORSO_CENTER_Y)
-	part("LegL", LIMB_SIZE, -LIMB_SIZE.X / 2, LEG_CENTER_Y)
-	part("LegR", LIMB_SIZE, LIMB_SIZE.X / 2, LEG_CENTER_Y)
+	-- ⚠️ ARM_GAP/LEG_GAP เว้นช่องว่างจริงจากขอบลำตัว/จากกึ่งกลางตามลำดับ — ไม่ใช่ชิดขอบพอดีเป๊ะ
+	-- เหมือนเดิมที่ทำให้แขน/ขากลืนเป็นก้อนเดียวกับลำตัว (ดูคอมเมนต์ตรงค่าคงที่ด้านบน)
+	part("ArmL", LIMB_SIZE, -(TORSO_SIZE.X / 2 + ARM_GAP + LIMB_SIZE.X / 2), TORSO_CENTER_Y)
+	part("ArmR", LIMB_SIZE, TORSO_SIZE.X / 2 + ARM_GAP + LIMB_SIZE.X / 2, TORSO_CENTER_Y)
+	part("LegL", LIMB_SIZE, -(LEG_GAP / 2 + LIMB_SIZE.X / 2), LEG_CENTER_Y)
+	part("LegR", LIMB_SIZE, LEG_GAP / 2 + LIMB_SIZE.X / 2, LEG_CENTER_Y)
 
 	-- ประกาศ pivot ที่จุดแตะพื้น (world origin ตอนสร้าง = (0,0,0)) โดยไม่ขยับชิ้นไหนเลย
 	model.WorldPivot = CFrame.new(0, 0, 0)

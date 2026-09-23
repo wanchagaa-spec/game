@@ -20,6 +20,10 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+-- ⚠️ Phase 3B-2: เอฟเฟกต์ตอนทหารฝ่ายรับตาย (แทนที่จะ pop หายเฉย ๆ) — ดูเหตุผล require
+-- แบบ WaitForChild เดียวกับที่ Main.client.lua ใช้กับไฟล์นี้เอง (StarterPlayerScripts
+-- ก็อปมาเป็น PlayerScripts ช้ากว่าที่สคริปต์นี้เริ่มทำงาน)
+local CombatEffects = require(script.Parent:WaitForChild("CombatEffects"))
 
 local TroopRenderer = {}
 
@@ -32,6 +36,11 @@ local COMBAT = Config.Balance.Combat
 -- ด่าน 2 ห่างจากจุดปล่อยแค่ ~180 studs ด่าน 9 ห่างเกือบ 1,600 studs) — ยอมรับว่าความเร็วที่เห็น
 -- จะไม่เท่ากันทุกด่าน เพราะเป็นแค่ simulation ไม่ใช่ของจริง (ดูคอมเมนต์หัวไฟล์)
 local WALK_SECONDS = COMBAT.WALK_SECONDS_TO_WALL
+
+-- ⚠️ Phase 3B-2: sync เดียวลดจำนวนโมเดลได้มากสุดถึง MAX_VISIBLE_UNITS ตัวพร้อมกัน (เช่น สต็อกใหญ่
+-- ปล่อยรวดเดียวจบทั้งด่าน) — เล่นเอฟเฟกต์ตายจริงแค่ไม่กี่ตัวแรกต่อรอบ sync พอ ไม่งั้นเกิด
+-- ParticleEmitter เป็นร้อยตัวพร้อมกันในเฟรมเดียว ("ต้องเบา" ตามที่สั่ง) ตัวที่เหลือยัง pop หายปกติ
+local DEATH_EFFECT_CAP_PER_UPDATE = 12
 
 local OUR_COLOR = Color3.fromRGB(70, 200, 90)
 local DEFENDER_COLOR = Color3.fromRGB(150, 45, 45)
@@ -269,9 +278,16 @@ local function updateDefenders(payload: any?)
 		targetX = getStageTargetX(stage)
 	end
 
+	local deathEffectsPlayed = 0
+
 	while #defenderModels > targetCount do
 		local model = table.remove(defenderModels)
 		if model then
+			if deathEffectsPlayed < DEATH_EFFECT_CAP_PER_UPDATE then
+				-- ⚠️ ตำแหน่งเดิมของโมเดลก่อนทำลาย — ต้องอ่านก่อน Destroy เสมอ
+				CombatEffects.onDefenderDeath(model:GetPivot().Position)
+				deathEffectsPlayed += 1
+			end
 			model:Destroy()
 		end
 	end

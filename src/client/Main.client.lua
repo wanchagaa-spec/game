@@ -22,6 +22,8 @@ local Remotes = require(ReplicatedStorage.Shared.Remotes)
 -- อ้างตรง ๆ แล้วเจอจังหวะนั้น = client พังตั้งแต่บรรทัดแรก UI ไม่ขึ้นเลยสักอย่าง
 local WallRenderer = require(script.Parent:WaitForChild("WallRenderer"))
 local TroopRenderer = require(script.Parent:WaitForChild("TroopRenderer"))
+-- ⚠️ Phase 3B-2: เลขความเสียหายลอย + burst ตอนกระทบ — client-only visual ล้วน ๆ
+local CombatEffects = require(script.Parent:WaitForChild("CombatEffects"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -1272,6 +1274,9 @@ farmStateSync.OnClientEvent:Connect(function(payload)
 	-- มานี้เสมอ ไม่ใช่ default อีกต่อไป — อัปเดตทุกครั้งที่ sync มาใหม่ (real-time ตามที่กำลังตีอยู่)
 	WallRenderer.setStageProgress(payload.stageProgress)
 	TroopRenderer.updateFromPayload(payload)
+	-- ⚠️ Phase 3B-2: เทียบ defendersRemaining/wallHpRemaining ของด่านที่กำลังตีกับรอบ sync
+	-- ก่อนหน้า (state เก็บอยู่ในตัว CombatEffects เอง) แล้วโชว์เลขลอย+burst ถ้ามี damage เกิดขึ้นจริง
+	CombatEffects.onSync(payload)
 	if releasePanel.Visible then
 		renderReleaseOrderPanel()
 	end

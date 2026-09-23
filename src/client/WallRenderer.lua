@@ -18,11 +18,16 @@
 -- จากเซิร์ฟเวอร์เลย — ตอนนี้รับ `stageProgress` จริงจาก FarmStateSync (CombatService 3A ใส่ไว้ใน
 -- payload ผ่าน CombatService.buildSyncFields) ทุกครั้งที่ sync มาใหม่ ผ่าน setStageProgress()
 -- (Main.client.lua เรียกจาก farmStateSync.OnClientEvent) ด่านที่ "พังเรียบร้อย"
--- (defendersRemaining=0 และ wallHpRemaining=0 → entry.cleared=true) กำแพงหายไป ด่านที่ยังไม่ผ่าน
--- กำแพงยังเต็ม (ยังไม่ทำรอยร้าวตาม % ในเฟสนี้ — เป็น 3B-2)
+-- (defendersRemaining=0 และ wallHpRemaining=0 → entry.cleared=true) กำแพงหายไป
 --
 -- ทหารฝ่ายรับกับกองทัพของผู้เล่นเองวาดฝั่ง client ด้วยเหตุผลเดียวกัน (เห็นเฉพาะของตัวเอง)
 -- อยู่ที่ src/client/TroopRenderer.lua (Phase 3B-1)
+--
+-- ══ Phase 3B-2 ══
+-- กำแพงที่ "ยังไม่พังเรียบร้อย" ตอนนี้แตกเป็น 5 ระดับตาม wallHpRemaining/wallHpTotal ที่เหลือ
+-- (blockout: คล้ำสี + เพิ่มเส้นรอยร้าวทีละขั้น ไม่มีโมเดล/texture รอยร้าวจริง) รายละเอียดอยู่
+-- ตรงตาราง WALL_TIER_* ด้านล่าง — อัปเดตเฉพาะด่านที่ข้าม threshold เท่านั้น ไม่ rebuild ทั้งชุด
+-- ทุก sync อีกต่อไป (ประหยัด work ฝั่ง client)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -36,8 +41,44 @@ local MAP = Config.MapDimensions
 
 local WALL_COLOR = Color3.fromRGB(126, 116, 104)
 local WALL_TOP_COLOR = Color3.fromRGB(154, 142, 126)
+local CRACK_COLOR = Color3.fromRGB(28, 24, 20)
+
+-- ══ Phase 3B-2: กำแพงแตกตาม % HP ที่เหลือ (blockout — คล้ำสี + เส้นรอยร้าวเพิ่มทีละขั้น) ══
+-- 5 ระดับตาม wallHpRemaining/wallHpTotal: 100-76% / 75-51% / 50-26% / 25-1% / 0% (หายไปเลย
+-- เหมือนเดิม — ระดับ 0% ไม่มีโมเดลให้วาดต่อ จึงมีแค่ tier 1-4 ในตารางข้างล่าง)
+local WALL_TIER_DARKEN = { [1] = 0, [2] = 0.2, [3] = 0.4, [4] = 0.6 } -- ยิ่งเลขมากยิ่งคล้ำ
+local WALL_TIER_CRACKS = { [1] = 0, [2] = 2, [3] = 4, [4] = 6 } -- ยิ่ง HP น้อยยิ่งมีเส้นเยอะ
+
+local function getWallTier(ratio: number): number
+	if ratio > 0.75 then
+		return 1
+	elseif ratio > 0.50 then
+		return 2
+	elseif ratio > 0.25 then
+		return 3
+	else
+		return 4
+	end
+end
+
+-- สัดส่วน wallHpRemaining/wallHpTotal ของด่านนั้น — 1 (เต็ม) ถ้ายังไม่เคยแตะหรือข้อมูลไม่ครบ
+local function getWallRatio(entry: any): number
+	if type(entry) ~= "table" or entry.started ~= true then
+		return 1
+	end
+	local total = entry.wallHpTotal
+	if type(total) ~= "number" or total <= 0 then
+		return 1
+	end
+	return math.clamp(entry.wallHpRemaining / total, 0, 1)
+end
 
 local folder: Folder? = nil
+
+-- ⚠️ เก็บ "เลเวลที่วาดอยู่จริงตอนนี้" แยกจาก currentStageProgress (ค่าดิบจาก server)
+-- ต่างกันเมื่อไหร่ค่อย rebuild โมเดลด่านนั้นจริง ๆ — เลเวลเดิมไม่ต้องแตะอะไรเลย (ประหยัด work
+-- ฝั่ง client ตามที่สั่ง ไม่ใช่คำนวณ/สร้าง Part ใหม่ทุก sync) · nil = ไม่มีโมเดลอยู่ตอนนี้
+local builtTier: { [number]: number? } = {}
 
 -- ⚠️ ก่อน sync ครั้งแรกมาถึง ยังไม่รู้ค่าจริงจากเซิร์ฟ — สมมติว่ายังไม่พังด่านไหนเลย (ทุกด่าน
 -- ยังเป็น false เหมือนผู้เล่นใหม่) ปลอดภัยกว่าสมมติว่าพังไปแล้ว: กำแพงเกินโผล่มาก่อนแล้วหายไป
@@ -93,7 +134,40 @@ local function ensureFolder(): Folder
 	return created
 end
 
-local function buildWall(stage: number, parent: Folder)
+-- เส้นรอยร้าว — สุ่มตำแหน่งแต่ fix seed ด้วยเลขด่านเสมอ (Random.new(stage) สร้างใหม่ทุกครั้งที่
+-- เรียก แต่ให้ลำดับเลขสุ่มเดิมเป๊ะเพราะ seed เดิม) เปิดเผยทีละ N เส้นตามเลเวล — เลข n ตัวแรก
+-- จึงตรงกันทุกเลเวลเสมอ (เลเวลสูงขึ้นแค่ "เพิ่ม" เส้นต่อท้าย ไม่สลับตำแหน่งเส้นเดิมที่มีอยู่แล้ว)
+-- → ไม่กระพริบ/ไม่เปลี่ยนตำแหน่งตอน sync ใหม่มาถึงตามที่สั่ง
+local function addCracks(model: Model, stage: number, wallX: number, tier: number)
+	local count = WALL_TIER_CRACKS[tier] or 0
+	if count <= 0 then
+		return
+	end
+
+	local rng = Random.new(stage)
+	local faceX = wallX + MAP.StageWall.Thickness / 2 + 0.06
+	local halfWidth = MAP.Lane.Width / 2
+
+	for index = 1, count do
+		local length = rng:NextNumber(3, 7)
+		local y = rng:NextNumber(1, math.max(MAP.Lane.WallHeight - 1, 1))
+		local z = rng:NextNumber(-halfWidth + 2, halfWidth - 2)
+		local tilt = rng:NextNumber(-25, 25)
+
+		local crack = Instance.new("Part")
+		crack.Name = `Crack{index}`
+		crack.Size = Vector3.new(0.18, length, 0.3)
+		crack.CFrame = CFrame.new(faceX, y, z) * CFrame.Angles(0, 0, math.rad(tilt))
+		crack.Color = CRACK_COLOR
+		crack.Material = Enum.Material.SmoothPlastic
+		crack.Anchored = true
+		crack.CanCollide = false
+		crack.CastShadow = false
+		crack.Parent = model
+	end
+end
+
+local function buildWall(stage: number, parent: Folder, tier: number)
 	local wallX = Config.getWallX(stage)
 	if not wallX then
 		return -- ด่านนี้ไม่มีกำแพง (ด่าน 1)
@@ -107,7 +181,8 @@ local function buildWall(stage: number, parent: Folder)
 	body.Name = "Body"
 	body.Size = Vector3.new(MAP.StageWall.Thickness, MAP.Lane.WallHeight, MAP.Lane.Width)
 	body.Position = Vector3.new(wallX, MAP.Lane.WallHeight / 2, 0)
-	body.Color = WALL_COLOR
+	-- ⚠️ Phase 3B-2: คล้ำลงทีละขั้นตามเลเวลความเสียหาย (tier 1 = สีเดิมเป๊ะ)
+	body.Color = WALL_COLOR:Lerp(Color3.new(0, 0, 0), WALL_TIER_DARKEN[tier] or 0)
 	body.Anchored = true
 	body.CanCollide = true -- ← จุดที่ทำให้ "คนที่ยังไม่พังเดินชน" ทำงานเอง
 	body.Material = Enum.Material.Slate
@@ -115,6 +190,8 @@ local function buildWall(stage: number, parent: Folder)
 	body.BottomSurface = Enum.SurfaceType.Smooth
 	body.Parent = model
 	model.PrimaryPart = body
+
+	addCracks(model, stage, wallX, tier)
 
 	-- ขอบบน ไว้ให้ดูออกว่าเป็นกำแพง ไม่ใช่แค่แท่งทึบ
 	local cap = Instance.new("Part")
@@ -146,21 +223,50 @@ local function buildWall(stage: number, parent: Folder)
 	label.Parent = gui
 end
 
--- วาดใหม่ทั้งชุดตาม stageProgress ปัจจุบัน
--- กำแพงของด่านที่ **ยังไม่พังเรียบร้อย** เท่านั้นที่ต้องมี ด่านที่พังแล้วไม่ต้องวาด
+-- อัปเดตตาม stageProgress ปัจจุบัน — ⚠️ Phase 3B-2: **ไม่ ClearAllChildren + rebuild ทั้งชุดอีก
+-- ต่อไปแล้ว** เทียบทีละด่านกับ `builtTier` (เลเวลที่วาดอยู่จริงตอนนี้) rebuild เฉพาะด่านที่
+-- เลเวลเปลี่ยนจริง (ข้าม threshold ของ % HP หรือเพิ่ง cleared) ด่านที่ยังอยู่เลเวลเดิมข้ามไปเลย
+-- ไม่แตะ Part สักชิ้น — ประหยัด work ฝั่ง client ตามที่สั่ง เพราะ sync มาถี่ (~ทุก 1 วิ)
+-- แต่ % HP ส่วนใหญ่ไม่ได้ข้าม threshold ทุกรอบ
 function WallRenderer.render()
 	local parent = ensureFolder()
-	parent:ClearAllChildren()
+	local changed = 0
 
-	local built = 0
 	for stage = 1, Config.Balance.Stage.COUNT do
-		if not isStageCleared(currentStageProgress[stage]) then
-			buildWall(stage, parent)
-			built += 1
+		local modelName = `Wall{stage}`
+		local existingModel = parent:FindFirstChild(modelName)
+		local wallX = Config.getWallX(stage)
+
+		if not wallX or isStageCleared(currentStageProgress[stage]) then
+			-- ด่านนี้ไม่มีกำแพงจริง (ด่าน 1) หรือพังเรียบร้อยแล้ว → ต้องไม่มีโมเดล
+			if builtTier[stage] ~= nil then
+				if existingModel then
+					existingModel:Destroy()
+				end
+				builtTier[stage] = nil
+				changed += 1
+			end
+			continue
 		end
+
+		local ratio = getWallRatio(currentStageProgress[stage])
+		local tier = getWallTier(ratio)
+
+		if builtTier[stage] == tier and existingModel then
+			continue -- ยังอยู่เลเวลเดิม ไม่ต้องแตะอะไรเลย
+		end
+
+		if existingModel then
+			existingModel:Destroy()
+		end
+		buildWall(stage, parent, tier)
+		builtTier[stage] = tier
+		changed += 1
 	end
 
-	print(`[WallRenderer] วาดกำแพง {built} ด่าน (ที่ยังพังไม่ได้)`)
+	if changed > 0 then
+		print(`[WallRenderer] อัปเดตกำแพง {changed} ด่าน (ข้าม threshold ความเสียหาย/พัง)`)
+	end
 end
 
 -- ⚠️ เรียกทุกครั้งที่ FarmStateSync มาใหม่ (ดู Main.client.lua) — ของจริงจาก server

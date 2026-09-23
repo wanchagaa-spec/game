@@ -25,6 +25,8 @@ local EVENT_NAMES: { string } = {
 	NAMES.FARM_STATE_SYNC,
 	NAMES.ACTION_RESULT,
 	NAMES.AUTO_FILL_PEN_REQUEST,
+	NAMES.SET_RELEASE_ORDER_REQUEST,
+	NAMES.SET_SUMMON_ENABLED_REQUEST,
 }
 
 -- เรียกจากฝั่ง server ตอนบูตเท่านั้น สร้าง Folder + RemoteEvent ให้ครบ

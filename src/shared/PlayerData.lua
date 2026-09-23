@@ -89,6 +89,14 @@ export type Data = {
 	heldEggs: HeldEggs,
 	stageProgress: { StageProgress | false },
 	summonEnabled: boolean,
+	-- ⚠️ true เฉพาะตอนที่ auto-pause (§7.6) เป็นคนปิด summonEnabled ให้เอง
+	-- ผู้เล่นกดปิดเองไม่ตั้งค่านี้ — ใช้แยกว่าจะโชว์แจ้งเตือน "ตีไม่เข้า" หรือเปล่า (3B)
+	combatAutoPaused: boolean,
+	-- ⚠️ อาเรย์ของ stack key (Config.makeStackKey()) เรียงลำดับที่ผู้เล่นตั้งไว้เอง
+	-- หัวอาเรย์ = ปล่อยก่อน · กองที่หมด (count เป็น 0/ไม่มีใน children) ยังค้างอยู่ในนี้
+	-- ไม่ถูกลบ (เผื่อผลิตเพิ่มมาเติมทีหลัง) · กองใหม่ที่ยังไม่เคยอยู่ในนี้ถูกต่อท้ายอัตโนมัติ
+	-- (CombatService.reconcileReleaseOrder) ห้ามเขียนตรง ๆ ที่อื่นนอกจาก CombatService
+	releaseOrder: { string },
 	stats: { [string]: any },
 	sessionLock: SessionLock?,
 	lastSaveAt: number,
@@ -140,7 +148,9 @@ function PlayerData.createNew(): Data
 		hatching = hatching,
 		heldEggs = { nextEggId = 1, items = {} },
 		stageProgress = stageProgress,
-		summonEnabled = true,
+		summonEnabled = Config.Balance.Combat.SUMMON_DEFAULT_ON,
+		combatAutoPaused = false,
+		releaseOrder = {},
 
 		stats = {
 			eggsHatched = 0,
@@ -468,10 +478,14 @@ function PlayerData.buildWorstCase(): Data
 	end
 
 	-- กองลูก: key ยาวสุด × จำนวนกองสูงสุด × จำนวนลูกสูงสุดต่อกอง
+	-- ⚠️ releaseOrder เต็มขนาดเดียวกันด้วย (ทุกกองต้องมีที่อยู่ในลำดับปล่อย)
 	for index = 1, inventory.MAX_CHILD_STACKS do
 		local key = Config.makeStackKey("jade_emperor", 100000000 - index, { "gold", "silver" })
 		data.children[key] = inventory.MAX_CHILDREN_PER_STACK
+		table.insert(data.releaseOrder, key)
 	end
+
+	data.combatAutoPaused = true
 
 	for index = 1, HATCHERY.MAX_SLOTS do
 		data.hatching[index] = {

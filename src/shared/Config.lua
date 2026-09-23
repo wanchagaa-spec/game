@@ -509,6 +509,15 @@ Config.RemoteNames = {
 	-- (เลือกตัวรายได้เงิน/นาทีสูงสุดก่อน) เติมเฉพาะช่องว่างที่เหลือ ไม่เคยเตะแม่ในคอกออก
 	AUTO_FILL_PEN_REQUEST = "AutoFillPenRequest",
 
+	-- client → server : FireServer(orderedStackKeys: {string})
+	-- ⚠️ ต้องเป็น stack key ที่ผ่าน Config.makeStackKey() เป๊ะ (round-trip ตรงตัว) เท่านั้น
+	-- ไม่ต้องเป็นกองที่ผู้เล่นมีอยู่ตอนนี้ (กองที่ว่างชั่วคราวยังตั้งลำดับล่วงหน้าได้) —
+	-- server ปฏิเสธทั้งคำขอเงียบ ๆ ถ้ามี key แปลกปลอมหรือซ้ำแม้แค่ตัวเดียว (CombatService)
+	SET_RELEASE_ORDER_REQUEST = "SetReleaseOrderRequest",
+
+	-- client → server : FireServer(enabled: boolean) — เปิด/ปิดปุ่มอัญเชิญ (data.summonEnabled)
+	SET_SUMMON_ENABLED_REQUEST = "SetSummonEnabledRequest",
+
 	-- server → client : { slotIndex, eggId, charId, charName, class, weight, placedIn }
 	EGG_HATCHED = "EggHatched",
 

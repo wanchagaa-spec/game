@@ -1,0 +1,483 @@
+--!strict
+-- egg-army-game :: เครื่องยนต์คำนวณรบฝั่ง server (Phase 3A — ไม่มีภาพ/UI)
+--
+-- ปล่อยทหาร (ลูกจากคลัง) ต่อเนื่องตามอัตราของด่านที่กำลังตี → สะสม damage →
+-- ตีทหารฝ่ายรับก่อน (defendersRemaining) แล้วส่วนเกินไหลไปตีกำแพงในตาเดียวกัน
+-- (wallHpRemaining) → จ่ายเงินตามสัดส่วน HP ทหารฝ่ายรับ (ไม่รวมกำแพง) ที่ลดไป
+--
+-- ⚠️ ปล่อยเฉพาะตอนออนไลน์เท่านั้น — ต่างจาก ProductionService ที่มี offline settlement
+-- ปิดเกม/ออกเกมแล้วหยุดสู้ทันที ไม่มี catch-up ย้อนหลัง (docs/data-schema.md §7.1)
+-- เพราะงั้นฟังก์ชันหลักในไฟล์นี้ไม่ต้องพึ่ง os.time()/timestamp แบบ ProductionService เลย —
+-- รับ elapsedSeconds ตรง ๆ จาก loop ที่เรียก (CombatService.start()) ทำให้เทสต์เรียกตรง ๆ
+-- ได้เลยโดยไม่ต้องปลอมนาฬิกา
+--
+-- ⚠️ ยังไม่ทำในเฟสนี้ (ดู CLAUDE.md/ไม่ทำ turret/ระบบรบด้วยตัวเอง/ส่งแม่ไปรบ/บอส):
+-- damage ในนี้จึงไหลทางเดียว (กองทัพเรา → ทหารฝ่ายรับ/กำแพง) ไม่มีความเสียหายย้อนกลับใส่เรา
+--
+-- ⚠️ require แบบสองทางเหมือน ProductionService/DataService เพื่อให้ tests/run.luau
+-- require ไฟล์นี้ได้ตรง ๆ โดยไม่ต้องเปิด Studio (โค้ดที่แตะ Roblox API จริงมีแค่ CombatService.start())
+local Shared = if script then game:GetService("ReplicatedStorage"):WaitForChild("Shared") else nil
+local Config = (if Shared then require(Shared.Config) else require("../shared/Config")) :: any
+
+type Data = any
+type StageProgress = { defendersRemaining: number, wallHpRemaining: number }
+
+local CombatService = {}
+
+--------------------------------------------------------------------------------
+-- meta ต่อผู้เล่น — ของที่ **ห้ามเซฟ** ตายพร้อมเซสชัน (เหมือน EggService.sessionMeta)
+--------------------------------------------------------------------------------
+-- ⚠️ ไม่มี offline catch-up ให้ระบบนี้อยู่แล้ว จึงไม่จำเป็นต้องเซฟเศษที่สะสมไว้เลย
+-- เสียเศษไม่ถึง 1 หน่วย/1 เหรียญตอนออกเกมถือว่ายอมรับได้ (เทียบไม่ได้กับตัวเลขที่เล่นจริง)
+-- และ "ไม่มี offline progress" ก็เป็นกติกาที่ตั้งใจอยู่แล้วด้วย
+
+export type CombatMeta = {
+	releaseCarry: number, -- เศษจำนวนหน่วยที่ยังไม่ถึง 1 ตัว สะสมข้ามรอบ tick (กัน rate เศษหายตอนปัดเศษทุกรอบ)
+	coinCarry: number, -- เศษเหรียญที่ยังไม่ถึง 1 เหรียญ สะสมข้ามรอบ tick ด้วยเหตุผลเดียวกัน
+	unitsSinceProgress: number, -- ใช้กับ auto-pause (§7.6) — รีเซ็ตทุกครั้งที่ตีแล้ว HP ลดจริง
+	lastTickClock: number?, -- os.clock() ของ tick ก่อนหน้า ใช้เฉพาะใน loop จริง (ไม่ใช้ในเทสต์)
+}
+
+local combatMeta: { [number]: CombatMeta } = {}
+
+function CombatService.newMeta(): CombatMeta
+	return { releaseCarry = 0, coinCarry = 0, unitsSinceProgress = 0, lastTickClock = nil }
+end
+
+function CombatService.getOrCreateMeta(userId: number): CombatMeta
+	local meta = combatMeta[userId]
+	if not meta then
+		meta = CombatService.newMeta()
+		combatMeta[userId] = meta
+	end
+	return meta
+end
+
+function CombatService.clearMeta(userId: number)
+	combatMeta[userId] = nil
+end
+
+--------------------------------------------------------------------------------
+-- ด่านที่กำลังตี — ตีเรียงลำดับด่านเท่านั้น ห้ามข้ามด่าน
+--------------------------------------------------------------------------------
+
+-- ด่านแรกที่ยังตีไม่จบ (ยังไม่เคยเริ่ม หรือเริ่มแล้วแต่ยังมี HP เหลือ)
+-- คืน nil เมื่อผ่านครบทุกด่านแล้ว (defendersRemaining=0 และ wallHpRemaining=0 ทั้ง 9 ด่าน)
+function CombatService.getActiveStage(data: Data): number?
+	for stage = 1, Config.Balance.Stage.COUNT do
+		local progress = data.stageProgress[stage]
+		-- ⚠️ ใช้ type() ไม่ใช่ ~= false — Luau ขยาย `X | false` เป็น `X | boolean`
+		-- ทำให้เทียบกับ false แล้วไม่แคบลง (แบบเดียวกับ EggService.buildSyncPayload)
+		if type(progress) ~= "table" then
+			return stage
+		end
+		if progress.defendersRemaining > 0 or progress.wallHpRemaining > 0 then
+			return stage
+		end
+	end
+	return nil
+end
+
+-- init ด่านที่แตะเป็นครั้งแรก (จาก false) — เรียกซ้ำได้ปลอดภัย (idempotent)
+-- ⚠️ defendersRemaining เริ่มจาก Config.getStageDefenderHp() (HP ทหารฝ่ายรับล้วน ๆ)
+-- ไม่ใช่ Config.getStageTotalHp() ซึ่งเป็นผลรวมทหาร+กำแพง — ใช้ผิดตัวจะเท่ากับให้กำแพง
+-- มี HP ซ้ำสองชั้น (นับใน defendersRemaining ด้วย แล้วก็ยังนับใน wallHpRemaining อีกที)
+function CombatService.ensureStageStarted(data: Data, stage: number)
+	if type(data.stageProgress[stage]) ~= "table" then
+		data.stageProgress[stage] = {
+			defendersRemaining = Config.getStageDefenderHp(stage),
+			wallHpRemaining = Config.getStageWallHp(stage),
+		}
+	end
+end
+
+--------------------------------------------------------------------------------
+-- releaseOrder — คิวปล่อยทหารที่ผู้เล่นจัดลำดับเอง
+--------------------------------------------------------------------------------
+
+-- กองใน data.children ที่ยังไม่เคยอยู่ใน releaseOrder (เพิ่งผลิตครั้งแรก) → ต่อท้ายอัตโนมัติ
+-- ⚠️ ไม่ลบ key ออกจาก releaseOrder แม้กองนั้นจะว่างแล้ว (เผื่อผลิตเพิ่มมาเติมทีหลัง
+-- จะได้กลับมาอยู่คิวเดิมโดยไม่ต้องจัดใหม่)
+function CombatService.reconcileReleaseOrder(data: Data)
+	local present: { [string]: boolean } = {}
+	for _, key in data.releaseOrder do
+		present[key] = true
+	end
+	for key in data.children do
+		if not present[key] then
+			table.insert(data.releaseOrder, key)
+			present[key] = true
+		end
+	end
+end
+
+-- ดึงทหาร `unitsToRelease` ตัวจากหัวคิว ข้ามกองที่ว่าง (count<=0/ไม่มี) โดยไม่ลบออกจากลำดับ
+-- คืน (unitsActuallyReleased, totalPower) — totalPower ผ่าน Config.computeBattlePower() ต่อหน่วย
+-- (รวมตัวคูณ damageLevel ที่ซื้อด้วยเงินไว้แล้ว) ตามน้ำหนักลูก+ตัวละคร+สถานะของกองนั้น ๆ
+-- ⚠️ ถ้าทุกกองในลำดับว่างหมด (count=0) ไม่ error แค่คืน (0, 0) เฉย ๆ
+function CombatService.releaseFromQueue(data: Data, unitsToRelease: number): (number, number)
+	if unitsToRelease <= 0 then
+		return 0, 0
+	end
+
+	local remaining = unitsToRelease
+	local totalReleased = 0
+	local totalPower = 0
+
+	for _, key in data.releaseOrder do
+		if remaining <= 0 then
+			break
+		end
+
+		local available = data.children[key]
+		if available and available > 0 then
+			local charId, motherWeight, statuses = Config.parseStackKey(key)
+			-- key เพี้ยน (ไม่น่าเกิดเพราะสร้างจาก Config.makeStackKey() เท่านั้น) → ข้ามเงียบ ๆ
+			if charId and motherWeight then
+				local take = math.min(available, remaining)
+				local childWeight = Config.getChildWeight(motherWeight, statuses)
+				local power = Config.computeBattlePower(childWeight, charId, statuses, data.damageLevel)
+
+				totalReleased += take
+				totalPower += take * power
+				remaining -= take
+
+				local newCount = available - take
+				if newCount > 0 then
+					data.children[key] = newCount
+				else
+					data.children[key] = nil
+				end
+			end
+		end
+	end
+
+	return totalReleased, totalPower
+end
+
+--------------------------------------------------------------------------------
+-- ใส่ damage ให้ด่าน — ทหารฝ่ายรับก่อน ส่วนเกินไหลไปกำแพงในตาเดียวกัน
+--------------------------------------------------------------------------------
+
+-- เงินรางวัล: ตามสัดส่วน HP ทหารฝ่ายรับ (ไม่รวมกำแพง) ที่ลดไปในตานี้เท่านั้น
+-- ⚠️ ยืนยันจาก Config แล้ว: Config.getStageDefenderRewardTotal(stage)
+-- = Config.getStageDefenderCount(stage) × Config.getDefenderKillReward(stage)
+-- = (Config.getStageDefenderHp(stage) / DEFENDER_HP) × (เงิน/ตัว)
+-- ⇒ เงินต่อ HP ทหาร 1 หน่วย = getStageDefenderRewardTotal(stage) ÷ getStageDefenderHp(stage) คงที่
+-- ดังนั้น "ลด HP ทหารไป X" ต้องได้เงิน (X ÷ getStageDefenderHp(stage)) × getStageDefenderRewardTotal(stage)
+-- **ไม่มีฟังก์ชันรางวัลของกำแพงเลยใน Config** — HP กำแพงที่ลดไปจึงไม่ได้เงินสักบาท (ตั้งใจ)
+-- คืน (dmgToDefenders, dmgToWall, coinsEarned, stageCleared)
+function CombatService.applyDamageToStage(
+	data: Data,
+	meta: CombatMeta,
+	stage: number,
+	damage: number
+): (number, number, number, boolean)
+	if damage <= 0 then
+		return 0, 0, 0, false
+	end
+
+	local progress = data.stageProgress[stage] :: StageProgress
+	assert(
+		type(progress) == "table",
+		`CombatService: ด่าน {stage} ยังไม่เริ่ม — ต้องเรียก ensureStageStarted ก่อน`
+	)
+
+	local dmgToDefenders = math.min(damage, progress.defendersRemaining)
+	progress.defendersRemaining -= dmgToDefenders
+
+	local overflow = damage - dmgToDefenders
+	local dmgToWall = math.min(overflow, progress.wallHpRemaining)
+	progress.wallHpRemaining -= dmgToWall
+
+	local coinsEarned = 0
+	if dmgToDefenders > 0 then
+		local defenderHpTotal = Config.getStageDefenderHp(stage)
+		local rewardTotal = Config.getStageDefenderRewardTotal(stage)
+		local coinBudget = meta.coinCarry + (dmgToDefenders / defenderHpTotal) * rewardTotal
+		coinsEarned = math.floor(coinBudget)
+		meta.coinCarry = coinBudget - coinsEarned
+
+		if coinsEarned > 0 then
+			data.currency.coins += coinsEarned
+			data.stats.coinsFromKills += coinsEarned
+			data.stats.totalCoinsEarned += coinsEarned
+		end
+	end
+
+	local stageCleared = progress.defendersRemaining <= 0 and progress.wallHpRemaining <= 0
+	return dmgToDefenders, dmgToWall, coinsEarned, stageCleared
+end
+
+--------------------------------------------------------------------------------
+-- tick หลัก — เรียกทุกครั้งที่ผู้เล่นออนไลน์ (loop จริงอยู่ใน CombatService.start())
+--------------------------------------------------------------------------------
+
+export type TickResult = {
+	unitsReleased: number,
+	damageDealt: number,
+	coinsEarned: number,
+	stageCleared: boolean,
+	autoPaused: boolean,
+}
+
+local EMPTY_RESULT: TickResult =
+	{ unitsReleased = 0, damageDealt = 0, coinsEarned = 0, stageCleared = false, autoPaused = false }
+
+-- auto-pause (§7.6): กันทหารถูกป้อนเข้าเครื่องบดหายถาวรโดยไม่ได้ damage เลย
+-- นับจาก HP ที่ลดจริง (progressMade) ไม่ใช่จาก damage ที่ "พยายาม" ทำ — สองค่านี้ต่างกัน
+-- เฉพาะตอนด่านเคลียร์ไปแล้วเท่านั้น (แยกเป็นฟังก์ชันของตัวเองให้เทสต์เรียกตรง ๆ ได้โดยไม่ต้อง
+-- พึ่ง getActiveStage เลือกด่านให้ถูกจังหวะ)
+-- ⚠️ ในเฟสนี้ (ยังไม่มี turret) เส้นทาง progressMade<=0 แทบไม่มีวันเกิดจริง เพราะ
+-- Config.computeBattlePower มีพื้น minDamage บวก ๆ เสมอ — ใส่ไว้เป็นตาข่ายกันไว้ก่อนตามที่
+-- ออกแบบ ให้ turret ในเฟสหลังเสียบเข้ามาได้โดยไม่ต้องแก้จุดนี้อีก
+-- คืน true ถ้าการเรียกครั้งนี้ทำให้ auto-pause ทำงาน (ปิด summonEnabled ไปแล้ว)
+function CombatService.registerProgress(data: Data, meta: CombatMeta, unitsReleased: number, progressMade: number): boolean
+	if unitsReleased <= 0 then
+		return false
+	end
+
+	if progressMade > 0 then
+		meta.unitsSinceProgress = 0
+		return false
+	end
+
+	meta.unitsSinceProgress += unitsReleased
+	if meta.unitsSinceProgress >= Config.Balance.Combat.AUTO_PAUSE_AFTER_UNITS then
+		data.summonEnabled = false
+		data.combatAutoPaused = true
+		meta.unitsSinceProgress = 0
+		return true
+	end
+
+	return false
+end
+
+-- ⚠️ ไม่มี offline catch-up: ฟังก์ชันนี้รับ elapsedSeconds ตรง ๆ ไม่อ่าน os.time()/os.clock() เอง
+-- ปิดเกม/ออกเกม = ไม่มีใครเรียกฟังก์ชันนี้ = ไม่มีอะไรคืบหน้า (ตรงข้ามกับ ProductionService ที่มี
+-- offline settlement) — แค่ไม่เรียกก็พอ ไม่ต้องมี flag พิเศษกันไว้
+function CombatService.tick(data: Data, meta: CombatMeta, elapsedSeconds: number): TickResult
+	if not data.summonEnabled or elapsedSeconds <= 0 then
+		return EMPTY_RESULT
+	end
+
+	local stage = CombatService.getActiveStage(data)
+	if not stage then
+		return EMPTY_RESULT -- ผ่านครบทุกด่านแล้ว ไม่มีอะไรให้ตีต่อ
+	end
+
+	CombatService.ensureStageStarted(data, stage)
+	CombatService.reconcileReleaseOrder(data)
+
+	local rate = Config.getReleaseRate(stage)
+	local budget = meta.releaseCarry + rate * elapsedSeconds
+	local unitsToRelease = math.floor(budget)
+	meta.releaseCarry = budget - unitsToRelease
+
+	local unitsReleased, damageDealt = CombatService.releaseFromQueue(data, unitsToRelease)
+
+	local coinsEarned = 0
+	local stageCleared = false
+	local progressMade = 0
+
+	if damageDealt > 0 then
+		local dmgToDefenders, dmgToWall, coins, cleared =
+			CombatService.applyDamageToStage(data, meta, stage, damageDealt)
+		coinsEarned = coins
+		stageCleared = cleared
+		progressMade = dmgToDefenders + dmgToWall
+	end
+
+	local autoPaused = CombatService.registerProgress(data, meta, unitsReleased, progressMade)
+
+	return {
+		unitsReleased = unitsReleased,
+		damageDealt = damageDealt,
+		coinsEarned = coinsEarned,
+		stageCleared = stageCleared,
+		autoPaused = autoPaused,
+	}
+end
+
+--------------------------------------------------------------------------------
+-- RemoteEvent: SetReleaseOrderRequest / SetSummonEnabledRequest
+--------------------------------------------------------------------------------
+-- ⚠️ ฟังก์ชัน handle* รับ `data`/`meta` ตรง ๆ (ไม่รับ Player) ตั้งใจให้เทสต์เรียกตรง ๆ ได้
+-- โดยไม่ต้องมี Player จริง — ตัวที่ผูกกับ Player อยู่ใน CombatService.start() เท่านั้น
+
+local function isValidStackKey(key: unknown): boolean
+	if type(key) ~= "string" then
+		return false
+	end
+
+	local charId, motherWeight, statuses = Config.parseStackKey(key)
+	if not charId or not motherWeight then
+		return false
+	end
+	if not Config.getCharacter(charId) then
+		return false
+	end
+	if motherWeight % 1 ~= 0 or motherWeight <= 0 then
+		return false
+	end
+
+	-- ⚠️ ต้อง round-trip กลับมาเป็น string เดิมเป๊ะ — กันคั่นแปลก/สถานะเรียงผิด/สถานะซ้ำ
+	-- ที่ "หน้าตาคล้าย" stack key แต่ไม่ได้มาจาก Config.makeStackKey() จริง ๆ
+	return Config.makeStackKey(charId, motherWeight, statuses) == key
+end
+
+-- คืน releaseOrder ใหม่ถ้า rawOrder ทั้งชุดผ่านกฎ (ทุก key ถูกต้องรูปแบบ + ไม่ซ้ำ + ไม่ยาวเกิน
+-- เพดานจำนวนกองสูงสุด) — คืน nil ถ้ามีจุดใดจุดหนึ่งผิด (ผู้เรียกปฏิเสธคำขอทั้งชุดเงียบ ๆ ตามที่
+-- ออกแบบไว้ ไม่ apply บางส่วน)
+function CombatService.validateReleaseOrder(rawOrder: unknown): { string }?
+	if type(rawOrder) ~= "table" then
+		return nil
+	end
+	local order = rawOrder :: { [number]: unknown }
+
+	local length = #order
+	if length > Config.Inventory.MAX_CHILD_STACKS then
+		return nil
+	end
+
+	local cleaned: { string } = table.create(length)
+	local seen: { [string]: boolean } = {}
+
+	for index = 1, length do
+		local key = order[index]
+		if not isValidStackKey(key) then
+			return nil
+		end
+		local keyString = key :: string
+		if seen[keyString] then
+			return nil
+		end
+		seen[keyString] = true
+		cleaned[index] = keyString
+	end
+
+	return cleaned
+end
+
+function CombatService.handleSetReleaseOrder(data: Data, rawOrder: unknown): boolean
+	local cleaned = CombatService.validateReleaseOrder(rawOrder)
+	if not cleaned then
+		return false
+	end
+	data.releaseOrder = cleaned
+	return true
+end
+
+function CombatService.handleSetSummonEnabled(data: Data, meta: CombatMeta, rawEnabled: unknown): boolean
+	if type(rawEnabled) ~= "boolean" then
+		return false
+	end
+	data.summonEnabled = rawEnabled
+	if rawEnabled then
+		-- ผู้เล่นกดเปิดเอง = รับทราบแจ้งเตือน auto-pause แล้ว เริ่มนับใหม่
+		data.combatAutoPaused = false
+		meta.unitsSinceProgress = 0
+	end
+	return true
+end
+
+--------------------------------------------------------------------------------
+-- ฟิลด์ sync — merge เข้า FarmStateSync payload ของ EggService
+--------------------------------------------------------------------------------
+-- ⚠️ 3A ส่งแค่ข้อมูลดิบ ไม่ทำ client แสดงผล (เป็นงาน 3B) — % ความคืบหน้าคำนวณฝั่ง client
+-- เองจาก remaining/total ที่ส่งมาให้ตรงนี้
+
+type StageProgressView = {
+	started: boolean,
+	defendersRemaining: number?,
+	defendersTotal: number?,
+	wallHpRemaining: number?,
+	wallHpTotal: number?,
+	cleared: boolean?,
+}
+
+function CombatService.buildSyncFields(data: Data)
+	local stageProgress: { StageProgressView } = table.create(Config.Balance.Stage.COUNT)
+	for stage = 1, Config.Balance.Stage.COUNT do
+		local progress = data.stageProgress[stage]
+		if type(progress) == "table" then
+			stageProgress[stage] = {
+				started = true,
+				defendersRemaining = progress.defendersRemaining,
+				defendersTotal = Config.getStageDefenderHp(stage),
+				wallHpRemaining = progress.wallHpRemaining,
+				wallHpTotal = Config.getStageWallHp(stage),
+				cleared = progress.defendersRemaining <= 0 and progress.wallHpRemaining <= 0,
+			}
+		else
+			stageProgress[stage] = { started = false }
+		end
+	end
+
+	return {
+		activeStage = CombatService.getActiveStage(data),
+		stageProgress = stageProgress,
+		summonEnabled = data.summonEnabled,
+		combatAutoPaused = data.combatAutoPaused,
+		releaseOrder = data.releaseOrder,
+	}
+end
+
+--------------------------------------------------------------------------------
+-- ต่อสาย Roblox จริง (RemoteEvent + loop) — เรียกจาก Main.server.lua เท่านั้น
+--------------------------------------------------------------------------------
+-- ⚠️ require ของจริงทั้งหมดอยู่ *ในตัวฟังก์ชัน* ไม่ใช่ระดับโมดูล เหมือน ProductionService.start()
+-- เพื่อให้ require ไฟล์นี้จาก tests/run.luau (นอก Roblox) ได้โดยไม่พังตั้งแต่โหลด
+
+function CombatService.start()
+	local Players = game:GetService("Players")
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local ServerScriptService = game:GetService("ServerScriptService")
+	local Remotes = require(ReplicatedStorage.Shared.Remotes)
+	local DataService = require(ServerScriptService.DataService)
+
+	local setReleaseOrderRequest = Remotes.waitFor(Config.RemoteNames.SET_RELEASE_ORDER_REQUEST)
+	local setSummonEnabledRequest = Remotes.waitFor(Config.RemoteNames.SET_SUMMON_ENABLED_REQUEST)
+
+	setReleaseOrderRequest.OnServerEvent:Connect(function(player: Player, rawOrder: unknown)
+		local data = DataService.getCached(player.UserId)
+		if data then
+			CombatService.handleSetReleaseOrder(data, rawOrder)
+		end
+	end)
+
+	setSummonEnabledRequest.OnServerEvent:Connect(function(player: Player, rawEnabled: unknown)
+		local data = DataService.getCached(player.UserId)
+		if data then
+			CombatService.handleSetSummonEnabled(data, CombatService.getOrCreateMeta(player.UserId), rawEnabled)
+		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(player: Player)
+		CombatService.clearMeta(player.UserId)
+	end)
+
+	-- ⚠️ ลูปเดียวคุมทั้งการปล่อย+ตี ความละเอียด = Config.World.SYNC_INTERVAL (ค่าเดียวกับ
+	-- ลูป sync ของ EggService) ใช้ os.clock() วัด elapsed จริงระหว่างรอบ กัน drift จาก
+	-- task.wait() ที่ไม่เป๊ะ 1 วินาทีเป๊ะทุกรอบ (ตัวนับเศษ meta.releaseCarry รับส่วนที่เหลือไว้)
+	task.spawn(function()
+		while true do
+			task.wait(Config.World.SYNC_INTERVAL)
+
+			for _, player in Players:GetPlayers() do
+				local data = DataService.getCached(player.UserId)
+				if data then
+					local meta = CombatService.getOrCreateMeta(player.UserId)
+					local nowClock = os.clock()
+					local elapsed = if meta.lastTickClock
+						then nowClock - meta.lastTickClock
+						else Config.World.SYNC_INTERVAL
+					meta.lastTickClock = nowClock
+					CombatService.tick(data, meta, elapsed)
+				end
+			end
+		end
+	end)
+end
+
+return CombatService

@@ -37,6 +37,7 @@ local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local DataService = require(ServerScriptService.DataService)
 local PenService = require(ServerScriptService.PenService)
 local ProductionService = require(ServerScriptService.ProductionService)
+local CombatService = require(ServerScriptService.CombatService)
 
 local EggService = {}
 
@@ -260,6 +261,11 @@ local function buildSyncPayload(data: Data)
 		})
 	end
 
+	-- ⚠️ Phase 3A: ฟิลด์การรบ (stageProgress/summonEnabled/releaseOrder/...) มาจาก
+	-- CombatService.buildSyncFields() ล้วน ๆ ไม่คำนวณซ้ำที่นี่ — แค่ merge เข้า payload เดียวกัน
+	-- ให้ 3B ใช้ต่อได้โดยไม่ต้องมี RemoteEvent แยก
+	local combat = CombatService.buildSyncFields(data)
+
 	return {
 		heldEggs = held,
 		heldCount = #heldItems,
@@ -279,6 +285,11 @@ local function buildSyncPayload(data: Data)
 		-- ⚠️ ข้อ D: จำนวนแม่ที่ฟักเสร็จแล้วแต่ยังค้างในสวนฟักเพราะคอก+กระเป๋าเต็มพร้อมกัน
 		-- client ใช้ค่านี้โชว์ข้อความ "กระเป๋าแม่เต็ม ขายแม่บางตัวเพื่อรับแม่ที่ฟักเสร็จแล้ว" (ยังไม่ทำ UI เฟสนี้)
 		stuckHatchCount = stuckHatchCount,
+		activeStage = combat.activeStage,
+		stageProgress = combat.stageProgress,
+		summonEnabled = combat.summonEnabled,
+		combatAutoPaused = combat.combatAutoPaused,
+		releaseOrder = combat.releaseOrder,
 	}
 end
 

@@ -22,6 +22,7 @@ local DataService = require(ServerScriptService.DataService)
 local PenService = require(ServerScriptService.PenService)
 local EggService = require(ServerScriptService.EggService)
 local ProductionService = require(ServerScriptService.ProductionService)
+local CombatService = require(ServerScriptService.CombatService)
 
 -- ⚠️ กันตัวละครเกิดก่อนแมพสร้างเสร็จ
 -- แมพทั้งใบ generate ตอน server start ดังนั้น**ก่อนหน้านั้นโลกว่างเปล่า ไม่มีพื้นเลย**
@@ -129,6 +130,12 @@ EggService.start()
 -- กัน circular require (EggService เองก็ require ProductionService ไปเรียก settleMother
 -- ตอนย้ายแม่ออกจากคอก)
 ProductionService.start(EggService.sync)
+
+-- ⚠️ Phase 3A: เครื่องยนต์คำนวณรบฝั่ง server — ลูปของตัวเอง คนละ loop กับ ProductionService/
+-- EggService (อ่าน docs/data-schema.md §7) ต่อ RemoteEvent ของตัวเอง (SetReleaseOrderRequest /
+-- SetSummonEnabledRequest) และเซฟผ่าน DataService path เดิม (stageProgress/currency ก็คือ
+-- PlayerData fields ธรรมดา ไม่มีระบบเซฟแยก)
+CombatService.start()
 
 -- ⚠️ ต่อ BindToClose **ก่อน** ปล่อยให้ใครเข้ามาเล่น
 -- ถ้าต่อทีหลัง มีช่วงที่เซิร์ฟเวอร์ปิดแล้วไม่มีใครเซฟให้เลย

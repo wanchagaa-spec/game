@@ -78,6 +78,8 @@ local moveMotherRequest: RemoteEvent
 local upgradePenRequest: RemoteEvent
 local sellMotherRequest: RemoteEvent
 local autoFillPenRequest: RemoteEvent
+local buyDamageUpgradeRequest: RemoteEvent
+local buySpeedUpgradeRequest: RemoteEvent
 local eggHatched: RemoteEvent
 local farmStateSync: RemoteEvent
 local actionResult: RemoteEvent
@@ -266,6 +268,14 @@ local function buildSyncPayload(data: Data)
 	-- ให้ 3B ใช้ต่อได้โดยไม่ต้องมี RemoteEvent แยก
 	local combat = CombatService.buildSyncFields(data)
 
+	-- ⚠️ เพดานที่ซื้อได้ผูกกับ wallProgress (off-by-one: ด่าน 1 = 8 ขั้น ไม่ใช่ 0 — ดู
+	-- docs/data-schema.md §8.6) ต้องเช็คเพดานนี้ก่อนถามราคา ไม่งั้น damageUpgradeCost จะไม่ nil
+	-- ตอนติดเพดานด่าน ทั้งที่ยังไม่ถึงเพดานรวม 72 ขั้นของทั้งเกม
+	local maxDamageLevel = Config.getMaxDamageLevel(data.wallProgress)
+	local damageUpgradeCost = if data.damageLevel < maxDamageLevel
+		then Config.getDamageUpgradeCost(data.damageLevel + 1)
+		else nil
+
 	return {
 		heldEggs = held,
 		heldCount = #heldItems,
@@ -281,6 +291,15 @@ local function buildSyncPayload(data: Data)
 		penUpgradeCost = Config.getPenUpgradeCost(data.penLevel), -- nil = เต็มเพดานแล้ว
 		bagCapacity = Config.Balance.Bag.CAPACITY,
 		coins = data.currency.coins,
+		wallProgress = data.wallProgress,
+		damageLevel = data.damageLevel,
+		maxDamageLevel = maxDamageLevel,
+		damageMultiplier = Config.getArmyDamageMultiplier(data.damageLevel),
+		damageUpgradeCost = damageUpgradeCost, -- nil = เต็มเพดานของด่านนี้แล้ว
+		speedLevel = data.speedLevel,
+		maxSpeedLevel = Config.Balance.SpeedUpgrade.MAX_LEVEL,
+		walkSpeed = Config.getWalkSpeed(data.speedLevel),
+		speedUpgradeCost = Config.getSpeedUpgradeCost(data.speedLevel), -- nil = เต็มเพดานแล้ว
 		children = children,
 		-- ⚠️ ข้อ D: จำนวนแม่ที่ฟักเสร็จแล้วแต่ยังค้างในสวนฟักเพราะคอก+กระเป๋าเต็มพร้อมกัน
 		-- client ใช้ค่านี้โชว์ข้อความ "กระเป๋าแม่เต็ม ขายแม่บางตัวเพื่อรับแม่ที่ฟักเสร็จแล้ว" (ยังไม่ทำ UI เฟสนี้)
@@ -734,6 +753,87 @@ function EggService.sellMother(player: Player, rawUid: unknown): (boolean, strin
 	EggService.sync(player)
 
 	print(`[EggService] {player.Name} ขายแม่ {mother.uid} ({Config.formatWeight(mother.weight)}) ได้ {price} coins`)
+	return true, nil
+end
+
+--------------------------------------------------------------------------------
+-- ซื้อตัวคูณ damage / ความเร็ว — ทั้งคู่เป็นของบัญชีผู้เล่น (ไม่ใช่ของแม่รายตัว)
+--------------------------------------------------------------------------------
+
+-- ตั้ง Humanoid.WalkSpeed จริงตาม speedLevel ที่ซื้อไว้ — เรียกทั้งตอนซื้อสำเร็จ (มีผลทันที
+-- ไม่ต้องรอ respawn) และทุกครั้งที่ CharacterAdded (Roblox รีเซ็ต WalkSpeed กลับไปเป็นค่าฐาน
+-- ของ StarterPlayer ทุกครั้งที่ Humanoid ใหม่ถูกสร้าง — ตายแล้วเกิดใหม่จะเสียตัวคูณถ้าไม่ตั้งซ้ำ)
+function EggService.applyWalkSpeed(player: Player)
+	local data = dataOf(player)
+	if not data then
+		return
+	end
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = Config.getWalkSpeed(data.speedLevel)
+	end
+end
+
+-- ⚠️ ไม่แตะ data.damageLevel นอกจากที่นี่ — CombatService อ่านค่านี้อย่างเดียว ไม่เคยเขียน
+-- ซื้อได้ทีละขั้นเสมอ (ขั้นถัดไปจาก damageLevel ปัจจุบัน) ไม่มีพารามิเตอร์ให้ client เลือกขั้น
+function EggService.buyDamageUpgrade(player: Player): (boolean, string?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น"
+	end
+
+	local maxLevel = Config.getMaxDamageLevel(data.wallProgress)
+	if data.damageLevel >= maxLevel then
+		return false, "ซื้อครบเพดานของด่านนี้แล้ว — พังกำแพงด่านถัดไปก่อนถึงจะซื้อเพิ่มได้"
+	end
+
+	-- ⚠️ getDamageUpgradeCost รับ "ขั้นที่กำลังจะซื้อ" (1-indexed) ไม่ใช่ขั้นที่มีอยู่ตอนนี้
+	local nextLevel = data.damageLevel + 1
+	local cost = Config.getDamageUpgradeCost(nextLevel)
+	if not cost then
+		return false, "ซื้อครบเพดานของด่านนี้แล้ว — พังกำแพงด่านถัดไปก่อนถึงจะซื้อเพิ่มได้"
+	end
+	if data.currency.coins < cost then
+		return false, "เงินไม่พอ"
+	end
+
+	-- ⚠️ หักเงิน + เพิ่มขั้นต้องไม่มี yield คั่นกลาง (เหตุผลเดียวกับ upgradePen)
+	data.currency.coins -= cost
+	data.damageLevel = nextLevel
+
+	EggService.sync(player)
+
+	print(`[EggService] {player.Name} ซื้อตัวคูณ damage ขั้น {data.damageLevel}/{maxLevel} (จ่าย {cost} coins)`)
+	return true, nil
+end
+
+-- ⚠️ ไม่แตะ data.speedLevel นอกจากที่นี่ · เพดาน MAX_LEVEL = 5 ขั้น ตัดสินถาวร ห้ามขยาย (§8.8)
+function EggService.buySpeedUpgrade(player: Player): (boolean, string?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น"
+	end
+
+	-- ⚠️ getSpeedUpgradeCost รับ "ขั้นที่มีอยู่ตอนนี้" (0-indexed) ต่างจาก getDamageUpgradeCost
+	-- — ห้ามส่ง data.speedLevel + 1 เข้าไปเหมือนฝั่ง damage
+	local cost = Config.getSpeedUpgradeCost(data.speedLevel)
+	if not cost then
+		return false, "ซื้อครบเพดานความเร็วแล้ว"
+	end
+	if data.currency.coins < cost then
+		return false, "เงินไม่พอ"
+	end
+
+	data.currency.coins -= cost
+	data.speedLevel += 1
+
+	-- ⚠️ ต้องมีผลทันที ไม่ต้องรอ respawn — ผู้เล่นกดซื้อแล้วคาดว่าจะวิ่งเร็วขึ้นเลย
+	EggService.applyWalkSpeed(player)
+	EggService.sync(player)
+
+	print(`[EggService] {player.Name} ซื้อความเร็ววิ่งขั้น {data.speedLevel} (จ่าย {cost} coins)`)
 	return true, nil
 end
 
@@ -1227,6 +1327,8 @@ function EggService.start()
 	upgradePenRequest = Remotes.waitFor(Config.RemoteNames.UPGRADE_PEN_REQUEST)
 	sellMotherRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHER_REQUEST)
 	autoFillPenRequest = Remotes.waitFor(Config.RemoteNames.AUTO_FILL_PEN_REQUEST)
+	buyDamageUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_DAMAGE_UPGRADE_REQUEST)
+	buySpeedUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_SPEED_UPGRADE_REQUEST)
 	eggHatched = Remotes.waitFor(Config.RemoteNames.EGG_HATCHED)
 	farmStateSync = Remotes.waitFor(Config.RemoteNames.FARM_STATE_SYNC)
 	actionResult = Remotes.waitFor(Config.RemoteNames.ACTION_RESULT)
@@ -1288,6 +1390,30 @@ function EggService.start()
 		else
 			local penAfter = if data then #data.mothersInPen else penBefore
 			reportResult(player, true, `จัดแม่เข้าคอกสำเร็จ +{penAfter - penBefore} ตัว`)
+		end
+	end)
+
+	buyDamageUpgradeRequest.OnServerEvent:Connect(function(player)
+		local ok, reason = EggService.buyDamageUpgrade(player)
+		if not ok then
+			print(`[EggService] ปฏิเสธคำขอซื้อ damage upgrade ของ {player.Name}: {reason}`)
+			reportResult(player, false, reason or "ซื้อตัวคูณ damage ไม่สำเร็จ")
+		else
+			local data = dataOf(player)
+			local level = if data then data.damageLevel else nil
+			reportResult(player, true, `ซื้อตัวคูณ damage สำเร็จ → ขั้น {level}`)
+		end
+	end)
+
+	buySpeedUpgradeRequest.OnServerEvent:Connect(function(player)
+		local ok, reason = EggService.buySpeedUpgrade(player)
+		if not ok then
+			print(`[EggService] ปฏิเสธคำขอซื้อความเร็วของ {player.Name}: {reason}`)
+			reportResult(player, false, reason or "ซื้อความเร็วไม่สำเร็จ")
+		else
+			local data = dataOf(player)
+			local level = if data then data.speedLevel else nil
+			reportResult(player, true, `ซื้อความเร็วสำเร็จ → ขั้น {level}`)
 		end
 	end)
 

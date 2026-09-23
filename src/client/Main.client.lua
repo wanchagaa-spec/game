@@ -39,6 +39,9 @@ local actionResult = Remotes.waitFor(Config.RemoteNames.ACTION_RESULT)
 -- ⚠️ Phase 3B-1: สองตัวนี้สร้างไว้แล้วตั้งแต่ 3A (CombatService) — ต่อ UI จริงตอนนี้
 local setReleaseOrderRequest = Remotes.waitFor(Config.RemoteNames.SET_RELEASE_ORDER_REQUEST)
 local setSummonEnabledRequest = Remotes.waitFor(Config.RemoteNames.SET_SUMMON_ENABLED_REQUEST)
+-- ⚠️ ปุ่มติดตัว 2 ปุ่ม (damage/ความเร็ว) — ไม่มีแท่นวาปแล้ว จึงต้องกดซื้อได้จากทุกที่ ไม่ต้องเดินมาร้าน
+local buyDamageUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_DAMAGE_UPGRADE_REQUEST)
+local buySpeedUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_SPEED_UPGRADE_REQUEST)
 
 --------------------------------------------------------------------------------
 -- สร้าง UI
@@ -108,6 +111,47 @@ coinLabel.TextStrokeTransparency = 0.4
 coinLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 coinLabel.Text = "-"
 coinLabel.Parent = gui
+
+--------------------------------------------------------------------------------
+-- ปุ่มติดตัว 2 ปุ่ม: ซื้อตัวคูณ damage / ซื้อความเร็ววิ่ง (CLAUDE.md "แมพ" — ไม่ต้องเดินมาร้าน)
+-- ⚠️ อยู่นอกแผงที่ย่อ/ปิดได้เหมือน coinLabel — เป็นลูกของ `gui` ตรง ๆ ไม่ใช่ของ `panel`/`body`
+-- วางซ้อนอยู่เหนือ coinLabel มุมล่างขวา
+--------------------------------------------------------------------------------
+
+local UPGRADE_ACTION_BUTTON_HEIGHT = 44
+local UPGRADE_ACTION_BUTTON_WIDTH = 420
+local UPGRADE_ACTION_BUTTON_GAP = 8
+
+local function makePersistentActionButton(name: string, bottomOffset: number): TextButton
+	local button = Instance.new("TextButton")
+	button.Name = name
+	button.AnchorPoint = Vector2.new(1, 1)
+	button.Position = UDim2.new(1, -16, 1, bottomOffset)
+	button.Size = UDim2.new(0, UPGRADE_ACTION_BUTTON_WIDTH, 0, UPGRADE_ACTION_BUTTON_HEIGHT)
+	button.BackgroundColor3 = ACCENT
+	button.BorderSizePixel = 0
+	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.TextSize = 16
+	button.Font = Enum.Font.SourceSansBold
+	button.Text = "กำลังโหลด..."
+	button.AutoButtonColor = true
+	button.TextStrokeTransparency = 0.6
+	button.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	button.Parent = gui
+
+	local buttonCorner = Instance.new("UICorner")
+	buttonCorner.CornerRadius = UDim.new(0, 8)
+	buttonCorner.Parent = button
+
+	return button
+end
+
+-- ⚠️ coinLabel กิน 72 px จากขอบล่าง (Position -16, Size 72) — วางปุ่มไล่ขึ้นไปเหนือมันโดยไม่ทับ
+local SPEED_BUTTON_BOTTOM = -16 - 72 - UPGRADE_ACTION_BUTTON_GAP
+local DAMAGE_BUTTON_BOTTOM = SPEED_BUTTON_BOTTOM - UPGRADE_ACTION_BUTTON_HEIGHT - UPGRADE_ACTION_BUTTON_GAP
+
+local buyDamageUpgradeButton = makePersistentActionButton("BuyDamageUpgrade", DAMAGE_BUTTON_BOTTOM)
+local buySpeedUpgradeButton = makePersistentActionButton("BuySpeedUpgrade", SPEED_BUTTON_BOTTOM)
 
 -- ⚠️ ใส่ comma คั่นหลักพันเอง (ไม่มีให้ในตัวภาษา) — เฉพาะจำนวนเต็ม ไม่ต้องรองรับทศนิยม เพราะ
 -- currency.coins ทั้งเกมเป็นจำนวนเต็มเสมอ (math.floor ตอนคำนวณราคาทุกจุด) — ข้อ 4: โชว์เต็ม ไม่ย่อ
@@ -889,6 +933,50 @@ local function updateUpgradePenButton()
 	end
 end
 
+-- ⚠️ ปุ่มติดตัว damage/ความเร็ว — เพดานเป็น nil = เต็มแล้ว เหมือนกันกับ penUpgradeCost ด้านบน
+-- แสดง "เต็มเพดานแล้ว" ต่างข้อความกันตามสาเหตุ (damage ติดเพดานด่าน ≠ ความเร็วติดเพดาน 5 ขั้นถาวร)
+local function updateUpgradeButtons()
+	if not lastPayload then
+		return
+	end
+
+	if lastPayload.damageUpgradeCost then
+		buyDamageUpgradeButton.Text = `⚔ Damage ×{string.format("%.2f", lastPayload.damageMultiplier)} `
+			.. `(ขั้น {lastPayload.damageLevel}/{lastPayload.maxDamageLevel}) → ฿{formatCommaNumber(lastPayload.damageUpgradeCost)}`
+		buyDamageUpgradeButton.Active = true
+		buyDamageUpgradeButton.AutoButtonColor = true
+		buyDamageUpgradeButton.BackgroundColor3 = ACCENT
+	else
+		buyDamageUpgradeButton.Text = `⚔ Damage ×{string.format("%.2f", lastPayload.damageMultiplier)} `
+			.. `(ขั้น {lastPayload.damageLevel}/{lastPayload.maxDamageLevel}) — เต็มเพดานด่านนี้แล้ว`
+		buyDamageUpgradeButton.Active = false
+		buyDamageUpgradeButton.AutoButtonColor = false
+		buyDamageUpgradeButton.BackgroundColor3 = DISABLED_ACTION_COLOR
+	end
+
+	if lastPayload.speedUpgradeCost then
+		buySpeedUpgradeButton.Text = `👟 ความเร็ว {math.floor(lastPayload.walkSpeed)} `
+			.. `(ขั้น {lastPayload.speedLevel}/{lastPayload.maxSpeedLevel}) → ฿{formatCommaNumber(lastPayload.speedUpgradeCost)}`
+		buySpeedUpgradeButton.Active = true
+		buySpeedUpgradeButton.AutoButtonColor = true
+		buySpeedUpgradeButton.BackgroundColor3 = ACCENT
+	else
+		buySpeedUpgradeButton.Text = `👟 ความเร็ว {math.floor(lastPayload.walkSpeed)} `
+			.. `(ขั้น {lastPayload.speedLevel}/{lastPayload.maxSpeedLevel}) — เต็มเพดานแล้ว`
+		buySpeedUpgradeButton.Active = false
+		buySpeedUpgradeButton.AutoButtonColor = false
+		buySpeedUpgradeButton.BackgroundColor3 = DISABLED_ACTION_COLOR
+	end
+end
+
+buyDamageUpgradeButton.Activated:Connect(function()
+	buyDamageUpgradeRequest:FireServer()
+end)
+
+buySpeedUpgradeButton.Activated:Connect(function()
+	buySpeedUpgradeRequest:FireServer()
+end)
+
 renderActiveTab = function(preserveScroll: boolean?)
 	local keepScroll = preserveScroll ~= false
 	local savedCanvasPosition = gridScroll.CanvasPosition
@@ -1178,6 +1266,7 @@ end)
 farmStateSync.OnClientEvent:Connect(function(payload)
 	lastPayload = payload
 	coinLabel.Text = formatCommaNumber(payload.coins)
+	updateUpgradeButtons()
 
 	-- ⚠️ Phase 3B-1: กำแพง (WallRenderer) กับโมเดลทหาร (TroopRenderer) อ่านจากของจริงที่ sync
 	-- มานี้เสมอ ไม่ใช่ default อีกต่อไป — อัปเดตทุกครั้งที่ sync มาใหม่ (real-time ตามที่กำลังตีอยู่)

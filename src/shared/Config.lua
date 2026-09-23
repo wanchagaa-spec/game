@@ -518,6 +518,14 @@ Config.RemoteNames = {
 	-- client → server : FireServer(enabled: boolean) — เปิด/ปิดปุ่มอัญเชิญ (data.summonEnabled)
 	SET_SUMMON_ENABLED_REQUEST = "SetSummonEnabledRequest",
 
+	-- client → server : FireServer() — ไม่มีพารามิเตอร์ ซื้อขั้นถัดไปเสมอ (data.damageLevel + 1)
+	-- ราคา/เพดานคำนวณฝั่ง server ทั้งหมดจาก Config.getDamageUpgradeCost / getMaxDamageLevel
+	BUY_DAMAGE_UPGRADE_REQUEST = "BuyDamageUpgradeRequest",
+
+	-- client → server : FireServer() — ไม่มีพารามิเตอร์ ซื้อขั้นถัดไปเสมอ (data.speedLevel + 1)
+	-- ⚠️ ซื้อสำเร็จแล้วต้องมีผลกับ Humanoid.WalkSpeed ทันที ไม่ต้องรอ respawn
+	BUY_SPEED_UPGRADE_REQUEST = "BuySpeedUpgradeRequest",
+
 	-- server → client : { slotIndex, eggId, charId, charName, class, weight, placedIn }
 	EGG_HATCHED = "EggHatched",
 

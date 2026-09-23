@@ -81,14 +81,16 @@ if Players.MaxPlayers ~= Config.World.MAX_PENS then
 	)
 end
 
--- ⚠️ ความเร็ววิ่งของผู้เล่นต้องตรงกับ Config.MapDimensions.Player.WalkSpeed
+-- ⚠️ ความเร็ว**ฐาน**ของผู้เล่นต้องตรงกับ Config.MapDimensions.Player.WalkSpeed
 -- ตั้งไว้ที่ StarterPlayer.CharacterWalkSpeed ใน default.project.json (ไม่ได้ตั้งตอน CharacterAdded)
--- เพราะ:
---   · Roblox ใส่ค่าให้ตั้งแต่ตอนสร้าง Humanoid = ไม่มีจังหวะที่ผู้เล่นวิ่งช้าแล้วค่อยเร็วขึ้น
---   · ไม่ต้องต่อ event และไม่ต้องจำว่าต้องตั้งซ้ำทุกครั้งที่ตาย
---   · แก้ได้จาก Studio โดยไม่ต้องรันเกม = ลองค่าใหม่ง่าย
+-- เพราะ Roblox ใส่ค่าให้ตั้งแต่ตอนสร้าง Humanoid = ไม่ต้องต่อ event สำหรับค่าฐานที่ไม่เปลี่ยน
+-- และแก้ได้จาก Studio โดยไม่ต้องรันเกม = ลองค่าใหม่ง่าย
 -- แต่ **เช็คซ้ำตอนบูต** ด้วยเหตุผลเดียวกับ MaxPlayers: ค่านี้แก้จาก Studio ทับไฟล์ได้
 -- และถ้ามันไม่ตรง ตัวเลขเวลาเดินทุกตัวที่ประเมินขนาดแมพไว้จะผิดหมดโดยไม่มีใครรู้
+--
+-- ⚠️ ตัวคูณจาก `speedLevel` ที่ซื้อด้วยเงิน (§8.8) เป็นคนละชั้นกับค่าฐานนี้ — ต่างจากค่าฐาน
+-- ตัวคูณนี้**ต้องตั้งซ้ำทุกครั้งที่ CharacterAdded** เพราะ Humanoid ใหม่ทุกตัวรีเซ็ตกลับไปที่ค่า
+-- ฐานของ StarterPlayer เสมอ (ดู `EggService.applyWalkSpeed` + hook ท้ายไฟล์นี้)
 if StarterPlayer.CharacterWalkSpeed ~= Config.MapDimensions.Player.WalkSpeed then
 	warn(
 		`[Main] ⚠️ CharacterWalkSpeed = {StarterPlayer.CharacterWalkSpeed} แต่ Config ตั้งไว้ `
@@ -164,11 +166,23 @@ local function onPlayerAdded(player: Player)
 		warn(`[Main] คอกเต็ม ให้คอกกับ {player.Name} ไม่ได้ — Config.World.MAX_PENS ต้องเท่ากับจำนวนผู้เล่นสูงสุด`)
 	end
 
+	-- ⚠️ ต่อก่อนรอโหลดข้อมูลจบ — LoadAsync (DataStore) ช้ากว่า MapBuilder เสร็จมาก
+	-- ตัวละครเกิดไปแล้วก่อนข้อมูล speedLevel พร้อมได้ง่าย ๆ ต่อ event ไว้ก่อนกันพลาดจังหวะนั้น
+	-- ⚠️ ต้องต่อทุกครั้งที่ตายด้วย ไม่ใช่แค่ตอนเข้าเกม — Roblox รีเซ็ต WalkSpeed กลับเป็นค่า
+	-- default ของ StarterPlayer ทุกครั้งที่ Humanoid ใหม่ถูกสร้าง (docs/data-schema.md §8.8)
+	player.CharacterAdded:Connect(function()
+		EggService.applyWalkSpeed(player)
+	end)
+
 	-- ต้องเรียกหลังจองคอกแล้ว เพราะไข่กับแม่ต้องมีคอกให้วางก่อน
 	-- ⚠️ คืน false = โหลดข้อมูลไม่สำเร็จและผู้เล่นถูกเตะไปแล้ว — คืนคอกให้คนถัดไปด้วย
 	if not EggService.onPlayerAdded(player) then
 		PenService.release(player)
+		return
 	end
+
+	-- เผื่อตัวละครเกิดไปแล้วก่อนข้อมูลโหลดเสร็จ (เข้าคิว CharacterAdded ไปแล้วตอนยังไม่มีข้อมูลให้อ่าน)
+	EggService.applyWalkSpeed(player)
 end
 
 local function onPlayerRemoving(player: Player)

@@ -117,23 +117,28 @@ coinLabel.Parent = gui
 --------------------------------------------------------------------------------
 -- ปุ่มติดตัว 2 ปุ่ม: ซื้อตัวคูณ damage / ซื้อความเร็ววิ่ง (CLAUDE.md "แมพ" — ไม่ต้องเดินมาร้าน)
 -- ⚠️ อยู่นอกแผงที่ย่อ/ปิดได้เหมือน coinLabel — เป็นลูกของ `gui` ตรง ๆ ไม่ใช่ของ `panel`/`body`
--- วางซ้อนอยู่เหนือ coinLabel มุมล่างขวา
+-- ⚠️ เดิมวางซ้อนแนวตั้ง 2 แถบเต็มความกว้าง 420 (ทดสอบเกมจริงแล้วว่าใหญ่เกินไป) เปลี่ยนเป็นคู่กัน
+-- แนวนอน กะทัดรัดขึ้นมาก เหนือ coinLabel มุมล่างขวา — ข้อความ 2 บรรทัดต่อปุ่มแทน (บรรทัดบน
+-- = ตัวคูณ/ความเร็ว + ขั้น · บรรทัดล่าง = ราคา) ข้อมูลเดิมยังอ่านได้ครบ แค่แบ่งบรรทัดแทน
 --------------------------------------------------------------------------------
 
-local UPGRADE_ACTION_BUTTON_HEIGHT = 44
-local UPGRADE_ACTION_BUTTON_WIDTH = 420
+local UPGRADE_ACTION_BUTTON_HEIGHT = 50
+local UPGRADE_ACTION_BUTTON_WIDTH = 190
 local UPGRADE_ACTION_BUTTON_GAP = 8
+-- ⚠️ coinLabel กิน 72 px จากขอบล่าง (Position -16, Size 72) — วางแถวปุ่มไว้เหนือมันโดยไม่ทับ
+local UPGRADE_ROW_BOTTOM = -16 - 72 - UPGRADE_ACTION_BUTTON_GAP
 
-local function makePersistentActionButton(name: string, bottomOffset: number): TextButton
+local function makePersistentActionButton(name: string, rightOffset: number): TextButton
 	local button = Instance.new("TextButton")
 	button.Name = name
 	button.AnchorPoint = Vector2.new(1, 1)
-	button.Position = UDim2.new(1, -16, 1, bottomOffset)
+	button.Position = UDim2.new(1, rightOffset, 1, UPGRADE_ROW_BOTTOM)
 	button.Size = UDim2.new(0, UPGRADE_ACTION_BUTTON_WIDTH, 0, UPGRADE_ACTION_BUTTON_HEIGHT)
 	button.BackgroundColor3 = ACCENT
 	button.BorderSizePixel = 0
 	button.TextColor3 = Color3.fromRGB(255, 255, 255)
-	button.TextSize = 16
+	button.TextSize = 13
+	button.TextWrapped = true
 	button.Font = Enum.Font.SourceSansBold
 	button.Text = "กำลังโหลด..."
 	button.AutoButtonColor = true
@@ -148,12 +153,11 @@ local function makePersistentActionButton(name: string, bottomOffset: number): T
 	return button
 end
 
--- ⚠️ coinLabel กิน 72 px จากขอบล่าง (Position -16, Size 72) — วางปุ่มไล่ขึ้นไปเหนือมันโดยไม่ทับ
-local SPEED_BUTTON_BOTTOM = -16 - 72 - UPGRADE_ACTION_BUTTON_GAP
-local DAMAGE_BUTTON_BOTTOM = SPEED_BUTTON_BOTTOM - UPGRADE_ACTION_BUTTON_HEIGHT - UPGRADE_ACTION_BUTTON_GAP
+local SPEED_BUTTON_RIGHT = -16
+local DAMAGE_BUTTON_RIGHT = -16 - UPGRADE_ACTION_BUTTON_WIDTH - UPGRADE_ACTION_BUTTON_GAP
 
-local buyDamageUpgradeButton = makePersistentActionButton("BuyDamageUpgrade", DAMAGE_BUTTON_BOTTOM)
-local buySpeedUpgradeButton = makePersistentActionButton("BuySpeedUpgrade", SPEED_BUTTON_BOTTOM)
+local buyDamageUpgradeButton = makePersistentActionButton("BuyDamageUpgrade", DAMAGE_BUTTON_RIGHT)
+local buySpeedUpgradeButton = makePersistentActionButton("BuySpeedUpgrade", SPEED_BUTTON_RIGHT)
 
 -- ⚠️ ใส่ comma คั่นหลักพันเอง (ไม่มีให้ในตัวภาษา) — เฉพาะจำนวนเต็ม ไม่ต้องรองรับทศนิยม เพราะ
 -- currency.coins ทั้งเกมเป็นจำนวนเต็มเสมอ (math.floor ตอนคำนวณราคาทุกจุด) — ข้อ 4: โชว์เต็ม ไม่ย่อ
@@ -510,23 +514,71 @@ local function addInfoRow(text: string, emphasized: boolean?, color: Color3?)
 	label.Parent = gridScroll
 end
 
--- แถบความคืบหน้า (progress bar) ใช้กับ % ทหารฝ่ายรับ/% กำแพงเหลือในแท็บ "ลูก" (Phase 3B-1)
--- ⚠️ ตั้งชื่อ "Row" เหมือน addInfoRow/addButtonRow เพื่อให้ clearGrid() ล้างออกพร้อมกันได้
+-- สไตล์แถบความคืบหน้า (progress bar) — ใช้กับหลอด % ทหารฝ่ายรับ/% กำแพงเหลือใน combatHud
+-- ด้านล่าง (ย้ายออกจากกริดในแท็บ "ลูก" มาไว้ที่ HUD ถาวรนอกแผงแล้ว — ดูคอมเมนต์ตรงนั้น)
 local PROGRESS_BAR_HEIGHT = 20
 local PROGRESS_BG_COLOR = Color3.fromRGB(50, 54, 62)
 
-local function addProgressBar(label: string, ratio: number, fillColor: Color3?)
-	rowOrder += 1
-	local clamped = math.clamp(ratio, 0, 1)
+--------------------------------------------------------------------------------
+-- HUD สถานะการรบ — หลอด HP ทหารฝ่ายรับ/กำแพง + จำนวนทหารรวมในคลัง
+-- ⚠️ ทดสอบเกมจริงแล้วว่าเดิมของ 3 อย่างนี้ (หลอด 2 แถบ + ตัวเลขคลัง) อยู่ใน renderCombatSection()
+-- ของแท็บ "ลูก" เท่านั้น — ต้องเปิดแผง + สลับมาแท็บนั้นถึงจะเห็น ย้ายออกมาไว้นอกแผงที่ย่อ/ปิดได้
+-- (เป็นลูกของ `gui` ตรง ๆ เหมือน coinLabel) ให้เห็นตลอดเวลาโดยไม่ต้องเปิดอะไรเลย
+-- ⚠️ หลอดกำแพงเดิมตั้งใจให้โชว์เฉพาะตอนทหารฝ่ายรับหมดแล้ว (defendersCleared) — เปลี่ยนเป็นโชว์
+-- คู่กับหลอดทหารฝ่ายรับตลอดเวลาตั้งแต่เริ่มด่าน (เต็ม 100% ถ้ายังไม่โดนตี) ให้เห็นเป้าหมายถัดไป
+-- ล่วงหน้า · ค่าที่แสดงยังอ่านจาก stageProgress ของ payload.activeStage เหมือนเดิมทุกประการ
+--------------------------------------------------------------------------------
 
+local combatHud = Instance.new("Frame")
+combatHud.Name = "CombatHud"
+combatHud.AnchorPoint = Vector2.new(1, 0)
+combatHud.Position = UDim2.new(1, -16, 0, 16)
+combatHud.Size = UDim2.new(0, 260, 0, 108)
+combatHud.BackgroundColor3 = BG
+combatHud.BackgroundTransparency = 0.15
+combatHud.BorderSizePixel = 0
+combatHud.Parent = gui
+
+local combatHudCorner = Instance.new("UICorner")
+combatHudCorner.CornerRadius = UDim.new(0, 8)
+combatHudCorner.Parent = combatHud
+
+local combatHudPadding = Instance.new("UIPadding")
+combatHudPadding.PaddingTop = UDim.new(0, 8)
+combatHudPadding.PaddingBottom = UDim.new(0, 8)
+combatHudPadding.PaddingLeft = UDim.new(0, 10)
+combatHudPadding.PaddingRight = UDim.new(0, 10)
+combatHudPadding.Parent = combatHud
+
+local combatHudLayout = Instance.new("UIListLayout")
+combatHudLayout.Padding = UDim.new(0, 4)
+combatHudLayout.SortOrder = Enum.SortOrder.LayoutOrder
+combatHudLayout.Parent = combatHud
+
+local combatHudStageLabel = Instance.new("TextLabel")
+combatHudStageLabel.Name = "Stage"
+combatHudStageLabel.LayoutOrder = 1
+combatHudStageLabel.Size = UDim2.new(1, 0, 0, 18)
+combatHudStageLabel.BackgroundTransparency = 1
+combatHudStageLabel.TextColor3 = FG
+combatHudStageLabel.TextXAlignment = Enum.TextXAlignment.Left
+combatHudStageLabel.TextSize = 13
+combatHudStageLabel.Font = Enum.Font.SourceSansBold
+combatHudStageLabel.Text = "-"
+combatHudStageLabel.Parent = combatHud
+
+-- แถบพื้นหลัง+ส่วนเติม+ข้อความสไตล์เดียวกับที่เคยใช้ในกริด (PROGRESS_BAR_HEIGHT/PROGRESS_BG_COLOR
+-- ด้านบน) แต่คืน handle ของ Fill/Text ไว้แก้ค่าซ้ำทุก sync แทนที่จะสร้าง Instance ใหม่ทุกครั้ง
+-- (combatHud มีแค่ 2 แถบคงที่ ไม่ใช่รายการยาวไม่คงที่แบบในกริดที่ต้องล้าง/สร้างใหม่ทุกครั้ง)
+local function makeHudBar(order: number, fillColor: Color3): (Frame, TextLabel)
 	local row = Instance.new("Frame")
-	row.Name = "Row"
-	row.LayoutOrder = rowOrder
+	row.Name = "Bar"
+	row.LayoutOrder = order
 	row.Size = UDim2.new(1, 0, 0, PROGRESS_BAR_HEIGHT)
 	row.BackgroundColor3 = PROGRESS_BG_COLOR
 	row.BorderSizePixel = 0
 	row.ClipsDescendants = true
-	row.Parent = gridScroll
+	row.Parent = combatHud
 
 	local rowCorner = Instance.new("UICorner")
 	rowCorner.CornerRadius = UDim.new(0, 4)
@@ -534,8 +586,8 @@ local function addProgressBar(label: string, ratio: number, fillColor: Color3?)
 
 	local fill = Instance.new("Frame")
 	fill.Name = "Fill"
-	fill.Size = UDim2.new(clamped, 0, 1, 0)
-	fill.BackgroundColor3 = fillColor or ACCENT
+	fill.Size = UDim2.new(0, 0, 1, 0)
+	fill.BackgroundColor3 = fillColor
 	fill.BorderSizePixel = 0
 	fill.Parent = row
 
@@ -546,9 +598,35 @@ local function addProgressBar(label: string, ratio: number, fillColor: Color3?)
 	text.TextStrokeTransparency = 0.4
 	text.TextSize = 12
 	text.Font = Enum.Font.SourceSansBold
-	text.Text = `{label}: {math.floor(clamped * 100)}%`
+	text.Text = ""
 	text.Parent = row
+
+	return fill, text
 end
+
+local defendersHudFill, defendersHudText = makeHudBar(2, ACCENT)
+local wallHudFill, wallHudText = makeHudBar(3, ERROR_COLOR)
+
+local combatHudStockpileLabel = Instance.new("TextLabel")
+combatHudStockpileLabel.Name = "Stockpile"
+combatHudStockpileLabel.LayoutOrder = 4
+combatHudStockpileLabel.Size = UDim2.new(1, 0, 0, 18)
+combatHudStockpileLabel.BackgroundTransparency = 1
+combatHudStockpileLabel.TextColor3 = DIM
+combatHudStockpileLabel.TextXAlignment = Enum.TextXAlignment.Left
+combatHudStockpileLabel.TextSize = 13
+combatHudStockpileLabel.Font = Enum.Font.SourceSans
+combatHudStockpileLabel.Text = "-"
+combatHudStockpileLabel.Parent = combatHud
+
+local function setHudBar(fill: Frame, text: TextLabel, label: string, ratio: number)
+	local clamped = math.clamp(ratio, 0, 1)
+	fill.Size = UDim2.new(clamped, 0, 1, 0)
+	text.Text = `{label}: {math.floor(clamped * 100)}%`
+end
+
+-- ⚠️ updateCombatHud() (เรียกทุก sync เหมือน updateUpgradeButtons) อยู่ถัดจาก `local lastPayload`
+-- ข้างล่าง (นอก scope นี้ยังไม่มี lastPayload ให้ใช้ — ลำดับไฟล์สำคัญ)
 
 -- แถวปุ่มกดได้เต็มความกว้าง ใช้กับปุ่มเฉพาะแท็บ (จัดแม่อัตโนมัติ/ขาย) ที่อยู่ในเนื้อหาของแท็บ
 -- "กระเป๋า" เท่านั้น แทนที่จะเป็นแถวถาวรนอกกริดที่โผล่ทุกแท็บ — ใช้ชื่อ "Row" เหมือน addInfoRow
@@ -813,34 +891,12 @@ local function renderEggsTab()
 	end
 end
 
--- ⚠️ Phase 3B-1: สถานะการรบ (CombatService 3A คำนวณทั้งหมด ที่นี่แค่แสดงผล) — % ทหารฝ่ายรับ
--- เหลือ, % กำแพงเหลือ (โชว์เฉพาะตอนทหารฝ่ายรับหมดแล้ว), จำนวนทหารรวมในคลัง, ปุ่มอัญเชิญ,
+-- ⚠️ Phase 3B-1: สถานะการรบ (CombatService 3A คำนวณทั้งหมด ที่นี่แค่แสดงผล) — ปุ่มอัญเชิญ
 -- และแจ้งเตือนถ้า auto-pause ทำงาน (แยกจากตอนผู้เล่นปิดปุ่มเอง)
+-- ⚠️ หลอด HP (ทหารฝ่ายรับ/กำแพง) + ตัวเลขทหารรวมในคลัง ย้ายไปอยู่ที่ combatHud (นอกแผง เห็น
+-- ตลอดเวลา) แล้ว — เหลือแค่ส่วนที่เป็น "การกระทำ" (ปุ่มอัญเชิญ) กับแจ้งเตือน auto-pause ที่ยัง
+-- อยู่ในแท็บนี้ตามเดิม เพราะเป็นของที่ต้องกดเลือก ไม่ใช่แค่ข้อมูลอ่านอย่างเดียว
 local function renderCombatSection()
-	local activeStage = lastPayload.activeStage
-	if not activeStage then
-		addInfoRow("ผ่านครบทุกด่านแล้ว! ไม่มีอะไรให้ตีต่อ", true, SUCCESS_COLOR)
-	else
-		local info = lastPayload.stageProgress[activeStage]
-		local defendersRatio = 1
-		local wallRatio = 1
-		local defendersCleared = false
-		if info.started then
-			defendersCleared = info.defendersRemaining <= 0
-			defendersRatio = if info.defendersTotal > 0 then info.defendersRemaining / info.defendersTotal else 0
-			wallRatio = if info.wallHpTotal > 0 then info.wallHpRemaining / info.wallHpTotal else 1
-		else
-			-- ยังไม่เคยแตะด่านนี้ (false) = ยังเต็ม 100% ทั้งคู่
-			defendersCleared = false
-		end
-
-		addInfoRow(`กำลังตีด่าน {activeStage}`, true)
-		addProgressBar("ทหารฝ่ายรับ", defendersRatio)
-		if defendersCleared then
-			addProgressBar("กำแพง", wallRatio, ERROR_COLOR)
-		end
-	end
-
 	if lastPayload.combatAutoPaused then
 		addInfoRow("⚠️ ตีไม่เข้า — หยุดปล่อยอัตโนมัติ กดเปิดอัญเชิญใหม่เมื่อพร้อม", true, ERROR_COLOR)
 	end
@@ -853,12 +909,6 @@ local function renderCombatSection()
 			setSummonEnabledRequest:FireServer(not lastPayload.summonEnabled)
 		end
 	)
-
-	local totalStock = 0
-	for _, stack in lastPayload.children do
-		totalStock += stack.count
-	end
-	addInfoRow(`ทหารรวมในคลัง: {formatCommaNumber(totalStock)} ตัว`, true)
 end
 
 -- ⚠️ แท็บลูก — โชว์สถานะการรบ (ข้างบน) ต่อด้วยกองลูกดิบทั้งหมด (ข้างล่าง) ดูอย่างเดียว
@@ -935,6 +985,42 @@ local function updateUpgradePenButton()
 	end
 end
 
+-- ⚠️ เรียกทุกครั้งที่ sync มาใหม่ (เหมือน updateUpgradeButtons ด้านล่าง) — ผลรวมทหารในคลังใช้
+-- สูตรเดียวกับที่ renderCombatSection เดิมเคยคำนวณ (ผลรวม count ของทุกกองใน lastPayload.children)
+local function updateCombatHud()
+	if not lastPayload then
+		return
+	end
+
+	local activeStage = lastPayload.activeStage
+	if not activeStage then
+		combatHudStageLabel.Text = "ผ่านครบทุกด่านแล้ว!"
+		combatHudStageLabel.TextColor3 = SUCCESS_COLOR
+		setHudBar(defendersHudFill, defendersHudText, "ทหารฝ่ายรับ", 0)
+		setHudBar(wallHudFill, wallHudText, "กำแพง", 0)
+	else
+		combatHudStageLabel.Text = `กำลังตีด่าน {activeStage}`
+		combatHudStageLabel.TextColor3 = FG
+
+		local info = lastPayload.stageProgress[activeStage]
+		local defendersRatio = 1
+		local wallRatio = 1
+		if info.started then
+			defendersRatio = if info.defendersTotal > 0 then info.defendersRemaining / info.defendersTotal else 0
+			wallRatio = if info.wallHpTotal > 0 then info.wallHpRemaining / info.wallHpTotal else 1
+		end
+
+		setHudBar(defendersHudFill, defendersHudText, "ทหารฝ่ายรับ", defendersRatio)
+		setHudBar(wallHudFill, wallHudText, "กำแพง", wallRatio)
+	end
+
+	local totalStock = 0
+	for _, stack in lastPayload.children do
+		totalStock += stack.count
+	end
+	combatHudStockpileLabel.Text = `ทหารรวมในคลัง: {formatCommaNumber(totalStock)} ตัว`
+end
+
 -- ⚠️ ปุ่มติดตัว damage/ความเร็ว — เพดานเป็น nil = เต็มแล้ว เหมือนกันกับ penUpgradeCost ด้านบน
 -- แสดง "เต็มเพดานแล้ว" ต่างข้อความกันตามสาเหตุ (damage ติดเพดานด่าน ≠ ความเร็วติดเพดาน 5 ขั้นถาวร)
 local function updateUpgradeButtons()
@@ -942,29 +1028,31 @@ local function updateUpgradeButtons()
 		return
 	end
 
+	-- ⚠️ 2 บรรทัดต่อปุ่ม (บรรทัดบน = ตัวคูณ/ความเร็ว + ขั้น · บรรทัดล่าง = ราคา/สถานะ) แทนที่จะ
+	-- ยัดทุกอย่างบรรทัดเดียว — ให้กล่องแคบลงได้มากโดยข้อมูลยังอ่านได้ครบเหมือนเดิม
 	if lastPayload.damageUpgradeCost then
-		buyDamageUpgradeButton.Text = `⚔ Damage ×{string.format("%.2f", lastPayload.damageMultiplier)} `
-			.. `(ขั้น {lastPayload.damageLevel}/{lastPayload.maxDamageLevel}) → ฿{formatCommaNumber(lastPayload.damageUpgradeCost)}`
+		buyDamageUpgradeButton.Text = `⚔ ×{string.format("%.2f", lastPayload.damageMultiplier)} `
+			.. `({lastPayload.damageLevel}/{lastPayload.maxDamageLevel})\n฿{formatCommaNumber(lastPayload.damageUpgradeCost)}`
 		buyDamageUpgradeButton.Active = true
 		buyDamageUpgradeButton.AutoButtonColor = true
 		buyDamageUpgradeButton.BackgroundColor3 = ACCENT
 	else
-		buyDamageUpgradeButton.Text = `⚔ Damage ×{string.format("%.2f", lastPayload.damageMultiplier)} `
-			.. `(ขั้น {lastPayload.damageLevel}/{lastPayload.maxDamageLevel}) — เต็มเพดานด่านนี้แล้ว`
+		buyDamageUpgradeButton.Text = `⚔ ×{string.format("%.2f", lastPayload.damageMultiplier)} `
+			.. `({lastPayload.damageLevel}/{lastPayload.maxDamageLevel})\nเต็มเพดานด่านนี้`
 		buyDamageUpgradeButton.Active = false
 		buyDamageUpgradeButton.AutoButtonColor = false
 		buyDamageUpgradeButton.BackgroundColor3 = DISABLED_ACTION_COLOR
 	end
 
 	if lastPayload.speedUpgradeCost then
-		buySpeedUpgradeButton.Text = `👟 ความเร็ว {math.floor(lastPayload.walkSpeed)} `
-			.. `(ขั้น {lastPayload.speedLevel}/{lastPayload.maxSpeedLevel}) → ฿{formatCommaNumber(lastPayload.speedUpgradeCost)}`
+		buySpeedUpgradeButton.Text = `👟 {math.floor(lastPayload.walkSpeed)} `
+			.. `({lastPayload.speedLevel}/{lastPayload.maxSpeedLevel})\n฿{formatCommaNumber(lastPayload.speedUpgradeCost)}`
 		buySpeedUpgradeButton.Active = true
 		buySpeedUpgradeButton.AutoButtonColor = true
 		buySpeedUpgradeButton.BackgroundColor3 = ACCENT
 	else
-		buySpeedUpgradeButton.Text = `👟 ความเร็ว {math.floor(lastPayload.walkSpeed)} `
-			.. `(ขั้น {lastPayload.speedLevel}/{lastPayload.maxSpeedLevel}) — เต็มเพดานแล้ว`
+		buySpeedUpgradeButton.Text = `👟 {math.floor(lastPayload.walkSpeed)} `
+			.. `({lastPayload.speedLevel}/{lastPayload.maxSpeedLevel})\nเต็มเพดานแล้ว`
 		buySpeedUpgradeButton.Active = false
 		buySpeedUpgradeButton.AutoButtonColor = false
 		buySpeedUpgradeButton.BackgroundColor3 = DISABLED_ACTION_COLOR
@@ -1269,6 +1357,7 @@ farmStateSync.OnClientEvent:Connect(function(payload)
 	lastPayload = payload
 	coinLabel.Text = formatCommaNumber(payload.coins)
 	updateUpgradeButtons()
+	updateCombatHud()
 
 	-- ⚠️ Phase 3B-1: กำแพง (WallRenderer) กับโมเดลทหาร (TroopRenderer) อ่านจากของจริงที่ sync
 	-- มานี้เสมอ ไม่ใช่ default อีกต่อไป — อัปเดตทุกครั้งที่ sync มาใหม่ (real-time ตามที่กำลังตีอยู่)

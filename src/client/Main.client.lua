@@ -21,6 +21,7 @@ local Remotes = require(ReplicatedStorage.Shared.Remotes)
 -- และของข้างในไม่ได้มาถึงพร้อมกันเสมอ — สคริปต์นี้เริ่มทำงานได้ก่อนพี่น้องของมันจะมาครบ
 -- อ้างตรง ๆ แล้วเจอจังหวะนั้น = client พังตั้งแต่บรรทัดแรก UI ไม่ขึ้นเลยสักอย่าง
 local WallRenderer = require(script.Parent:WaitForChild("WallRenderer"))
+local TroopRenderer = require(script.Parent:WaitForChild("TroopRenderer"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -35,6 +36,9 @@ local farmStateSync = Remotes.waitFor(Config.RemoteNames.FARM_STATE_SYNC)
 -- ⚠️ server ส่งผลลัพธ์ (สำเร็จ/ล้มเหลว + เหตุผล) ของคำขอด้านบนกลับมาทางนี้
 -- ก่อนหน้านี้ผลลัพธ์ไปโผล่แค่ print ใน server console เท่านั้น ผู้เล่นไม่เห็นอะไรเลย
 local actionResult = Remotes.waitFor(Config.RemoteNames.ACTION_RESULT)
+-- ⚠️ Phase 3B-1: สองตัวนี้สร้างไว้แล้วตั้งแต่ 3A (CombatService) — ต่อ UI จริงตอนนี้
+local setReleaseOrderRequest = Remotes.waitFor(Config.RemoteNames.SET_RELEASE_ORDER_REQUEST)
+local setSummonEnabledRequest = Remotes.waitFor(Config.RemoteNames.SET_SUMMON_ENABLED_REQUEST)
 
 --------------------------------------------------------------------------------
 -- สร้าง UI
@@ -444,20 +448,60 @@ end
 
 local rowOrder = 0
 
-local function addInfoRow(text: string, emphasized: boolean?)
+local function addInfoRow(text: string, emphasized: boolean?, color: Color3?)
 	rowOrder += 1
 	local label = Instance.new("TextLabel")
 	label.Name = "Row"
 	label.LayoutOrder = rowOrder
 	label.Size = UDim2.new(1, 0, 0, 18)
 	label.BackgroundTransparency = 1
-	label.TextColor3 = if emphasized then DIM else FG
+	label.TextColor3 = color or (if emphasized then DIM else FG)
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.TextTruncate = Enum.TextTruncate.AtEnd
 	label.TextSize = 13
 	label.Font = if emphasized then Enum.Font.SourceSansBold else Enum.Font.SourceSans
 	label.Text = text
 	label.Parent = gridScroll
+end
+
+-- แถบความคืบหน้า (progress bar) ใช้กับ % ทหารฝ่ายรับ/% กำแพงเหลือในแท็บ "ลูก" (Phase 3B-1)
+-- ⚠️ ตั้งชื่อ "Row" เหมือน addInfoRow/addButtonRow เพื่อให้ clearGrid() ล้างออกพร้อมกันได้
+local PROGRESS_BAR_HEIGHT = 20
+local PROGRESS_BG_COLOR = Color3.fromRGB(50, 54, 62)
+
+local function addProgressBar(label: string, ratio: number, fillColor: Color3?)
+	rowOrder += 1
+	local clamped = math.clamp(ratio, 0, 1)
+
+	local row = Instance.new("Frame")
+	row.Name = "Row"
+	row.LayoutOrder = rowOrder
+	row.Size = UDim2.new(1, 0, 0, PROGRESS_BAR_HEIGHT)
+	row.BackgroundColor3 = PROGRESS_BG_COLOR
+	row.BorderSizePixel = 0
+	row.ClipsDescendants = true
+	row.Parent = gridScroll
+
+	local rowCorner = Instance.new("UICorner")
+	rowCorner.CornerRadius = UDim.new(0, 4)
+	rowCorner.Parent = row
+
+	local fill = Instance.new("Frame")
+	fill.Name = "Fill"
+	fill.Size = UDim2.new(clamped, 0, 1, 0)
+	fill.BackgroundColor3 = fillColor or ACCENT
+	fill.BorderSizePixel = 0
+	fill.Parent = row
+
+	local text = Instance.new("TextLabel")
+	text.Size = UDim2.new(1, 0, 1, 0)
+	text.BackgroundTransparency = 1
+	text.TextColor3 = Color3.fromRGB(255, 255, 255)
+	text.TextStrokeTransparency = 0.4
+	text.TextSize = 12
+	text.Font = Enum.Font.SourceSansBold
+	text.Text = `{label}: {math.floor(clamped * 100)}%`
+	text.Parent = row
 end
 
 -- แถวปุ่มกดได้เต็มความกว้าง ใช้กับปุ่มเฉพาะแท็บ (จัดแม่อัตโนมัติ/ขาย) ที่อยู่ในเนื้อหาของแท็บ
@@ -723,12 +767,63 @@ local function renderEggsTab()
 	end
 end
 
--- ⚠️ แท็บลูก — ดูอย่างเดียว ไม่มีปุ่มกระทำการ (ปล่อยทหารเป็นงานเฟสหลัง) แค่ไว้เช็คว่ากองลูก
--- (stack) รวมกันถูกต้องไหม — ลูกที่ตัวละคร+น้ำหนัก+สถานะเหมือนกันต้องรวมเป็นกองเดียว
+-- ⚠️ Phase 3B-1: สถานะการรบ (CombatService 3A คำนวณทั้งหมด ที่นี่แค่แสดงผล) — % ทหารฝ่ายรับ
+-- เหลือ, % กำแพงเหลือ (โชว์เฉพาะตอนทหารฝ่ายรับหมดแล้ว), จำนวนทหารรวมในคลัง, ปุ่มอัญเชิญ,
+-- และแจ้งเตือนถ้า auto-pause ทำงาน (แยกจากตอนผู้เล่นปิดปุ่มเอง)
+local function renderCombatSection()
+	local activeStage = lastPayload.activeStage
+	if not activeStage then
+		addInfoRow("ผ่านครบทุกด่านแล้ว! ไม่มีอะไรให้ตีต่อ", true, SUCCESS_COLOR)
+	else
+		local info = lastPayload.stageProgress[activeStage]
+		local defendersRatio = 1
+		local wallRatio = 1
+		local defendersCleared = false
+		if info.started then
+			defendersCleared = info.defendersRemaining <= 0
+			defendersRatio = if info.defendersTotal > 0 then info.defendersRemaining / info.defendersTotal else 0
+			wallRatio = if info.wallHpTotal > 0 then info.wallHpRemaining / info.wallHpTotal else 1
+		else
+			-- ยังไม่เคยแตะด่านนี้ (false) = ยังเต็ม 100% ทั้งคู่
+			defendersCleared = false
+		end
+
+		addInfoRow(`กำลังตีด่าน {activeStage}`, true)
+		addProgressBar("ทหารฝ่ายรับ", defendersRatio)
+		if defendersCleared then
+			addProgressBar("กำแพง", wallRatio, ERROR_COLOR)
+		end
+	end
+
+	if lastPayload.combatAutoPaused then
+		addInfoRow("⚠️ ตีไม่เข้า — หยุดปล่อยอัตโนมัติ กดเปิดอัญเชิญใหม่เมื่อพร้อม", true, ERROR_COLOR)
+	end
+
+	addButtonRow(
+		if lastPayload.summonEnabled then "ปิดอัญเชิญ (หยุดปล่อยทหาร สะสมในคลังแทน)" else "เปิดอัญเชิญ (ปล่อยทหารต่อเนื่อง)",
+		true,
+		ACCENT,
+		function()
+			setSummonEnabledRequest:FireServer(not lastPayload.summonEnabled)
+		end
+	)
+
+	local totalStock = 0
+	for _, stack in lastPayload.children do
+		totalStock += stack.count
+	end
+	addInfoRow(`ทหารรวมในคลัง: {formatCommaNumber(totalStock)} ตัว`, true)
+end
+
+-- ⚠️ แท็บลูก — โชว์สถานะการรบ (ข้างบน) ต่อด้วยกองลูกดิบทั้งหมด (ข้างล่าง) ดูอย่างเดียว
+-- ไม่มีปุ่มจัดลำดับปล่อยที่นี่ — จัดลำดับทำผ่านแผงแยกที่เปิดเมื่อเข้าใกล้จุดปล่อยทหาร
+-- (ดู renderReleaseOrderPanel) เพราะเป็นการตัดสินใจเชิงพื้นที่ ไม่ใช่ของที่ต้องดูตลอดเวลา
 local function renderChildrenTab()
 	if not lastPayload then
 		return
 	end
+
+	renderCombatSection()
 
 	local cards: { CardSpec } = {}
 	for _, stack in lastPayload.children do
@@ -829,6 +924,208 @@ renderActiveTab = function(preserveScroll: boolean?)
 end
 
 --------------------------------------------------------------------------------
+-- แผงจัดคิวปล่อยทหาร — เปิดเฉพาะตอนผู้เล่นเข้าใกล้จุดปล่อยทหาร (Phase 3B-1)
+--------------------------------------------------------------------------------
+-- ⚠️ แยกจากแผงหลักด้านบนตั้งใจ: การจัดลำดับปล่อยมีความหมายก็ต่อเมื่อยืนอยู่หน้าจุดปล่อย
+-- (เหมือนบอกทหารว่า "แถวไหนออกก่อน" ตอนกำลังจะส่งจริง) ไม่ใช่ของที่ต้องเปิดค้างตลอดเวลา
+-- เหมือนแท็บกระเป๋า/ไข่/ลูก จึงเป็น Frame แยก โผล่/หายตามระยะห่างจากจุดปล่อย ไม่ใช่แท็บ
+
+local RELEASE_ORDER_PROXIMITY = 30 -- studs — ระยะที่เริ่มโชว์แผงนี้
+local RELEASE_ROW_HEIGHT = 26
+
+local releasePanel = Instance.new("Frame")
+releasePanel.Name = "ReleaseOrderPanel"
+releasePanel.AnchorPoint = Vector2.new(0.5, 1)
+releasePanel.Position = UDim2.new(0.5, 0, 1, -100)
+releasePanel.Size = UDim2.new(0, 320, 0, 260)
+releasePanel.BackgroundColor3 = BG
+releasePanel.BackgroundTransparency = 0.1
+releasePanel.BorderSizePixel = 0
+releasePanel.Visible = false
+releasePanel.Parent = gui
+
+local releasePanelCorner = Instance.new("UICorner")
+releasePanelCorner.CornerRadius = UDim.new(0, 8)
+releasePanelCorner.Parent = releasePanel
+
+local releaseTitle = Instance.new("TextLabel")
+releaseTitle.Size = UDim2.new(1, -16, 0, 26)
+releaseTitle.Position = UDim2.new(0, 8, 0, 4)
+releaseTitle.BackgroundTransparency = 1
+releaseTitle.TextColor3 = FG
+releaseTitle.TextXAlignment = Enum.TextXAlignment.Left
+releaseTitle.TextSize = 15
+releaseTitle.Font = Enum.Font.SourceSansBold
+releaseTitle.Text = "จัดคิวปล่อยทหาร (หัวแถว = ปล่อยก่อน)"
+releaseTitle.Parent = releasePanel
+
+local releaseScroll = Instance.new("ScrollingFrame")
+releaseScroll.Name = "List"
+releaseScroll.Position = UDim2.new(0, 8, 0, 32)
+releaseScroll.Size = UDim2.new(1, -16, 1, -40)
+releaseScroll.BackgroundColor3 = Color3.fromRGB(20, 22, 26)
+releaseScroll.BackgroundTransparency = 0.2
+releaseScroll.BorderSizePixel = 0
+releaseScroll.ScrollBarThickness = 6
+releaseScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+releaseScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+releaseScroll.Parent = releasePanel
+
+local releaseScrollCorner = Instance.new("UICorner")
+releaseScrollCorner.CornerRadius = UDim.new(0, 6)
+releaseScrollCorner.Parent = releaseScroll
+
+local releaseScrollLayout = Instance.new("UIListLayout")
+releaseScrollLayout.Padding = UDim.new(0, 4)
+releaseScrollLayout.SortOrder = Enum.SortOrder.LayoutOrder
+releaseScrollLayout.Parent = releaseScroll
+
+local releaseScrollPadding = Instance.new("UIPadding")
+releaseScrollPadding.PaddingTop = UDim.new(0, 4)
+releaseScrollPadding.PaddingBottom = UDim.new(0, 4)
+releaseScrollPadding.PaddingLeft = UDim.new(0, 4)
+releaseScrollPadding.PaddingRight = UDim.new(0, 4)
+releaseScrollPadding.Parent = releaseScroll
+
+local function clearReleaseList()
+	for _, child in releaseScroll:GetChildren() do
+		if child.Name == "ReleaseRow" then
+			child:Destroy()
+		end
+	end
+end
+
+-- ⚠️ กองที่หมด (count=0/ไม่มีใน children) ยังค้างอยู่ใน releaseOrder ตามที่ CombatService (3A)
+-- ออกแบบไว้ (ไม่ลบ เผื่อผลิตเพิ่มมาเติมทีหลัง) — โชว์เป็น "(ว่าง)" แทนที่จะซ่อนทิ้งไป
+-- เพื่อให้ผู้เล่นยังเห็นและจัดลำดับล่วงหน้าได้ก่อนของจะมาเติม
+local function renderReleaseOrderPanel()
+	clearReleaseList()
+	if not lastPayload then
+		return
+	end
+
+	local order: { string } = lastPayload.releaseOrder
+	local byKey: { [string]: any } = {}
+	for _, stack in lastPayload.children do
+		byKey[stack.key] = stack
+	end
+
+	for index, key in order do
+		local stack = byKey[key]
+		local rowFrame = Instance.new("Frame")
+		rowFrame.Name = "ReleaseRow"
+		rowFrame.LayoutOrder = index
+		rowFrame.Size = UDim2.new(1, 0, 0, RELEASE_ROW_HEIGHT)
+		rowFrame.BackgroundColor3 = if index == 1 then ACCENT else Color3.fromRGB(46, 50, 58)
+		rowFrame.BorderSizePixel = 0
+		rowFrame.Parent = releaseScroll
+
+		local rowCorner = Instance.new("UICorner")
+		rowCorner.CornerRadius = UDim.new(0, 4)
+		rowCorner.Parent = rowFrame
+
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.new(1, -60, 1, 0)
+		label.Position = UDim2.new(0, 6, 0, 0)
+		label.BackgroundTransparency = 1
+		label.TextColor3 = Color3.fromRGB(255, 255, 255)
+		label.TextXAlignment = Enum.TextXAlignment.Left
+		label.TextTruncate = Enum.TextTruncate.AtEnd
+		label.TextSize = 12
+		label.Font = Enum.Font.SourceSans
+		label.Text = if stack
+			then `{stack.charName} {stack.weightText} × {formatCommaNumber(stack.count)}`
+			else `(ว่าง) {key}`
+		label.Parent = rowFrame
+
+		local upButton = Instance.new("TextButton")
+		upButton.Size = UDim2.new(0, 26, 0, 22)
+		upButton.Position = UDim2.new(1, -56, 0.5, -11)
+		upButton.BackgroundColor3 = if index > 1 then Color3.fromRGB(70, 74, 82) else DISABLED_ACTION_COLOR
+		upButton.BorderSizePixel = 0
+		upButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+		upButton.Text = "▲"
+		upButton.TextSize = 12
+		upButton.Active = index > 1
+		upButton.AutoButtonColor = index > 1
+		upButton.Parent = rowFrame
+
+		local downButton = Instance.new("TextButton")
+		downButton.Size = UDim2.new(0, 26, 0, 22)
+		downButton.Position = UDim2.new(1, -28, 0.5, -11)
+		downButton.BackgroundColor3 = if index < #order then Color3.fromRGB(70, 74, 82) else DISABLED_ACTION_COLOR
+		downButton.BorderSizePixel = 0
+		downButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+		downButton.Text = "▼"
+		downButton.TextSize = 12
+		downButton.Active = index < #order
+		downButton.AutoButtonColor = index < #order
+		downButton.Parent = rowFrame
+
+		-- ⚠️ ส่งลำดับใหม่ "ทั้งชุด" เสมอ (ไม่ใช่แค่ตำแหน่งที่สลับ) ตามที่ SetReleaseOrderRequest
+		-- ต้องการ (CombatService.validateReleaseOrder เช็คทั้งชุดแล้วแทนที่ทั้งก้อน)
+		upButton.Activated:Connect(function()
+			if index <= 1 then
+				return
+			end
+			local newOrder = table.clone(order)
+			newOrder[index], newOrder[index - 1] = newOrder[index - 1], newOrder[index]
+			setReleaseOrderRequest:FireServer(newOrder)
+		end)
+
+		downButton.Activated:Connect(function()
+			if index >= #order then
+				return
+			end
+			local newOrder = table.clone(order)
+			newOrder[index], newOrder[index + 1] = newOrder[index + 1], newOrder[index]
+			setReleaseOrderRequest:FireServer(newOrder)
+		end)
+	end
+
+	if #order == 0 then
+		local emptyLabel = Instance.new("TextLabel")
+		emptyLabel.Name = "ReleaseRow"
+		emptyLabel.Size = UDim2.new(1, 0, 0, RELEASE_ROW_HEIGHT)
+		emptyLabel.BackgroundTransparency = 1
+		emptyLabel.TextColor3 = DIM
+		emptyLabel.TextXAlignment = Enum.TextXAlignment.Left
+		emptyLabel.TextSize = 12
+		emptyLabel.Font = Enum.Font.SourceSans
+		emptyLabel.Text = "  (ยังไม่มีลูกเลย — ต้องมีแม่ในคอกก่อน)"
+		emptyLabel.Parent = releaseScroll
+	end
+end
+
+-- ⚠️ โพลระยะทางแทน RunService.Heartbeat — เป็นแค่ show/hide ไม่ต้องละเอียดระดับเฟรม
+-- (ดู Config.getLaneStartX/ReleasePadSize — จุดเดียวกับที่ MapBuilder วาง ReleasePad จริงฝั่ง server)
+task.spawn(function()
+	while true do
+		task.wait(0.25)
+
+		local character = player.Character
+		local near = false
+
+		if character then
+			local root = character.PrimaryPart
+			if root then
+				local pad =
+					Vector3.new(Config.getLaneStartX() + Config.MapDimensions.Lane.ReleasePadSize.X / 2, 0, 0)
+				local flat = Vector3.new(root.Position.X, pad.Y, root.Position.Z)
+				near = (flat - pad).Magnitude <= RELEASE_ORDER_PROXIMITY
+			end
+		end
+
+		if near ~= releasePanel.Visible then
+			releasePanel.Visible = near
+			if near then
+				renderReleaseOrderPanel()
+			end
+		end
+	end
+end)
+
+--------------------------------------------------------------------------------
 -- ต่อสาย
 --------------------------------------------------------------------------------
 
@@ -881,6 +1178,14 @@ end)
 farmStateSync.OnClientEvent:Connect(function(payload)
 	lastPayload = payload
 	coinLabel.Text = formatCommaNumber(payload.coins)
+
+	-- ⚠️ Phase 3B-1: กำแพง (WallRenderer) กับโมเดลทหาร (TroopRenderer) อ่านจากของจริงที่ sync
+	-- มานี้เสมอ ไม่ใช่ default อีกต่อไป — อัปเดตทุกครั้งที่ sync มาใหม่ (real-time ตามที่กำลังตีอยู่)
+	WallRenderer.setStageProgress(payload.stageProgress)
+	TroopRenderer.updateFromPayload(payload)
+	if releasePanel.Visible then
+		renderReleaseOrderPanel()
+	end
 
 	-- ⚠️ ของที่เลือกไว้อาจหายไปจาก payload ใหม่ (ขาย/ย้าย/ฟักไปแล้ว) — ถ้าไม่ตรวจ
 	-- ปุ่มจะยิง action ไปหาของที่ไม่มีอยู่แล้ว ต้องเคลียร์ selection ทิ้งก่อนเรนเดอร์
@@ -939,5 +1244,8 @@ end)
 -- (เหตุผลเต็มอยู่ใน src/client/WallRenderer.lua และ docs/map-layout.md)
 WallRenderer.start()
 
-print(`[egg-army-game] client พร้อมแล้ว · wallProgress ทดสอบ = {WallRenderer.getWallProgress()}`)
-print("   เปลี่ยนด่านที่พังแล้วเพื่อทดสอบ: WallRenderer.setWallProgress(n)")
+-- ⚠️ Phase 3B-1: โมเดลทหารฝ่ายเรา/ฝ่ายรับ วาดฝั่งนี้ด้วยเหตุผลเดียวกัน (ดู TroopRenderer.lua)
+TroopRenderer.start()
+
+print("[egg-army-game] client พร้อมแล้ว")
+print("   จำลองด่านที่พังแล้วเพื่อทดสอบกำแพง (ค่าจริงจาก sync จะเขียนทับทันที): WallRenderer.setWallProgress(n)")

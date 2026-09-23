@@ -13,13 +13,16 @@
 -- ⚠️ **ผลข้างเคียงที่ยอมรับแล้ว ไม่ต้องแก้**: จะเห็นคนอื่นเดินทะลุกำแพงที่ตัวเองยังพังไม่ได้
 -- บันทึกไว้ใน docs/map-layout.md แล้ว
 --
--- ══ Phase blockout ══
--- ยังไม่มี DataStore จึงอ่าน wallProgress จาก Config.Balance.NewPlayer ไปก่อน
--- เปลี่ยนค่าทดสอบได้ด้วย WallRenderer.setWallProgress(n) จาก command bar ฝั่ง client
--- Phase 2 ค่อยเปลี่ยนมารับจาก server ผ่าน RemoteEvent
+-- ══ Phase 3B-1 ══
+-- ⚠️ เดิม (blockout) อ่าน wallProgress จาก Config.Balance.NewPlayer ค่าคงที่ ไม่เคยรับค่าจริง
+-- จากเซิร์ฟเวอร์เลย — ตอนนี้รับ `stageProgress` จริงจาก FarmStateSync (CombatService 3A ใส่ไว้ใน
+-- payload ผ่าน CombatService.buildSyncFields) ทุกครั้งที่ sync มาใหม่ ผ่าน setStageProgress()
+-- (Main.client.lua เรียกจาก farmStateSync.OnClientEvent) ด่านที่ "พังเรียบร้อย"
+-- (defendersRemaining=0 และ wallHpRemaining=0 → entry.cleared=true) กำแพงหายไป ด่านที่ยังไม่ผ่าน
+-- กำแพงยังเต็ม (ยังไม่ทำรอยร้าวตาม % ในเฟสนี้ — เป็น 3B-2)
 --
--- ทหารฝ่ายรับกับกองทัพของผู้เล่นเองก็ต้องวาดฝั่ง client ด้วยเหตุผลเดียวกัน
--- (เห็นเฉพาะของตัวเอง) — ยังไม่ทำในเฟสนี้ แค่จองพื้นที่ไว้ในเลน
+-- ทหารฝ่ายรับกับกองทัพของผู้เล่นเองวาดฝั่ง client ด้วยเหตุผลเดียวกัน (เห็นเฉพาะของตัวเอง)
+-- อยู่ที่ src/client/TroopRenderer.lua (Phase 3B-1)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -35,7 +38,27 @@ local WALL_COLOR = Color3.fromRGB(126, 116, 104)
 local WALL_TOP_COLOR = Color3.fromRGB(154, 142, 126)
 
 local folder: Folder? = nil
-local currentProgress = Config.Balance.NewPlayer.wallProgress
+
+-- ⚠️ ก่อน sync ครั้งแรกมาถึง ยังไม่รู้ค่าจริงจากเซิร์ฟ — สมมติว่ายังไม่พังด่านไหนเลย (ทุกด่าน
+-- ยังเป็น false เหมือนผู้เล่นใหม่) ปลอดภัยกว่าสมมติว่าพังไปแล้ว: กำแพงเกินโผล่มาก่อนแล้วหายไป
+-- ทีหลังตอน sync จริงมาถึง ดูดีกว่ากำแพงขาดหายไปก่อนแล้วโผล่ขึ้นมาทีหลัง
+local currentStageProgress: { any } = {}
+for stage = 1, Config.Balance.Stage.COUNT do
+	currentStageProgress[stage] = false
+end
+
+-- ด่านนั้น "พังเรียบร้อย" ไหม จาก entry ที่ CombatService.buildSyncFields ส่งมาใน payload
+-- ⚠️ entry เป็นได้สามแบบ: `false` ทั้งก้อน (ยังไม่เคยแตะ) · `{started = false}` (รูปแบบเดียวกัน
+-- คนละที่มา) · `{started = true, cleared = boolean, ...}` (ค่าจริงจาก stageProgress ที่เริ่มแล้ว)
+local function isStageCleared(entry: any): boolean
+	if type(entry) ~= "table" then
+		return false
+	end
+	if entry.started ~= true then
+		return false
+	end
+	return entry.cleared == true
+end
 
 --------------------------------------------------------------------------------
 -- วาด
@@ -48,7 +71,7 @@ local function ensureFolder(): Folder
 
 	-- ⚠️ ต้องหา "LocalWalls" ที่มีอยู่แล้วใน Workspace ก่อนเสมอ ห้ามสร้างใหม่ตรง ๆ
 	-- StarterPlayerScripts ถูก copy เป็น PlayerScripts ตอนเข้าเกม → มี ModuleScript
-	-- WallRenderer อย่างน้อย 2 instance ที่ต่างคนต่างมี `folder`/`currentProgress` ของตัวเอง
+	-- WallRenderer อย่างน้อย 2 instance ที่ต่างคนต่างมี `folder`/`currentStageProgress` ของตัวเอง
 	-- (ตัวต้นฉบับใน StarterPlayerScripts กับตัวที่ก็อปมาใน PlayerScripts ที่ Main.client.lua
 	-- require จริง) ถ้า instance ไหนสร้างโฟลเดอร์ใหม่ทิ้งไว้โดยไม่เช็คของเดิมก่อน
 	-- จะเกิดโฟลเดอร์ "LocalWalls" ซ้อนกันสองใบใน Workspace เดียวกัน — ใบที่ผู้เล่นยืนชนอยู่จริง
@@ -123,39 +146,51 @@ local function buildWall(stage: number, parent: Folder)
 	label.Parent = gui
 end
 
--- วาดใหม่ทั้งชุดตาม wallProgress ปัจจุบัน
--- กำแพงของด่านที่ **ยังไปไม่ถึง** เท่านั้นที่ต้องมี ด่านที่พังแล้วไม่ต้องวาด
+-- วาดใหม่ทั้งชุดตาม stageProgress ปัจจุบัน
+-- กำแพงของด่านที่ **ยังไม่พังเรียบร้อย** เท่านั้นที่ต้องมี ด่านที่พังแล้วไม่ต้องวาด
 function WallRenderer.render()
 	local parent = ensureFolder()
 	parent:ClearAllChildren()
 
 	local built = 0
 	for stage = 1, Config.Balance.Stage.COUNT do
-		-- wallProgress = ด่านที่ยืนอยู่ → กำแพงของด่านที่มากกว่านั้นยังไม่ได้พัง
-		if stage > currentProgress then
+		if not isStageCleared(currentStageProgress[stage]) then
 			buildWall(stage, parent)
 			built += 1
 		end
 	end
 
-	print(`[WallRenderer] wallProgress = {currentProgress} · วาดกำแพง {built} ด่าน (ที่ยังพังไม่ได้)`)
+	print(`[WallRenderer] วาดกำแพง {built} ด่าน (ที่ยังพังไม่ได้)`)
+end
+
+-- ⚠️ เรียกทุกครั้งที่ FarmStateSync มาใหม่ (ดู Main.client.lua) — ของจริงจาก server
+-- (CombatService 3A ผ่าน CombatService.buildSyncFields) ไม่ใช่ default อีกต่อไป
+-- (เคยเป็นบั๊ก: currentProgress อ่านจาก Config.Balance.NewPlayer.wallProgress ค่าคงที่
+-- ไม่เคยรับค่าจริงจากเซิร์ฟเวอร์เลย)
+function WallRenderer.setStageProgress(stageProgress: { any })
+	currentStageProgress = stageProgress
+	WallRenderer.render()
+end
+
+function WallRenderer.getStageProgress(): { any }
+	return currentStageProgress
 end
 
 --------------------------------------------------------------------------------
 -- ค่าทดสอบ
 --------------------------------------------------------------------------------
 
--- ⚠️ ของเทสต์เท่านั้น — Phase 2 ค่าจริงจะมาจาก server
--- ตัวนี้เปลี่ยนแค่สิ่งที่ "เห็นและชน" บนเครื่องนี้ ไม่ได้ให้สิทธิ์อะไรเพิ่มจริง
--- เพราะการตีกำแพงและการให้รางวัลคำนวณฝั่ง server ทั้งหมด (Phase 3)
+-- ⚠️ ของเทสต์เท่านั้น — จำลองว่า "พังกำแพงมาถึงด่าน n แล้ว" (ด่าน 1..n-1 พังหมด ที่เหลือยังเต็ม)
+-- แปลงเป็นรูปแบบ stageProgress เดียวกับที่ server ส่งมาจริงแล้วเรียก setStageProgress ต่อ
+-- ตัวนี้เปลี่ยนแค่สิ่งที่ "เห็นและชน" บนเครื่องนี้ ไม่ได้ให้สิทธิ์อะไรเพิ่มจริง เพราะการตีกำแพง
+-- และการให้รางวัลคำนวณฝั่ง server ทั้งหมด (CombatService) — sync รอบถัดไปจะเขียนทับค่านี้เสมอ
 function WallRenderer.setWallProgress(value: number)
 	local clamped = math.clamp(math.floor(value), 1, Config.Balance.Stage.COUNT)
-	currentProgress = clamped
-	WallRenderer.render()
-end
-
-function WallRenderer.getWallProgress(): number
-	return currentProgress
+	local fake = {}
+	for stage = 1, Config.Balance.Stage.COUNT do
+		fake[stage] = if stage < clamped then { started = true, cleared = true } else { started = false }
+	end
+	WallRenderer.setStageProgress(fake)
 end
 
 function WallRenderer.start()

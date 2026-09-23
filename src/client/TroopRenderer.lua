@@ -334,6 +334,41 @@ local function defenderRatio(payload: any, stage: number): number
 	return info.defendersRemaining / info.defendersTotal
 end
 
+-- ⚠️ ตัวที่ยืนรอ (idle) ใน defenderModels ถูกเคลียร์เป็น 0 ตัวได้เองอยู่แล้วตอน targetCount=0
+-- (ลูป shrink ข้างล่าง) แต่ตัวที่ถูก spawnOurTroop ดึงออกไป "เดินออกมาชน" แล้ว (เก็บอยู่ใน
+-- ourTroops[i].pairedDefender ไม่ใช่ defenderModels อีกต่อไป) จะไม่ถูกแตะเลย — เดินต่อไปจนครบ
+-- WALK_SECONDS ของตัวเอง (สูงสุด 30 วิ) ทั้งที่ defendersRemaining จริงเป็น 0 ไปแล้ว ผู้เล่นจึงเห็น
+-- ทหารฝ่ายรับ "ยังสู้อยู่" หลังตายจริงไปแล้ว — ฟังก์ชันนี้กวาดทิ้งทันทีตอน targetCount เป็น 0
+-- (เล่นเอฟเฟกต์ตายตามปกติ ไม่ pop เฉย ๆ) แล้วให้ทหารเราที่เหลือเดินทะลุไปกำแพงต่อแบบไม่มีคู่ปะทะ
+-- (path เดียวกับตอนไม่มีทหารฝ่ายรับให้จับคู่ตั้งแต่แรกใน spawnOurTroop)
+local function retreatOrphanedDefenders(stage: number?)
+	local wallX = if stage then getStageTargetX(stage) else nil
+	local deathEffectsPlayed = 0
+
+	for _, troop in ourTroops do
+		local defender = troop.pairedDefender
+		if defender then
+			if defender.Parent and deathEffectsPlayed < DEATH_EFFECT_CAP_PER_UPDATE then
+				CombatEffects.onDefenderDeath(defender:GetPivot().Position)
+				deathEffectsPlayed += 1
+			end
+			defender:Destroy()
+			troop.pairedDefender = nil
+			troop.defenderFrom = nil
+
+			-- ⚠️ เริ่มเดินใหม่จากตำแหน่งปัจจุบันจริง (กันโมเดลกระโดดไปตำแหน่งอื่น) ไปกำแพงแทน
+			-- จุดชนเดิมที่ไม่มีอะไรให้ชนแล้ว — รีสตาร์ตนาฬิกาเดิน (ยอมรับว่าความเร็วที่เห็นจะไม่
+			-- คงเส้นคงวา เพราะทั้งไฟล์นี้เป็นแค่ simulation ไม่ใช่ของจริงอยู่แล้ว — ดูคอมเมนต์หัวไฟล์)
+			if wallX then
+				local currentPosition = troop.model:GetPivot().Position
+				troop.from = currentPosition
+				troop.to = Vector3.new(wallX, 0, currentPosition.Z)
+				troop.spawnedAt = os.clock()
+			end
+		end
+	end
+end
+
 local function updateDefenders(payload: any?)
 	local stage = if payload then payload.activeStage else nil
 
@@ -353,6 +388,12 @@ local function updateDefenders(payload: any?)
 	if stage and payload then
 		targetCount = math.min(Config.getDisplayModelCount(defenderRatio(payload, stage)), COMBAT.MAX_VISIBLE_UNITS)
 		targetX = getStageTargetX(stage)
+	end
+
+	-- ⚠️ targetCount=0 ↔ defendersRemaining<=0 เป๊ะ (Config.getDisplayModelCount คืน 0 ตรง ๆ
+	-- ตอน ratio<=0) เรียกซ้ำได้ปลอดภัยทุก sync — รอบแรกกวาดของค้าง รอบถัดไปไม่มีอะไรให้กวาดแล้ว
+	if targetCount == 0 then
+		retreatOrphanedDefenders(stage)
 	end
 
 	local deathEffectsPlayed = 0

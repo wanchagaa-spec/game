@@ -104,7 +104,12 @@ end
 
 local function __v3(x, y, z) return { X = x or 0, Y = y or 0, Z = z or 0 } end
 local Vector3 = { new = __v3 }
-local Color3 = { fromRGB = function() return { __color = true } end }
+-- ⚠️ Phase 3B-2 เริ่มใช้ `Color3.new` และ `color:Lerp(...)` (กำแพงคล้ำลงตามเลเวลความเสียหาย)
+-- สตั๊บเดิมมีแค่ fromRGB คืนตารางเปล่า → WallRenderer พังตั้งแต่สร้างกำแพงก้อนแรก (เงียบมาตั้งแต่ 1fdea01)
+local function __color()
+\treturn { __color = true, Lerp = function(_self, _goal, _alpha) return __color() end }
+end
+local Color3 = { fromRGB = function() return __color() end, new = function() return __color() end }
 local UDim2 = {
 \tfromOffset = function() return {} end,
 \tfromScale = function() return {} end,
@@ -189,6 +194,20 @@ local function wallIsSolid(stage)
 \treturn body ~= nil and body.CanCollide == true
 end
 
+-- ⚠️ WallRenderer ไม่มี getWallProgress() แล้วตั้งแต่ Phase 3B-1 (7b02706) — เก็บ stageProgress แทน
+-- คำนวณ "พังถึงด่านไหน" จาก getStageProgress() เอง (ด่านแรกที่ยังไม่ cleared) ใช้แค่พิมพ์ประกอบ
+-- ⚠️ ตัวตัดสินผล (RESULT) ยังเป็นกำแพงด่าน 2 ที่ผู้เล่นชนจริงเหมือนเดิมทุกอย่าง ไม่ได้ผ่อนเงื่อนไข
+local function wallProgressOf(renderer)
+\tlocal progress = renderer.getStageProgress() or {}
+\tfor stage = 1, __wrTestConfig.Balance.Stage.COUNT do
+\t\tlocal info = progress[stage]
+\t\tif not (type(info) == "table" and info.cleared) then
+\t\t\treturn stage
+\t\tend
+\tend
+\treturn __wrTestConfig.Balance.Stage.COUNT
+end
+
 -- 1) RendererA คือของจริงที่ Main.client.lua เรียกตอนเกมบูต (wallProgress ค่าเริ่มต้น = 1)
 RendererA.start()
 print(string.format("หลัง RendererA.start(): กำแพงด่าน 2 ชนอยู่ไหม = %s", tostring(wallIsSolid(2))))
@@ -196,10 +215,10 @@ assert(wallIsSolid(2), "เซ็ตอัพเทสต์ผิด — ต้
 
 -- 2) จำลองผู้ใช้พิมพ์คำสั่งใน command bar โดยได้ ModuleScript "คนละอินสแตนซ์"
 RendererB.setWallProgress(3)
-print(string.format("RendererB.getWallProgress() = %d (ควรเป็น 3)", RendererB.getWallProgress()))
+print(string.format("RendererB พังถึงด่าน = %d (ควรเป็น 3)", wallProgressOf(RendererB)))
 print(string.format(
-\t"แต่ RendererA.getWallProgress() = %d (ค่าจริงที่ผู้เล่นยืนอยู่ ไม่เปลี่ยนถ้ายัง bug)",
-\tRendererA.getWallProgress()
+\t"แต่ RendererA พังถึงด่าน = %d (ค่าจริงที่ผู้เล่นยืนอยู่ ไม่เปลี่ยนถ้ายัง bug)",
+\twallProgressOf(RendererA)
 ))
 
 local stillSolidAfter = wallIsSolid(2)
@@ -215,12 +234,29 @@ print(string.format("RESULT=%s", if stillSolidAfter then "BUG" else "FIXED"))
 '''
 
 
+# ⚠️ ถอดบรรทัด require/GetService ของ Roblox ออก **แบบต้องเจอจริง** — ถ้าซอร์สเปลี่ยนจนหาไม่เจอ
+# ให้พังดัง ๆ ตรงนี้ ไม่ใช่ replace เงียบ ๆ แล้วไปพังเป็น "attempt to ... nil" ใน luau ทีหลัง
+# และหลังถอดแล้วต้องไม่เหลือ require/GetService ของ Roblox ในโค้ดเลย (นอกคอมเมนต์)
+def strip_roblox_imports(src: str, lines: list, name: str) -> str:
+    for line in lines:
+        if src.count(line) != 1:
+            sys.exit(f'harness ตามซอร์สไม่ทัน: หาบรรทัดนี้ใน {name} ไม่เจอ (หรือเจอซ้ำ) — {line!r}')
+        src = src.replace(line, '')
+    for raw in src.split('\n'):
+        code = raw.split('--', 1)[0]
+        if 'require(' in code or 'game:GetService(' in code:
+            sys.exit(f'harness ตามซอร์สไม่ทัน: {name} ยังมี require/GetService ที่ harness ไม่ได้เตรียมของให้ — {raw.strip()!r}')
+    return src
+
+
 def build_harness() -> str:
     src = open(os.path.join(ROOT, 'src/client/WallRenderer.lua'), encoding='utf-8').read()
-    src = src.replace('local Players = game:GetService("Players")', '')
-    src = src.replace('local ReplicatedStorage = game:GetService("ReplicatedStorage")', '')
-    src = src.replace('local Workspace = game:GetService("Workspace")', '')
-    src = src.replace('local Config = require(ReplicatedStorage.Shared.Config)', '')
+    src = strip_roblox_imports(src, [
+        'local Players = game:GetService("Players")',
+        'local ReplicatedStorage = game:GetService("ReplicatedStorage")',
+        'local Workspace = game:GetService("Workspace")',
+        'local Config = require(ReplicatedStorage.Shared.Config)',
+    ], 'WallRenderer.lua')
     src = src.replace('--!strict', '--!nocheck' + PRELUDE)
     src = re.sub(r'\nreturn WallRenderer\s*$', '\nreturn WallRenderer\n', src)
 
@@ -229,9 +265,12 @@ def build_harness() -> str:
     return STUB + check
 
 
+# ⚠️ ประกอบ harness ให้เสร็จก่อนค่อยเปิดไฟล์ — ถ้า build_harness() หยุดกลางทาง (ตามซอร์สไม่ทัน)
+# จะได้ไม่ทิ้งไฟล์ว่าง .wall-singleton-check.luau ค้างไว้ในโฟลเดอร์โปรเจกต์
+harness_source = build_harness()
 harness = os.path.join(ROOT, '.wall-singleton-check.luau')
 with open(harness, 'w', encoding='utf-8') as f:
-    f.write(build_harness())
+    f.write(harness_source)
 
 try:
     proc = subprocess.run([LUAU, harness], capture_output=True, text=True, cwd=ROOT)

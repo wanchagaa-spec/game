@@ -23,6 +23,9 @@ STUB = '''--!nocheck
 local Config = require("./src/shared/Config")
 local PlayerData = require("./src/shared/PlayerData")
 local DataService = require("./src/server/DataService")
+-- ⚠️ ของจริง (ไม่ใช่ของปลอม) — CombatService เป็น Luau ล้วน tests/combat.spec ก็โหลดตัวจริง
+-- EggService เรียก buildSyncFields / handleSendMotherToBattle ของมันตรง ๆ (Phase 3A+)
+local CombatService = require("./src/server/CombatService")
 
 local FakePenService = {}
 function FakePenService.getPen(_player)
@@ -80,6 +83,7 @@ local __env = {
 \tDataService = DataService,
 \tPenService = FakePenService,
 \tProductionService = FakeProductionService,
+\tCombatService = CombatService,
 \tPlayers = {},
 \tRandom = FakeRandom,
 \twarn = capturingPrint,
@@ -97,6 +101,7 @@ local Remotes = __env.Remotes
 local DataService = __env.DataService
 local PenService = __env.PenService
 local ProductionService = __env.ProductionService
+local CombatService = __env.CombatService
 local Players = __env.Players
 local Random = __env.Random
 local warn = __env.warn
@@ -495,17 +500,36 @@ end
 '''
 
 
+# ⚠️ ถอดบรรทัด require/GetService ของ Roblox ออก **แบบต้องเจอจริง** — ถ้าซอร์สเปลี่ยนจนหาไม่เจอ
+# ให้พังดัง ๆ ตรงนี้ ไม่ใช่ replace เงียบ ๆ แล้วไปพังเป็น "attempt to index nil" ใน luau ทีหลัง
+# และหลังถอดแล้วต้องไม่เหลือ require/GetService ของ Roblox ในโค้ดเลย (นอกคอมเมนต์) — เคยพังเงียบมา
+# นานเพราะ EggService เพิ่ม `require(ServerScriptService.CombatService)` (Phase 3A) แต่ harness ไม่รู้จัก
+def strip_roblox_imports(src: str, lines: list, name: str) -> str:
+    for line in lines:
+        if src.count(line) != 1:
+            sys.exit(f'harness ตามซอร์สไม่ทัน: หาบรรทัดนี้ใน {name} ไม่เจอ (หรือเจอซ้ำ) — {line!r}')
+        src = src.replace(line, '')
+    for number, raw in enumerate(src.split('\n'), 1):
+        code = raw.split('--', 1)[0]
+        if 'require(' in code or 'game:GetService(' in code:
+            sys.exit(f'harness ตามซอร์สไม่ทัน: {name} ยังมี require/GetService ที่ harness ไม่ได้เตรียมของให้ — {raw.strip()!r}')
+    return src
+
+
 def build_harness() -> str:
     src = open(os.path.join(ROOT, 'src/server/EggService.lua'), encoding='utf-8').read()
-    src = src.replace('local Players = game:GetService("Players")', '')
-    src = src.replace('local ReplicatedStorage = game:GetService("ReplicatedStorage")', '')
-    src = src.replace('local ServerScriptService = game:GetService("ServerScriptService")', '')
-    src = src.replace('local Config = require(ReplicatedStorage.Shared.Config)', '')
-    src = src.replace('local PlayerData = require(ReplicatedStorage.Shared.PlayerData)', '')
-    src = src.replace('local Remotes = require(ReplicatedStorage.Shared.Remotes)', '')
-    src = src.replace('local DataService = require(ServerScriptService.DataService)', '')
-    src = src.replace('local PenService = require(ServerScriptService.PenService)', '')
-    src = src.replace('local ProductionService = require(ServerScriptService.ProductionService)', '')
+    src = strip_roblox_imports(src, [
+        'local Players = game:GetService("Players")',
+        'local ReplicatedStorage = game:GetService("ReplicatedStorage")',
+        'local ServerScriptService = game:GetService("ServerScriptService")',
+        'local Config = require(ReplicatedStorage.Shared.Config)',
+        'local PlayerData = require(ReplicatedStorage.Shared.PlayerData)',
+        'local Remotes = require(ReplicatedStorage.Shared.Remotes)',
+        'local DataService = require(ServerScriptService.DataService)',
+        'local PenService = require(ServerScriptService.PenService)',
+        'local ProductionService = require(ServerScriptService.ProductionService)',
+        'local CombatService = require(ServerScriptService.CombatService)',
+    ], 'EggService.lua')
     src = src.replace('--!strict', '--!nocheck' + PRELUDE)
 
     escaped = src.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
@@ -513,9 +537,12 @@ def build_harness() -> str:
     return STUB + check
 
 
+# ⚠️ ประกอบ harness ให้เสร็จก่อนค่อยเปิดไฟล์ — ถ้า build_harness() หยุดกลางทาง (ตามซอร์สไม่ทัน)
+# จะได้ไม่ทิ้งไฟล์ว่าง .debug-commands-check.luau ค้างไว้ในโฟลเดอร์โปรเจกต์
+harness_source = build_harness()
 harness = os.path.join(ROOT, '.debug-commands-check.luau')
 with open(harness, 'w', encoding='utf-8') as f:
-    f.write(build_harness())
+    f.write(harness_source)
 
 try:
     proc = subprocess.run([LUAU, harness], capture_output=True, text=True, cwd=ROOT)

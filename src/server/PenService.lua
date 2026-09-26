@@ -54,7 +54,8 @@ type Roamer = {
 	tracks: { [string]: AnimationTrack }?,
 	pose: string?, -- ท่าที่ขอล่าสุด (กันสั่งเล่นซ้ำทุก tick)
 	playing: AnimationTrack?, -- ท่าที่เล่นอยู่จริง (อาจเป็นท่าสำรอง ถ้าท่าที่ขอไม่มี)
-	stops: number, -- นับจำนวนครั้งที่หยุดพัก ไว้สลับ ยืนพัก/นั่ง
+	stops: number, -- นับจำนวนครั้งที่หยุดพัก ไว้วนท่าพัก (restPoses)
+	restPoses: { string }, -- ท่าพักที่ตัวนี้มีจริง เรียงตาม REST_POSE_ORDER (ว่าง = ไม่มีอนิเมชัน)
 	speed: number, -- studs/วิ (กล่องสี = MAP.Wander.Speed · โมเดล mesh = โตตามขนาดตัว)
 	animSpeed: number, -- ความเร็วเล่นอนิเมชัน (1 = ปกติ · ตัวใหญ่เล่นช้าลง ก้าวยาวขึ้น)
 	inset: number, -- ระยะเว้นจากขอบคอก = ครึ่งความกว้างตัว กันตัวใหญ่ยื่นทะลุรั้ว
@@ -62,6 +63,22 @@ type Roamer = {
 
 -- เวลาเฟดตอนเปลี่ยนท่า — สั้นพอไม่ให้ท่าเดินค้างตอนหยุด แต่ไม่กระตุกเปลี่ยนทันที
 local POSE_FADE_SECONDS = 0.25
+
+-- ลำดับวนท่าตอนหยุดพัก — ตัวละครไหนไม่มีท่าไหนก็ข้ามไป
+-- (กอริลลาเดิม = ยืน→นั่ง · ลิง = ยืน→ต่อย · มีครบ = ยืน→นั่ง→ต่อย)
+local REST_POSE_ORDER = { "idle", "sit", "punch" }
+
+local function getRestPoses(tracks: { [string]: AnimationTrack }?): { string }
+	local poses = {}
+	if tracks then
+		for _, pose in REST_POSE_ORDER do
+			if tracks[pose] then
+				table.insert(poses, pose)
+			end
+		end
+	end
+	return poses
+end
 
 -- เปลี่ยนท่า — ขาดท่าที่ขอ (เช่นไม่ได้ใส่ sit) ใช้ท่ายืนพักแทน · ท่าเดินไม่มีท่าสำรอง
 local function playPose(roamer: Roamer, pose: string)
@@ -164,9 +181,12 @@ local function updateWander()
 		end
 
 		if alpha >= 1 then
-			-- ถึงแล้ว หยุดพักสักครู่ค่อยออกเดินใหม่ · สลับท่า ยืนพัก → นั่ง → ยืนพัก ...
+			-- ถึงแล้ว หยุดพักสักครู่ค่อยออกเดินใหม่ · วนท่าพักที่ตัวนี้มี (ดู REST_POSE_ORDER)
 			roamer.stops += 1
-			playPose(roamer, if roamer.stops % 2 == 0 then "sit" else "idle")
+			local restPoses = roamer.restPoses
+			if #restPoses > 0 then
+				playPose(roamer, restPoses[(roamer.stops - 1) % #restPoses + 1])
+			end
 			roamer.waitUntil = now + rng:NextNumber(MAP.Wander.PauseMin, MAP.Wander.PauseMax)
 			pickNextTrip(roamer, roamer.waitUntil)
 		end
@@ -616,6 +636,7 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 			pose = nil,
 			playing = nil,
 			stops = 0,
+			restPoses = getRestPoses(tracks),
 			speed = speed,
 			animSpeed = animSpeed,
 			inset = inset,

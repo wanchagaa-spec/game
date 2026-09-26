@@ -211,8 +211,9 @@ export type Character = {
 	-- ดูหัว PenService.lua) · โครงกระดูก (Bone) + AnimationController ใช้ได้ ไว้เล่นอนิเมชัน
 	modelAssetId: number?,
 	-- อนิเมชันของโมเดลข้างบน (ต้องมี modelAssetId ด้วยเสมอ · validate() บังคับ)
-	-- เดินตอนเคลื่อนที่ · พอหยุดพักสลับ ยืนพัก → นั่ง → ยืนพัก ... (ดู PenService.updateWander)
-	-- ขาดท่าไหนก็ข้ามท่านั้นไป · ต้อง publish ด้วยบัญชีเดียวกับเจ้าของเกม ไม่งั้นเล่นไม่ออก
+	-- เดินตอนเคลื่อนที่ · พอหยุดพักวนท่าพักที่มี ตามลำดับ ยืนพัก → นั่ง → ต่อย → ยืนพัก ...
+	-- (ดู PenService.updateWander) · ขาดท่าไหนก็ข้ามท่านั้นไป
+	-- ต้อง publish ด้วยบัญชีเดียวกับเจ้าของเกม ไม่งั้นเล่นไม่ออก
 	animationIds: CharacterAnimations?,
 }
 
@@ -220,6 +221,7 @@ export type CharacterAnimations = {
 	walk: number?,
 	idle: number?,
 	sit: number?,
+	punch: number?,
 }
 
 -- หนึ่งแถวในตารางสุ่มคลาสของไข่
@@ -1036,14 +1038,14 @@ local Characters: { [string]: Character } = {
 	dragon_horse = { id = "dragon_horse", name = "ม้าขาวมังกร", class = "B", enabled = true },
 
 	-- C ×1
-	-- modelAssetId = โมเดลกอริลลา low-poly (Model asset ที่ผู้ใช้ publish เอง)
+	-- modelAssetId = โมเดลลิง (Model asset ที่ผู้ใช้ publish เอง · แทนกอริลลาเดิม ดู CLAUDE.md)
 	monkey = {
 		id = "monkey",
 		name = "ลิง",
 		class = "C",
 		enabled = true,
-		modelAssetId = 109867818523029,
-		animationIds = { walk = 110226605923724, idle = 83105969878758, sit = 71506621911711 },
+		modelAssetId = 109724272624838,
+		animationIds = { walk = 107531970151372, idle = 120196087973871, punch = 108427117124537 },
 	},
 	pig = { id = "pig", name = "หมู", class = "C", enabled = true },
 	horse = { id = "horse", name = "ม้า", class = "C", enabled = true },
@@ -3701,8 +3703,8 @@ function Config.validate()
 			)
 			for pose, animationId in character.animationIds :: { [string]: number } do
 				assert(
-					pose == "walk" or pose == "idle" or pose == "sit",
-					`Config: ตัวละคร "{charId}" มีท่า "{pose}" ที่ไม่รู้จัก (walk/idle/sit เท่านั้น)`
+					pose == "walk" or pose == "idle" or pose == "sit" or pose == "punch",
+					`Config: ตัวละคร "{charId}" มีท่า "{pose}" ที่ไม่รู้จัก (walk/idle/sit/punch เท่านั้น)`
 				)
 				assert(
 					animationId > 0 and animationId % 1 == 0,

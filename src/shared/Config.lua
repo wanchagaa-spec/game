@@ -207,9 +207,19 @@ export type Character = {
 	-- id ของ **Model asset** ที่พับลิชขึ้น Roblox แล้ว (ไม่ใช่ Mesh asset เฉย ๆ — ต้องเป็น
 	-- Model เพราะ PenService ใช้ InsertService:LoadAsset() แล้ว clone ทั้งก้อนมาสเกล/วางตำแหน่ง)
 	-- nil = ยังไม่มีโมเดลเฉพาะตัว ใช้กล่องสี่เหลี่ยมสีตามคลาสแทน (ค่าเริ่มต้นของทุกตัวละคร)
-	-- ⚠️ โมเดลที่ import เข้ามาต้องเป็นชิ้นแข็งชิ้นเดียว (rigid) ห้ามมี Humanoid/skeleton ติดมา
-	-- (เหตุผลเดียวกับที่ห้ามใช้ Humanoid กับตัวแม่ทั้งหมด — ดูหัว PenService.lua)
+	-- ⚠️ ห้ามมี Humanoid ติดมา (ถูกถอดทิ้ง — เหตุผลเดียวกับที่ห้ามใช้ Humanoid กับแม่ทั้งหมด
+	-- ดูหัว PenService.lua) · โครงกระดูก (Bone) + AnimationController ใช้ได้ ไว้เล่นอนิเมชัน
 	modelAssetId: number?,
+	-- อนิเมชันของโมเดลข้างบน (ต้องมี modelAssetId ด้วยเสมอ · validate() บังคับ)
+	-- เดินตอนเคลื่อนที่ · พอหยุดพักสลับ ยืนพัก → นั่ง → ยืนพัก ... (ดู PenService.updateWander)
+	-- ขาดท่าไหนก็ข้ามท่านั้นไป · ต้อง publish ด้วยบัญชีเดียวกับเจ้าของเกม ไม่งั้นเล่นไม่ออก
+	animationIds: CharacterAnimations?,
+}
+
+export type CharacterAnimations = {
+	walk: number?,
+	idle: number?,
+	sit: number?,
 }
 
 -- หนึ่งแถวในตารางสุ่มคลาสของไข่
@@ -1018,7 +1028,14 @@ local Characters: { [string]: Character } = {
 
 	-- C ×1
 	-- modelAssetId = โมเดลกอริลลา low-poly (Model asset ที่ผู้ใช้ publish เอง)
-	monkey = { id = "monkey", name = "ลิง", class = "C", enabled = true, modelAssetId = 109867818523029 },
+	monkey = {
+		id = "monkey",
+		name = "ลิง",
+		class = "C",
+		enabled = true,
+		modelAssetId = 109867818523029,
+		animationIds = { walk = 110226605923724, idle = 83105969878758, sit = 71506621911711 },
+	},
 	pig = { id = "pig", name = "หมู", class = "C", enabled = true },
 	horse = { id = "horse", name = "ม้า", class = "C", enabled = true },
 	fish = { id = "fish", name = "ปลา", class = "C", enabled = true },
@@ -3658,6 +3675,23 @@ function Config.validate()
 				character.modelAssetId > 0 and character.modelAssetId % 1 == 0,
 				`Config: ตัวละคร "{charId}" มี modelAssetId ที่ไม่ใช่จำนวนเต็มบวก`
 			)
+		end
+		if character.animationIds ~= nil then
+			-- อนิเมชันเล่นบนกระดูกของโมเดล mesh — กล่องสีไม่มีกระดูกให้ขยับ
+			assert(
+				character.modelAssetId ~= nil,
+				`Config: ตัวละคร "{charId}" มี animationIds แต่ไม่มี modelAssetId`
+			)
+			for pose, animationId in character.animationIds :: { [string]: number } do
+				assert(
+					pose == "walk" or pose == "idle" or pose == "sit",
+					`Config: ตัวละคร "{charId}" มีท่า "{pose}" ที่ไม่รู้จัก (walk/idle/sit เท่านั้น)`
+				)
+				assert(
+					animationId > 0 and animationId % 1 == 0,
+					`Config: ตัวละคร "{charId}" ท่า {pose} มี animation id ที่ไม่ใช่จำนวนเต็มบวก`
+				)
+			end
 		end
 		if character.enabled then
 			classHasCharacter[character.class] = true

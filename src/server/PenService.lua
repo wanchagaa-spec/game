@@ -50,7 +50,36 @@ type Roamer = {
 	startedAt: number, -- os.clock() ตอนเริ่มเดินรอบนี้
 	duration: number, -- ใช้เวลาเดินกี่วินาที
 	waitUntil: number, -- os.clock() ที่จะออกเดินรอบถัดไป
+	-- อนิเมชันตามท่า (walk/idle/sit) — nil = ไม่มีอนิเมชัน (กล่องสี หรือตัวละครที่ไม่ได้ใส่ไว้)
+	tracks: { [string]: AnimationTrack }?,
+	pose: string?, -- ท่าที่ขอล่าสุด (กันสั่งเล่นซ้ำทุก tick)
+	playing: AnimationTrack?, -- ท่าที่เล่นอยู่จริง (อาจเป็นท่าสำรอง ถ้าท่าที่ขอไม่มี)
+	stops: number, -- นับจำนวนครั้งที่หยุดพัก ไว้สลับ ยืนพัก/นั่ง
 }
+
+-- เวลาเฟดตอนเปลี่ยนท่า — สั้นพอไม่ให้ท่าเดินค้างตอนหยุด แต่ไม่กระตุกเปลี่ยนทันที
+local POSE_FADE_SECONDS = 0.25
+
+-- เปลี่ยนท่า — ขาดท่าที่ขอ (เช่นไม่ได้ใส่ sit) ใช้ท่ายืนพักแทน · ท่าเดินไม่มีท่าสำรอง
+local function playPose(roamer: Roamer, pose: string)
+	local tracks = roamer.tracks
+	if tracks == nil or roamer.pose == pose then
+		return
+	end
+	roamer.pose = pose
+
+	local nextTrack = tracks[pose] or (if pose ~= "walk" then tracks.idle else nil)
+	if nextTrack == roamer.playing then
+		return
+	end
+	if roamer.playing then
+		roamer.playing:Stop(POSE_FADE_SECONDS)
+	end
+	if nextTrack then
+		nextTrack:Play(POSE_FADE_SECONDS)
+	end
+	roamer.playing = nextTrack
+end
 
 local pens: { Pen } = {}
 local penByUserId: { [number]: Pen } = {}
@@ -110,8 +139,10 @@ local function updateWander()
 		end
 
 		if now < roamer.waitUntil then
-			continue -- ยืนพักอยู่
+			continue -- ยืนพักอยู่ (ท่ายืน/นั่งตั้งไว้แล้วตอนถึงจุดหมาย)
 		end
+
+		playPose(roamer, "walk")
 
 		local elapsed = now - roamer.startedAt
 		local alpha = math.clamp(elapsed / roamer.duration, 0, 1)
@@ -127,7 +158,9 @@ local function updateWander()
 		end
 
 		if alpha >= 1 then
-			-- ถึงแล้ว หยุดพักสักครู่ค่อยออกเดินใหม่
+			-- ถึงแล้ว หยุดพักสักครู่ค่อยออกเดินใหม่ · สลับท่า ยืนพัก → นั่ง → ยืนพัก ...
+			roamer.stops += 1
+			playPose(roamer, if roamer.stops % 2 == 0 then "sit" else "idle")
 			roamer.waitUntil = now + rng:NextNumber(MAP.Wander.PauseMin, MAP.Wander.PauseMax)
 			pickNextTrip(roamer, roamer.waitUntil)
 		end
@@ -303,9 +336,10 @@ local function fetchMeshTemplateAsync(assetId: number): Model?
 	container:Destroy()
 
 	for _, descendant in model:GetDescendants() do
-		if descendant:IsA("Humanoid") or descendant:IsA("AnimationController") then
+		if descendant:IsA("Humanoid") then
 			-- ⚠️ กฎ "ห้ามใช้ Humanoid กับตัวแม่" (หัวไฟล์) — Studio บางโหมด import แล้ว rig ให้เอง
-			warn(`[PenService] modelAssetId {assetId} มี {descendant.ClassName} ติดมา — ถอดทิ้ง`)
+			-- AnimationController **เก็บไว้** (เบากว่า Humanoid มาก) ใช้เล่นอนิเมชันกระดูก
+			warn(`[PenService] modelAssetId {assetId} มี Humanoid ติดมา — ถอดทิ้ง`)
 			descendant:Destroy()
 		elseif descendant:IsA("BasePart") then
 			-- เหมือนกล่องสีเดิม: ขยับด้วย PivotTo ล้วน ๆ ห้ามให้ฟิสิกส์ดึงตก และผู้เล่นเดินทะลุได้
@@ -388,6 +422,64 @@ local function buildMeshMother(template: Model, weight: number, assetId: number)
 	return model
 end
 
+-- animation id → Animation instance ใช้ซ้ำทุกตัว (ไม่ต้อง parent ไว้ที่ไหน)
+local animationObjects: { [number]: Animation } = {}
+
+local function getAnimation(animationId: number): Animation
+	local cached = animationObjects[animationId]
+	if cached then
+		return cached
+	end
+	local animation = Instance.new("Animation")
+	animation.AnimationId = `rbxassetid://{animationId}`
+	animationObjects[animationId] = animation
+	return animation
+end
+
+-- โหลดอนิเมชันทุกท่าให้โมเดลตัวนี้ — ไม่ yield (asset ค่อย ๆ โหลดเองเบื้องหลัง)
+-- ⚠️ ต้องเรียก **หลัง** parent โมเดลเข้า Workspace แล้ว (LoadAnimation ใช้กับ Animator นอกเกมไม่ได้)
+-- ⚠️ เล่นฝั่ง server ผ่าน Animator ที่ server สร้าง → Roblox ส่งภาพให้ทุก client เอง
+local function loadPoseTracks(model: Model, animationIds: Config.CharacterAnimations?): { [string]: AnimationTrack }?
+	if animationIds == nil then
+		return nil
+	end
+
+	local controller: AnimationController
+	local existingController = model:FindFirstChildWhichIsA("AnimationController", true)
+	if existingController then
+		controller = existingController
+	else
+		controller = Instance.new("AnimationController")
+		controller.Parent = model
+	end
+
+	local animator: Animator
+	local existingAnimator = controller:FindFirstChildWhichIsA("Animator")
+	if existingAnimator then
+		animator = existingAnimator
+	else
+		animator = Instance.new("Animator")
+		animator.Parent = controller
+	end
+
+	local tracks: { [string]: AnimationTrack } = {}
+	for pose, animationId in animationIds :: { [string]: number } do
+		local ok, track = pcall(function()
+			return animator:LoadAnimation(getAnimation(animationId))
+		end)
+		if ok and track then
+			-- ⚠️ ค่านี้ไม่ส่งไป client — ท่าที่ publish มาแบบไม่วนจะเล่นรอบเดียวแล้วค้างบนจอผู้เล่น
+			-- ต้องเปิด Loop ตอน publish ใน Animation Editor ด้วย
+			track.Looped = true
+			tracks[pose] = track
+		else
+			warn(`[PenService] โหลดอนิเมชันท่า {pose} ({animationId}) ไม่สำเร็จ: {track}`)
+		end
+	end
+
+	return if next(tracks) then tracks else nil
+end
+
 -- วาดแม่ในคอกใหม่ทั้งชุด (เรียกทุกครั้งที่รายชื่อแม่เปลี่ยน)
 -- ⚠️ ตำแหน่งสุ่มใหม่ทุกครั้ง ไม่ได้จำของเดิม ตามกฎ "ห้ามเซฟตำแหน่ง"
 -- ⚠️ ทั้งฟังก์ชัน**ไม่ yield** (โมเดล mesh โหลดเบื้องหลัง ดู getMeshTemplate) การล้าง+สร้างใหม่จึงจบ
@@ -419,6 +511,7 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 		local visual: Model | BasePart
 		local visualHeight: number
 		local restingY: number
+		local tracks: { [string]: AnimationTrack }? = nil
 
 		local assetId = if character then character.modelAssetId else nil
 		-- ยังโหลดไม่เสร็จ/ล้มเหลว = nil → วาดกล่องสีไปก่อน (ไม่ yield)
@@ -436,6 +529,7 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 			meshModel:PivotTo(CFrame.new(spot.X, restingY + pivotAboveCenter, spot.Z))
 			meshModel.Name = mother.uid
 			meshModel.Parent = pen.mothersFolder
+			tracks = loadPoseTracks(meshModel, if character then character.animationIds else nil)
 			visual = meshModel
 		else
 			-- ⚠️ ขนาดต่อตัว ไม่ใช่ค่าคงที่ร่วม — แม่แต่ละตัวหนักไม่เท่ากัน (Config.getMotherVisualSize)
@@ -487,7 +581,13 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 			duration = 0.05,
 			-- กระจายเวลาออกเดินครั้งแรก ไม่งั้นแม่ทุกตัวจะขยับพร้อมกันเป๊ะ ดูเป็นหุ่นยนต์
 			waitUntil = now + rng:NextNumber(0, MAP.Wander.PauseMax),
+			tracks = tracks,
+			pose = nil,
+			playing = nil,
+			stops = 0,
 		}
+		-- เพิ่งเกิด = ยืนรอออกเดินรอบแรก
+		playPose(roamer, "idle")
 		pickNextTrip(roamer, roamer.waitUntil)
 		table.insert(roamers, roamer)
 	end

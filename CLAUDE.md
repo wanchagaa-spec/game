@@ -242,7 +242,12 @@ Core loop:
   `PenService` โหลดด้วย `InsertService:LoadAsset` ครั้งเดียวแล้ว clone · ไม่มี/โหลดไม่ได้ = กล่องสีตามคลาสเหมือนเดิม
   ⚠️ **ไฟล์ .glb/.fbx ใส่ใน repo ตรง ๆ ไม่ได้** ต้อง Import 3D ใน Studio → Save to Roblox ด้วยบัญชี/กลุ่ม**เดียวกับเจ้าของเกม**
   (LoadAsset โหลดของคนอื่นไม่ได้) · Humanoid ที่ติดมาถูกถอดทิ้งอัตโนมัติ · ทุกชิ้นถูกบังคับ Anchored + CanCollide = false
-  ตอนนี้มีแค่ `monkey` = โมเดลกอริลลา (`109867818523029`) **ยังไม่ได้ทดสอบใน Studio**
+  ⚠️ **เลขต้องเป็น Model (AssetTypeId 10) ไม่ใช่ Mesh (4)** — เลข Mesh ทำ LoadAsset ค้างเงียบ ๆ ไม่ error (เคยเจอจริง)
+  · โหลดเบื้องหลังเสมอ `refreshMothers` ห้าม yield รอ LoadAsset
+  **อนิเมชัน** `Character.animationIds = { walk, idle, sit }` (ต้องมี `modelAssetId` ด้วย) เล่นผ่าน
+  `AnimationController` + `Animator` ฝั่ง server (**ไม่ใช่ Humanoid** · เก็บ AnimationController ไว้ ไม่ถอด)
+  เดินตอนเคลื่อนที่ · หยุดพักสลับ ยืน → นั่ง → ยืน ... · ท่าต้อง publish แบบ **Loop** (ค่า Looped จาก server ไม่ส่งไป client)
+  ตอนนี้มีแค่ `monkey` = โมเดลกอริลลา (`109867818523029`) + 3 ท่า · **อนิเมชันยังไม่ได้ทดสอบใน Studio**
 
 ### การรบ — ปล่อยทหารต่อเนื่องแบบ Age of War
 ⚠️ ระบบเดิม "กดส่งกองทัพทีเดียวแล้วรอผล" **ยกเลิกทั้งหมดแล้ว**

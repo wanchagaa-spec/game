@@ -330,4 +330,51 @@ return function(t, Config)
 		-- timeUsed ที่สั้นลงตามลูกที่ผลิตได้จริง (1 ตัว = 60 วิ) ไม่ใช่ elapsed เต็ม 600 วิ
 		check("เงินก็ถูกตัดตาม timeUsed ที่สั้นลงด้วย (ใช้ timestamp เดียวกัน)", coins, 1)
 	end
+
+	----------------------------------------------------------------------------
+	-- log "คลังเต็ม" — พิมพ์แค่รอบที่เพิ่งเต็ม ไม่ใช่ทุกรอบที่ยังเต็มค้าง
+	----------------------------------------------------------------------------
+	print("── log คลังเต็ม: พิมพ์ครั้งเดียวตอนเพิ่งเต็ม · เต็มค้างไม่พิมพ์ซ้ำ · ลดแล้วเต็มใหม่พิมพ์ใหม่ ──")
+
+	do
+		local clock = 1000
+		local logs: { string } = {}
+		ProductionService.injectForTests({
+			now = function() return clock end,
+			log = function(message: string) table.insert(logs, message) end,
+		})
+
+		local data = freshData()
+		local mother = makeMother({ lastProducedAt = clock })
+		table.insert(data.mothersInPen, mother)
+		local key = Config.makeStackKey("wukong", 100, {})
+		local cap = Config.getStackCap()
+
+		data.children[key] = cap - 1
+		clock += 600
+		ProductionService.settleMother(data, mother, true)
+		check("เพิ่งเต็ม (ผลิตเกินที่ว่าง) → พิมพ์ 1 ครั้ง", #logs, 1)
+
+		for _ = 1, 5 do
+			clock += 600
+			local _, _, hitCap = ProductionService.settleMother(data, mother, true)
+			check("เต็มค้าง: hitCap ยังเป็น true เหมือนเดิม", hitCap, true)
+		end
+		check("เต็มค้างอีก 5 รอบ → ไม่พิมพ์ซ้ำ (ยัง 1)", #logs, 1)
+
+		data.children[key] = cap - 3 -- ปล่อยลูกออกไปรบจนกองลด
+		clock += 600
+		ProductionService.settleMother(data, mother, true)
+		check("กองลดแล้วเต็มใหม่ → พิมพ์ใหม่ (2)", #logs, 2)
+
+		data.children[key] = cap - 5
+		mother.lastProducedAt = clock
+		clock += 300 -- ได้ 5 ตัวพอดีกับที่ว่าง (hitCap = false แต่เต็มแล้ว)
+		local produced, _, exactHitCap = ProductionService.settleMother(data, mother, true)
+		check("เติมพอดีเพดาน: ผลิต 5 ตัว", produced, 5)
+		check("เติมพอดีเพดาน: hitCap = false (ไม่มีส่วนเกิน)", exactHitCap, false)
+		check("เติมพอดีเพดาน → ยังนับว่าเพิ่งเต็ม พิมพ์ (3)", #logs, 3)
+
+		ProductionService.injectForTests({ now = function() return clock end })
+	end
 end

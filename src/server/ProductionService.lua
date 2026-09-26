@@ -36,8 +36,20 @@ local function now(): number
 	return os.time()
 end
 
-function ProductionService.injectForTests(fake: { now: (() -> number)? })
+-- log — inject ได้เพื่อให้เทสต์นับได้ว่าพิมพ์กี่ครั้ง (ไม่ inject = print ปกติ)
+local injectedLog: ((string) -> ())?
+
+local function log(message: string)
+	if injectedLog then
+		injectedLog(message)
+	else
+		print(message)
+	end
+end
+
+function ProductionService.injectForTests(fake: { now: (() -> number)?, log: ((string) -> ())? })
 	injectedNow = fake.now
+	injectedLog = fake.log
 end
 
 --------------------------------------------------------------------------------
@@ -75,7 +87,9 @@ function ProductionService.settleMother(data: Data, mother: Mother, online: bool
 	rawChildren = math.min(rawChildren, Production.MAX_PER_SETTLE)
 
 	local key = Config.makeStackKey(mother.charId, mother.weight, mother.statuses)
-	local capRemaining = math.max(0, Config.getStackCap() - (data.children[key] or 0))
+	local stackCap = Config.getStackCap()
+	local stackBefore = data.children[key] or 0
+	local capRemaining = math.max(0, stackCap - stackBefore)
 	local actualChildren = math.min(rawChildren, capRemaining)
 	local hitCap = actualChildren < rawChildren
 
@@ -111,8 +125,11 @@ function ProductionService.settleMother(data: Data, mother: Mother, online: bool
 
 	mother.lastProducedAt = windowStart + timeUsed
 
-	if hitCap then
-		print(`[ProductionService] แม่ {mother.uid} คลังลูก "{key}" เต็ม ({Config.getStackCap()} ตัว) หยุดผลิตชั่วคราว`)
+	-- ⚠️ แจ้งเฉพาะรอบที่ "เพิ่งเต็ม" (ก่อน settle ยังไม่เต็ม · หลัง settle ถึงเพดาน) ไม่ใช่ทุกรอบที่ hitCap
+	-- เดิมพิมพ์ทุกรอบ → แม่ที่คลังเต็มค้างพิมพ์ซ้ำทุก tick จน log อื่นจม · ปล่อยลูกออกไปรบจนกองลดแล้ว
+	-- เต็มใหม่ = แจ้งใหม่อีกครั้ง · ค่า hitCap ที่คืนออกไปยังความหมายเดิม (รอบนี้ผลิตไม่ครบเพราะคลังเต็ม)
+	if stackBefore < stackCap and stackBefore + actualChildren >= stackCap then
+		log(`[ProductionService] แม่ {mother.uid} คลังลูก "{key}" เต็ม ({stackCap} ตัว) หยุดผลิตชั่วคราว`)
 	end
 
 	return actualChildren, coinsEarned, hitCap

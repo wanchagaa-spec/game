@@ -395,6 +395,7 @@ docs/
   phase-1.5-rework.md  → บันทึกการรื้อโค้ด Phase 1 ให้ตรงดีไซน์ใหม่ (ทำครบแล้ว) + เช็คลิสต์ที่ต้องทดสอบใน Studio
   debug-commands.md    → คำสั่ง debug ทั้งหมดที่เรียกผ่าน command bar ใน Studio (ไม่ใช่ฟีเจอร์ในเกม)
   phase-3c-report.md   → รายงานสรุป Phase 3C-1 + 3C-2 (ส่งแม่ไปรบ + ตายถาวร) + ผลทดสอบ Studio
+  phase-4a-report.md   → รายงานสรุป Phase 4A (รางวัลผ่านด่าน) + ภาพรวมงานรอบเดียวกัน + ผลทดสอบ Studio
 default.project.json   → mapping ของ Rojo
 ```
 
@@ -436,6 +437,7 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   ⚠️ ชื่อ "4A" ตั้งตามที่สั่ง — **คนละเรื่องกับ Phase 4 (รบด้วยตัวเอง) ข้างล่าง** ซึ่งยังไม่ได้เริ่ม
   ด่าน 1 = 0 (ไม่มีกำแพง) · 2–3 = 1 · 4–6 = 2 · 7–9 = 3 · ไข่ = `egg_stageN` ผ่าน `grantEgg`
   · แจ้งด้วย `StageClearedNotify` (server → client ครั้งเดียว ไม่อยู่ใน sync) · รายละเอียด `docs/data-schema.md` §7.12
+  📄 รายงานสรุป (ตัดสินอะไร · ผลทดสอบ Studio · ที่ยังขาด) อยู่ใน `docs/phase-4a-report.md`
   📄 วิสัยทัศน์อนาคต **"HP รายตัว + turret"** (ลูก/แม่มี HP รายตัวจริง · turret สุ่มยิงมีจังหวะ
   ของตัวเอง · ทหารฝ่ายรับตีกลับได้ · หลอด HP ลอยทุกตัว) เป็น**เฟสแยกทีหลัง Phase 3C** —
   ยังไม่ได้ตั้งเลขเฟส **ไม่บล็อก 3C** ดู `docs/combat-hp-vision.md`

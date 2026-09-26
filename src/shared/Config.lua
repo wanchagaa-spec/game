@@ -1016,10 +1016,8 @@ local Characters: { [string]: Character } = {
 	dragon_horse = { id = "dragon_horse", name = "ม้าขาวมังกร", class = "B", enabled = true },
 
 	-- C ×1
-	-- ⚠️ TEMP: monkey ยังไม่มี modelAssetId — รอผู้ใช้ publish โมเดลกอริลลา (low-poly)
-	-- ขึ้น Roblox เป็น Model asset ก่อน (Import 3D ใน Studio แบบ rigid ห้ามมี Humanoid
-	-- แล้ว Save to Roblox) ได้เลขมาแล้วค่อยใส่ตรงนี้ ระหว่างนี้ยังโชว์เป็นกล่องสีเดิม
-	monkey = { id = "monkey", name = "ลิง", class = "C", enabled = true, modelAssetId = nil },
+	-- modelAssetId = โมเดลกอริลลา low-poly (Model asset ที่ผู้ใช้ publish เอง)
+	monkey = { id = "monkey", name = "ลิง", class = "C", enabled = true, modelAssetId = 108375520093381 },
 	pig = { id = "pig", name = "หมู", class = "C", enabled = true },
 	horse = { id = "horse", name = "ม้า", class = "C", enabled = true },
 	fish = { id = "fish", name = "ปลา", class = "C", enabled = true },

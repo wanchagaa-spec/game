@@ -18,6 +18,7 @@
 -- ตำแหน่งไม่มีความหมายเชิงเกม (แม่เดินไปมาอยู่แล้ว) และการเซฟตำแหน่งของแม่ทุกตัว
 -- บวกไข่อีกเป็นหมื่นฟอง จะกินโควต้า DataStore ฟรี ๆ โดยไม่ได้อะไรกลับมา
 
+local InsertService = game:GetService("InsertService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -38,8 +39,10 @@ export type Pen = {
 }
 
 -- แม่ 1 ตัวที่กำลังเดินอยู่ในคอก
+-- ⚠️ visual เป็น Part (กล่องสีเดิม) หรือ Model (โมเดล mesh ที่ import มา — ดู
+-- Character.modelAssetId) ก็ได้ ทั้งคู่เป็น PVInstance จึงใช้ PivotTo/GetPivot ร่วมกันได้
 type Roamer = {
-	part: Part,
+	visual: Model | BasePart,
 	origin: Vector3, -- กึ่งกลางแปลงที่แม่ตัวนี้อยู่
 	from: Vector3,
 	to: Vector3,
@@ -86,7 +89,7 @@ end
 
 local function pickNextTrip(roamer: Roamer, now: number)
 	local target = randomPointInPen(roamer.origin)
-	local from = roamer.part.Position
+	local from = roamer.visual:GetPivot().Position
 	local distance = (Vector3.new(target.X, from.Y, target.Z) - from).Magnitude
 
 	roamer.from = from
@@ -100,8 +103,8 @@ local function updateWander()
 	local now = os.clock()
 
 	for _, roamer in roamers do
-		local part = roamer.part
-		if part.Parent == nil then
+		local visual = roamer.visual
+		if visual.Parent == nil then
 			continue -- ถูกเก็บไปแล้ว รอบถัดไปจะถูกกวาดออกจากตาราง
 		end
 
@@ -116,9 +119,10 @@ local function updateWander()
 		-- หันหน้าไปทางที่เดิน ให้ดูมีชีวิตขึ้นโดยไม่ต้องมี Humanoid
 		local direction = roamer.to - roamer.from
 		if direction.Magnitude > 0.01 then
-			part.CFrame = CFrame.lookAt(position, position + direction.Unit)
+			visual:PivotTo(CFrame.lookAt(position, position + direction.Unit))
 		else
-			part.Position = position
+			-- ยังไม่มีทิศทางเดิน (เพิ่งสปอน) — ขยับตำแหน่งอย่างเดียว คงการหันหน้าเดิมไว้
+			visual:PivotTo(visual:GetPivot().Rotation + position)
 		end
 
 		if alpha >= 1 then
@@ -147,7 +151,7 @@ end
 
 local function dropRoamersUnder(folder: Folder)
 	for index = #roamers, 1, -1 do
-		if roamers[index].part:IsDescendantOf(folder) then
+		if roamers[index].visual:IsDescendantOf(folder) then
 			table.remove(roamers, index)
 		end
 	end
@@ -252,9 +256,101 @@ local CLASS_COLORS: { [string]: Color3 } = {
 	C = Color3.fromRGB(200, 200, 190),
 }
 
+-- modelAssetId → โมเดลต้นแบบ (ไม่ได้ parent ไว้ที่ไหน ใช้ clone อย่างเดียว)
+local meshTemplates: { [number]: Model } = {}
+-- โหลดไม่สำเร็จ ไม่ลองซ้ำจนกว่าเซิร์ฟจะรีสตาร์ท (กันยิงเน็ต + warn ซ้ำทุกครั้งที่ refresh)
+local failedMeshAssets: { [number]: boolean } = {}
+
+-- โหลด Model asset ที่ publish ขึ้น Roblox ไว้แล้ว (ดู Character.modelAssetId) ครั้งแรกครั้งเดียว
+-- ⚠️ LoadAsset **yield** (ยิงเน็ต) — เรียกครั้งแรกต้องทำก่อนล้างคอกเสมอ (ดู refreshMothers)
+-- ล้มเหลวตรงไหนก็ warn() แล้วคืน nil ให้ผู้เรียกตกกลับไปใช้กล่องสีเดิม
+-- (asset หลุด/ยังไม่ผ่านการตรวจของ Roblox ไม่ควรทำให้ทั้งคอกพังไปด้วย)
+local function loadMeshTemplate(assetId: number): Model?
+	if failedMeshAssets[assetId] then
+		return nil
+	end
+	local cached = meshTemplates[assetId]
+	if cached then
+		return cached
+	end
+
+	local ok, container = pcall(function()
+		return InsertService:LoadAsset(assetId)
+	end)
+	if not ok or container == nil then
+		-- ⚠️ LoadAsset โหลดได้เฉพาะ asset ของเจ้าของเกม (บัญชี/กลุ่มเดียวกับที่ publish เกม)
+		warn(`[PenService] LoadAsset ล้มเหลวกับ modelAssetId {assetId} — ใช้กล่องสีแทน`)
+		failedMeshAssets[assetId] = true
+		return nil
+	end
+
+	local content = container:FindFirstChildWhichIsA("Model") or container:FindFirstChildWhichIsA("BasePart")
+	if content == nil then
+		warn(`[PenService] modelAssetId {assetId} ไม่มี Model/BasePart อยู่ข้างใน — ใช้กล่องสีแทน`)
+		container:Destroy()
+		failedMeshAssets[assetId] = true
+		return nil
+	end
+
+	local model: Model
+	if content:IsA("Model") then
+		content.Parent = nil
+		model = content
+	else
+		-- asset เป็น BasePart เดี่ยว ๆ (ไม่ได้ห่อ Model มา) — ห่อเองให้ PivotTo/ScaleTo ใช้ได้
+		model = Instance.new("Model")
+		content.Parent = model
+		model.PrimaryPart = content
+	end
+	container:Destroy()
+
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("Humanoid") or descendant:IsA("AnimationController") then
+			-- ⚠️ กฎ "ห้ามใช้ Humanoid กับตัวแม่" (หัวไฟล์) — Studio บางโหมด import แล้ว rig ให้เอง
+			warn(`[PenService] modelAssetId {assetId} มี {descendant.ClassName} ติดมา — ถอดทิ้ง`)
+			descendant:Destroy()
+		elseif descendant:IsA("BasePart") then
+			-- เหมือนกล่องสีเดิม: ขยับด้วย PivotTo ล้วน ๆ ห้ามให้ฟิสิกส์ดึงตก และผู้เล่นเดินทะลุได้
+			descendant.Anchored = true
+			descendant.CanCollide = false
+		end
+	end
+
+	meshTemplates[assetId] = model
+	return model
+end
+
+-- clone จากต้นแบบแล้วสเกลตามน้ำหนักแม่ — ไม่ yield
+local function buildMeshMother(template: Model, weight: number, assetId: number): Model
+	local model = template:Clone()
+
+	-- ⚠️ สเกลแบบสัดส่วนเดียวกันทุกแกน (ไม่ยืด/บีบ) ต่างจากกล่องเดิมที่ยืด Vector3 อิสระ 3 แกนได้
+	-- เพราะโมเดล mesh จริงยืดแกนเดียวแล้วเสียรูปทันที
+	local scale = Config.getVisualScaleMultiplier(weight) * Config.Balance.VisualScale.MOTHER_PEN_SHRINK
+	local scaleOk = pcall(function()
+		model:ScaleTo(scale)
+	end)
+	if not scaleOk then
+		warn(`[PenService] Model:ScaleTo ล้มเหลวกับ modelAssetId {assetId} — ใช้ขนาดต้นฉบับที่ import มาแทน`)
+	end
+
+	return model
+end
+
 -- วาดแม่ในคอกใหม่ทั้งชุด (เรียกทุกครั้งที่รายชื่อแม่เปลี่ยน)
 -- ⚠️ ตำแหน่งสุ่มใหม่ทุกครั้ง ไม่ได้จำของเดิม ตามกฎ "ห้ามเซฟตำแหน่ง"
 function PenService.refreshMothers(player: Player, mothers: { any })
+	-- ⚠️ โหลดโมเดลต้นแบบให้ครบ **ก่อน** ล้างคอก — LoadAsset yield (ยิงเน็ต) ครั้งแรก
+	-- ถ้าไป yield กลางลูปหลังล้างคอกแล้ว refresh สองรอบที่ซ้อนกันจะสร้างแม่ซ้ำสองชุด
+	-- หลังบรรทัดนี้ทั้งฟังก์ชันไม่ yield อีกเลย การล้าง+สร้างใหม่จึงจบในรวดเดียว
+	for _, mother in mothers do
+		local character = Config.getCharacter(mother.charId)
+		if character and character.modelAssetId then
+			loadMeshTemplate(character.modelAssetId)
+		end
+	end
+
+	-- หาคอก **หลัง** yield — ผู้เล่นอาจออกเกมไประหว่างรอโหลด
 	local pen = penByUserId[player.UserId]
 	if not pen then
 		return
@@ -269,33 +365,62 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 		local character = Config.getCharacter(mother.charId)
 		local class = if character then character.class else "C"
 
-		-- ⚠️ ขนาดต่อตัว ไม่ใช่ค่าคงที่ร่วม — แม่แต่ละตัวหนักไม่เท่ากัน (Config.getMotherVisualSize)
-		-- `inPen = true` ย่อ 1/10 จากขนาดตอนถือ/ส่งรบเสมอ
-		local size = Config.getMotherVisualSize(mother.weight, true)
-		-- แม่เป็นทรงกล่อง ครึ่งความสูงจึงเป็น Y/2 ตรง ๆ (ต่างจากไข่ที่เป็นทรงกลม)
-		local restingY = Config.getPenRestingY(size.Y / 2)
-
 		local spot = randomPointInPen(pen.plot.center)
 
-		local part = Instance.new("Part")
-		part.Name = mother.uid
-		part.Size = size
-		part.Position = Vector3.new(spot.X, restingY, spot.Z)
-		part.Color = CLASS_COLORS[class] or CLASS_COLORS.C
-		part.Anchored = true
-		part.CanCollide = false
-		part.Material = Enum.Material.SmoothPlastic
-		part.TopSurface = Enum.SurfaceType.Smooth
-		part.BottomSurface = Enum.SurfaceType.Smooth
-		part.Parent = pen.mothersFolder
+		-- ⚠️ ลองใช้โมเดล mesh ที่ import มาก่อน (Character.modelAssetId) ล้มเหลว/ไม่มี
+		-- ค่อยตกกลับไปกล่องสีเดิม — ต้องมี resting Y ที่ตรงกับรูปทรงจริงของแต่ละแบบ
+		-- ⚠️ visualHeight คำนวณแยกต่อสาขา ไม่เรียก GetBoundingBox() รวมท้ายสุด เพราะเมธอดนี้
+		-- มีแค่ใน Model ไม่มีใน BasePart (สาขา fallback เป็น Part เดี่ยว ๆ)
+		local visual: Model | BasePart
+		local visualHeight: number
+		local restingY: number
+
+		local assetId = if character then character.modelAssetId else nil
+		-- โหลดไว้แล้วตอนต้นฟังก์ชัน ตรงนี้อ่านจากแคชล้วน ๆ ไม่ yield
+		local template = if assetId then loadMeshTemplate(assetId) else nil
+
+		if assetId and template then
+			local meshModel = buildMeshMother(template, mother.weight, assetId)
+			-- ครึ่งความสูงจริงหลังสเกลแล้ว (ไม่ใช่ก่อนสเกล) มาจาก bounding box จริงของโมเดลนั้น
+			local boxCFrame, boundsSize = meshModel:GetBoundingBox()
+			visualHeight = boundsSize.Y
+			restingY = Config.getPenRestingY(visualHeight / 2)
+			-- ⚠️ pivot ของโมเดลที่ import มาไม่จำเป็นต้องอยู่กลางกล่อง (มักอยู่ที่เท้าหรือจุดกำเนิด
+			-- ของไฟล์) — ชดเชยระยะนี้ ไม่งั้นโมเดลลอยหรือจมพื้นเท่ากับระยะห่าง pivot↔กลางกล่อง
+			local pivotAboveCenter = meshModel:GetPivot().Y - boxCFrame.Y
+			meshModel:PivotTo(CFrame.new(spot.X, restingY + pivotAboveCenter, spot.Z))
+			meshModel.Name = mother.uid
+			meshModel.Parent = pen.mothersFolder
+			visual = meshModel
+		else
+			-- ⚠️ ขนาดต่อตัว ไม่ใช่ค่าคงที่ร่วม — แม่แต่ละตัวหนักไม่เท่ากัน (Config.getMotherVisualSize)
+			-- `inPen = true` ย่อ 1/10 จากขนาดตอนถือ/ส่งรบเสมอ
+			local size = Config.getMotherVisualSize(mother.weight, true)
+			-- แม่เป็นทรงกล่อง ครึ่งความสูงจึงเป็น Y/2 ตรง ๆ (ต่างจากไข่ที่เป็นทรงกลม)
+			visualHeight = size.Y
+			restingY = Config.getPenRestingY(visualHeight / 2)
+
+			local part = Instance.new("Part")
+			part.Name = mother.uid
+			part.Size = size
+			part.Position = Vector3.new(spot.X, restingY, spot.Z)
+			part.Color = CLASS_COLORS[class] or CLASS_COLORS.C
+			part.Anchored = true
+			part.CanCollide = false
+			part.Material = Enum.Material.SmoothPlastic
+			part.TopSurface = Enum.SurfaceType.Smooth
+			part.BottomSurface = Enum.SurfaceType.Smooth
+			part.Parent = pen.mothersFolder
+			visual = part
+		end
 
 		local gui = Instance.new("BillboardGui")
 		gui.Name = "Tag"
 		gui.Size = UDim2.fromOffset(170, 38)
-		gui.StudsOffsetWorldSpace = Vector3.new(0, size.Y / 2 + 1.6, 0)
+		gui.StudsOffsetWorldSpace = Vector3.new(0, visualHeight / 2 + 1.6, 0)
 		gui.MaxDistance = 120
-		gui.Adornee = part
-		gui.Parent = part
+		gui.Adornee = visual
+		gui.Parent = visual
 
 		local label = Instance.new("TextLabel")
 		label.Size = UDim2.fromScale(1, 1)
@@ -307,11 +432,12 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 		label.Text = `{if character then character.name else mother.charId} ({class})\n{Config.formatWeight(mother.weight)}`
 		label.Parent = gui
 
+		local pivotPosition = visual:GetPivot().Position
 		local roamer: Roamer = {
-			part = part,
+			visual = visual,
 			origin = pen.plot.center,
-			from = part.Position,
-			to = part.Position,
+			from = pivotPosition,
+			to = pivotPosition,
 			startedAt = now,
 			duration = 0.05,
 			-- กระจายเวลาออกเดินครั้งแรก ไม่งั้นแม่ทุกตัวจะขยับพร้อมกันเป๊ะ ดูเป็นหุ่นยนต์

@@ -204,6 +204,12 @@ export type Character = {
 	name: string, -- ชื่อไทยสำหรับ UI
 	class: string, -- คีย์ใน Config.CharacterClasses
 	enabled: boolean,
+	-- id ของ **Model asset** ที่พับลิชขึ้น Roblox แล้ว (ไม่ใช่ Mesh asset เฉย ๆ — ต้องเป็น
+	-- Model เพราะ PenService ใช้ InsertService:LoadAsset() แล้ว clone ทั้งก้อนมาสเกล/วางตำแหน่ง)
+	-- nil = ยังไม่มีโมเดลเฉพาะตัว ใช้กล่องสี่เหลี่ยมสีตามคลาสแทน (ค่าเริ่มต้นของทุกตัวละคร)
+	-- ⚠️ โมเดลที่ import เข้ามาต้องเป็นชิ้นแข็งชิ้นเดียว (rigid) ห้ามมี Humanoid/skeleton ติดมา
+	-- (เหตุผลเดียวกับที่ห้ามใช้ Humanoid กับตัวแม่ทั้งหมด — ดูหัว PenService.lua)
+	modelAssetId: number?,
 }
 
 -- หนึ่งแถวในตารางสุ่มคลาสของไข่
@@ -1010,7 +1016,10 @@ local Characters: { [string]: Character } = {
 	dragon_horse = { id = "dragon_horse", name = "ม้าขาวมังกร", class = "B", enabled = true },
 
 	-- C ×1
-	monkey = { id = "monkey", name = "ลิง", class = "C", enabled = true },
+	-- ⚠️ TEMP: monkey ยังไม่มี modelAssetId — รอผู้ใช้ publish โมเดลกอริลลา (low-poly)
+	-- ขึ้น Roblox เป็น Model asset ก่อน (Import 3D ใน Studio แบบ rigid ห้ามมี Humanoid
+	-- แล้ว Save to Roblox) ได้เลขมาแล้วค่อยใส่ตรงนี้ ระหว่างนี้ยังโชว์เป็นกล่องสีเดิม
+	monkey = { id = "monkey", name = "ลิง", class = "C", enabled = true, modelAssetId = nil },
 	pig = { id = "pig", name = "หมู", class = "C", enabled = true },
 	horse = { id = "horse", name = "ม้า", class = "C", enabled = true },
 	fish = { id = "fish", name = "ปลา", class = "C", enabled = true },
@@ -3645,6 +3654,12 @@ function Config.validate()
 			CharacterClasses[character.class] ~= nil,
 			`Config: ตัวละคร "{charId}" อยู่คลาส "{character.class}" ที่ไม่มีอยู่`
 		)
+		if character.modelAssetId ~= nil then
+			assert(
+				character.modelAssetId > 0 and character.modelAssetId % 1 == 0,
+				`Config: ตัวละคร "{charId}" มี modelAssetId ที่ไม่ใช่จำนวนเต็มบวก`
+			)
+		end
 		if character.enabled then
 			classHasCharacter[character.class] = true
 		end

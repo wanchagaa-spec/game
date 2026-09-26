@@ -710,6 +710,15 @@ Balance.VisualScale = {
 	-- ไข่ไม่มีกฎนี้ (ไข่แสดงขนาดเดียวกันทุกที่ที่เห็น)
 	-- เดิม 0.1 (ย่อ 1/10) → เปลี่ยนเป็น 1 (1:1) ตามที่ผู้ใช้สั่ง — ย่อแล้วโมเดลจริง (กอริลลา) เล็กเกินไป
 	MOTHER_PEN_SHRINK = 1,
+
+	-- ══ โมเดล mesh (Character.modelAssetId) ══ — กล่องสีไม่ใช้สองค่านี้
+	-- ความสูงตอน tier 1 (studs) ไม่ว่าไฟล์ต้นฉบับ import มาขนาดไหน แล้วค่อยคูณ WEIGHT_MULTIPLIER
+	-- 5 ≈ ความสูงตัวละครผู้เล่นปกติ (ผู้ใช้ขอให้ tier 1 ตัวเท่าคน)
+	MOTHER_MESH_BASE_HEIGHT = 5,
+	-- ความเร็วเดิน (studs/วิ) ของโมเดลขนาด tier 1 ตอนอนิเมชันเดินเล่นความเร็วปกติ
+	-- ตัวใหญ่ขึ้น s เท่า → เดินเร็วขึ้น √s เท่า + อนิเมชันช้าลง √s เท่า → ระยะต่อก้าวโต s เท่า
+	-- พอดีกับขนาดตัว (สัตว์จริงก็ขยายแบบนี้) · เท้าไถล = ค่านี้มากไป · ย่ำอยู่กับที่ = น้อยไป
+	MOTHER_MESH_WALK_SPEED = 4,
 }
 
 --------------------------------------------------------------------------------
@@ -3098,6 +3107,14 @@ function Config.validate()
 		assert(
 			Balance.VisualScale.MOTHER_PEN_SHRINK > 0 and Balance.VisualScale.MOTHER_PEN_SHRINK <= 1,
 			`Config: VisualScale.MOTHER_PEN_SHRINK ต้องอยู่ในช่วง (0, 1]`
+		)
+		assert(
+			Balance.VisualScale.MOTHER_MESH_BASE_HEIGHT > 0,
+			`Config: VisualScale.MOTHER_MESH_BASE_HEIGHT ต้องมากกว่า 0`
+		)
+		assert(
+			Balance.VisualScale.MOTHER_MESH_WALK_SPEED > 0,
+			`Config: VisualScale.MOTHER_MESH_WALK_SPEED ต้องมากกว่า 0`
 		)
 	end
 

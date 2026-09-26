@@ -55,6 +55,9 @@ type Roamer = {
 	pose: string?, -- ท่าที่ขอล่าสุด (กันสั่งเล่นซ้ำทุก tick)
 	playing: AnimationTrack?, -- ท่าที่เล่นอยู่จริง (อาจเป็นท่าสำรอง ถ้าท่าที่ขอไม่มี)
 	stops: number, -- นับจำนวนครั้งที่หยุดพัก ไว้สลับ ยืนพัก/นั่ง
+	speed: number, -- studs/วิ (กล่องสี = MAP.Wander.Speed · โมเดล mesh = โตตามขนาดตัว)
+	animSpeed: number, -- ความเร็วเล่นอนิเมชัน (1 = ปกติ · ตัวใหญ่เล่นช้าลง ก้าวยาวขึ้น)
+	inset: number, -- ระยะเว้นจากขอบคอก = ครึ่งความกว้างตัว กันตัวใหญ่ยื่นทะลุรั้ว
 }
 
 -- เวลาเฟดตอนเปลี่ยนท่า — สั้นพอไม่ให้ท่าเดินค้างตอนหยุด แต่ไม่กระตุกเปลี่ยนทันที
@@ -76,7 +79,7 @@ local function playPose(roamer: Roamer, pose: string)
 		roamer.playing:Stop(POSE_FADE_SECONDS)
 	end
 	if nextTrack then
-		nextTrack:Play(POSE_FADE_SECONDS)
+		nextTrack:Play(POSE_FADE_SECONDS, 1, roamer.animSpeed)
 	end
 	roamer.playing = nextTrack
 end
@@ -103,9 +106,12 @@ local function innerHalfExtents(): (number, number)
 	return size.X / 2 - margin, size.Y / 2 - margin
 end
 
--- สุ่มจุดบนพื้นภายในแปลง
-local function randomPointInPen(center: Vector3): Vector3
+-- สุ่มจุดบนพื้นภายในแปลง · inset = เว้นจากขอบเพิ่ม (ครึ่งความกว้างของตัวที่จะวาง)
+-- ตัวใหญ่กว่าคอกก็แค่ยืนกลางคอก (ไม่ติดลบ)
+local function randomPointInPen(center: Vector3, inset: number?): Vector3
 	local halfX, halfZ = innerHalfExtents()
+	halfX = math.max(halfX - (inset or 0), 0)
+	halfZ = math.max(halfZ - (inset or 0), 0)
 	return Vector3.new(
 		center.X + rng:NextNumber(-halfX, halfX),
 		center.Y,
@@ -118,7 +124,7 @@ end
 --------------------------------------------------------------------------------
 
 local function pickNextTrip(roamer: Roamer, now: number)
-	local target = randomPointInPen(roamer.origin)
+	local target = randomPointInPen(roamer.origin, roamer.inset)
 	local from = roamer.visual:GetPivot().Position
 	local distance = (Vector3.new(target.X, from.Y, target.Z) - from).Magnitude
 
@@ -126,7 +132,7 @@ local function pickNextTrip(roamer: Roamer, now: number)
 	roamer.to = Vector3.new(target.X, from.Y, target.Z)
 	roamer.startedAt = now
 	-- ระยะ ÷ ความเร็ว = เวลาที่ใช้ · กันหาร 0 ตอนสุ่มได้จุดเดิมเป๊ะ
-	roamer.duration = math.max(distance / MAP.Wander.Speed, 0.05)
+	roamer.duration = math.max(distance / roamer.speed, 0.05)
 end
 
 local function updateWander()
@@ -292,6 +298,8 @@ local CLASS_COLORS: { [string]: Color3 } = {
 
 -- modelAssetId → โมเดลต้นแบบ (ไม่ได้ parent ไว้ที่ไหน ใช้ clone อย่างเดียว)
 local meshTemplates: { [number]: Model } = {}
+-- modelAssetId → ความสูงต้นฉบับตอน import (studs) ไว้คำนวณสเกลให้ tier 1 สูง MOTHER_MESH_BASE_HEIGHT
+local meshTemplateHeights: { [number]: number } = {}
 -- โหลดไม่สำเร็จ ไม่ลองซ้ำจนกว่าเซิร์ฟจะรีสตาร์ท (กันยิงเน็ต + warn ซ้ำทุกครั้งที่ refresh)
 local failedMeshAssets: { [number]: boolean } = {}
 -- กำลังโหลดอยู่เบื้องหลัง — กันยิง LoadAsset ซ้อนกันหลายรอบกับ asset เดียวกัน
@@ -394,8 +402,14 @@ local function getMeshTemplate(assetId: number): Model?
 	task.spawn(function()
 		local model = fetchMeshTemplateAsync(assetId)
 		loadingMeshAssets[assetId] = nil
+		local nativeHeight = if model then select(2, model:GetBoundingBox()).Y else 0
+		if model and nativeHeight <= 0 then
+			warn(`[PenService] modelAssetId {assetId} สูง 0 studs (ไม่มีชิ้นที่มองเห็น) — ใช้กล่องสีแทน`)
+			model = nil
+		end
 		if model then
 			meshTemplates[assetId] = model
+			meshTemplateHeights[assetId] = nativeHeight
 			print(`[PenService] โหลด modelAssetId {assetId} สำเร็จ — วาดคอกใหม่`)
 			redrawPensUsing(assetId)
 		else
@@ -406,12 +420,18 @@ local function getMeshTemplate(assetId: number): Model?
 end
 
 -- clone จากต้นแบบแล้วสเกลตามน้ำหนักแม่ — ไม่ yield
-local function buildMeshMother(template: Model, weight: number, assetId: number): Model
+-- คืน (โมเดล, sizeScale) · sizeScale = ใหญ่กว่าขนาด tier 1 กี่เท่า (ไว้คิดความเร็วเดิน/ก้าว)
+local function buildMeshMother(template: Model, weight: number, assetId: number): (Model, number)
 	local model = template:Clone()
+	local visualScale = Config.Balance.VisualScale
 
 	-- ⚠️ สเกลแบบสัดส่วนเดียวกันทุกแกน (ไม่ยืด/บีบ) ต่างจากกล่องเดิมที่ยืด Vector3 อิสระ 3 แกนได้
 	-- เพราะโมเดล mesh จริงยืดแกนเดียวแล้วเสียรูปทันที
-	local scale = Config.getVisualScaleMultiplier(weight) * Config.Balance.VisualScale.MOTHER_PEN_SHRINK
+	-- ⚠️ เทียบกับความสูงต้นฉบับ ไม่ใช่สเกลดิบ — ไฟล์แต่ละไฟล์ import มาขนาดไม่เท่ากัน
+	-- (กอริลลาเคยออกมาเล็กกว่าคนมากทั้งที่สเกล 1:1) ตอนนี้ tier 1 สูง MOTHER_MESH_BASE_HEIGHT เสมอ
+	local sizeScale = Config.getVisualScaleMultiplier(weight) * visualScale.MOTHER_PEN_SHRINK
+	local nativeHeight = meshTemplateHeights[assetId] or visualScale.MOTHER_MESH_BASE_HEIGHT
+	local scale = visualScale.MOTHER_MESH_BASE_HEIGHT / nativeHeight * sizeScale
 	local scaleOk = pcall(function()
 		model:ScaleTo(scale)
 	end)
@@ -419,7 +439,7 @@ local function buildMeshMother(template: Model, weight: number, assetId: number)
 		warn(`[PenService] Model:ScaleTo ล้มเหลวกับ modelAssetId {assetId} — ใช้ขนาดต้นฉบับที่ import มาแทน`)
 	end
 
-	return model
+	return model, sizeScale
 end
 
 -- animation id → Animation instance ใช้ซ้ำทุกตัว (ไม่ต้อง parent ไว้ที่ไหน)
@@ -502,8 +522,6 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 		local character = Config.getCharacter(mother.charId)
 		local class = if character then character.class else "C"
 
-		local spot = randomPointInPen(pen.plot.center)
-
 		-- ⚠️ ลองใช้โมเดล mesh ที่ import มาก่อน (Character.modelAssetId) ล้มเหลว/ไม่มี
 		-- ค่อยตกกลับไปกล่องสีเดิม — ต้องมี resting Y ที่ตรงกับรูปทรงจริงของแต่ละแบบ
 		-- ⚠️ visualHeight คำนวณแยกต่อสาขา ไม่เรียก GetBoundingBox() รวมท้ายสุด เพราะเมธอดนี้
@@ -512,17 +530,28 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 		local visualHeight: number
 		local restingY: number
 		local tracks: { [string]: AnimationTrack }? = nil
+		local speed = MAP.Wander.Speed
+		local animSpeed = 1
+		local inset: number
+		local spot: Vector3
 
 		local assetId = if character then character.modelAssetId else nil
 		-- ยังโหลดไม่เสร็จ/ล้มเหลว = nil → วาดกล่องสีไปก่อน (ไม่ yield)
 		local template = if assetId then getMeshTemplate(assetId) else nil
 
 		if assetId and template then
-			local meshModel = buildMeshMother(template, mother.weight, assetId)
+			local meshModel, sizeScale = buildMeshMother(template, mother.weight, assetId)
 			-- ครึ่งความสูงจริงหลังสเกลแล้ว (ไม่ใช่ก่อนสเกล) มาจาก bounding box จริงของโมเดลนั้น
 			local boxCFrame, boundsSize = meshModel:GetBoundingBox()
 			visualHeight = boundsSize.Y
 			restingY = Config.getPenRestingY(visualHeight / 2)
+			-- เว้นขอบเท่าครึ่งเส้นทแยงพื้น (ตัวหมุนหันไปทางไหนก็ไม่ยื่นทะลุรั้ว)
+			inset = Vector2.new(boundsSize.X, boundsSize.Z).Magnitude / 2
+			spot = randomPointInPen(pen.plot.center, inset)
+			-- ตัวใหญ่ s เท่า: เดินเร็วขึ้น √s + อนิเมชันช้าลง √s → ระยะต่อก้าวโต s เท่า (ไม่ไถล)
+			local stride = math.sqrt(sizeScale)
+			speed = Config.Balance.VisualScale.MOTHER_MESH_WALK_SPEED * stride
+			animSpeed = 1 / stride
 			-- ⚠️ pivot ของโมเดลที่ import มาไม่จำเป็นต้องอยู่กลางกล่อง (มักอยู่ที่เท้าหรือจุดกำเนิด
 			-- ของไฟล์) — ชดเชยระยะนี้ ไม่งั้นโมเดลลอยหรือจมพื้นเท่ากับระยะห่าง pivot↔กลางกล่อง
 			local pivotAboveCenter = meshModel:GetPivot().Y - boxCFrame.Y
@@ -538,6 +567,8 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 			-- แม่เป็นทรงกล่อง ครึ่งความสูงจึงเป็น Y/2 ตรง ๆ (ต่างจากไข่ที่เป็นทรงกลม)
 			visualHeight = size.Y
 			restingY = Config.getPenRestingY(visualHeight / 2)
+			inset = Vector2.new(size.X, size.Z).Magnitude / 2
+			spot = randomPointInPen(pen.plot.center, inset)
 
 			local part = Instance.new("Part")
 			part.Name = mother.uid
@@ -585,6 +616,9 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 			pose = nil,
 			playing = nil,
 			stops = 0,
+			speed = speed,
+			animSpeed = animSpeed,
+			inset = inset,
 		}
 		-- เพิ่งเกิด = ยืนรอออกเดินรอบแรก
 		playPose(roamer, "idle")

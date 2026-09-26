@@ -81,6 +81,15 @@ if Players.MaxPlayers ~= Config.World.MAX_PENS then
 	)
 end
 
+-- ⚠️ property ตัวเลขของ Roblox เก็บเป็น float 32 บิต — ค่าที่อ่านกลับมาไม่ตรงกับเลขใน Config เป๊ะ
+-- (เช่น JumpHeight 7.2 อ่านได้ 7.19999980926514) เทียบด้วย `~=` ตรง ๆ แล้วเตือนผิดทุกครั้งที่บูต
+-- จึงเทียบแบบยอมคลาดเล็กน้อย — ห่างจริง ๆ (เช่น 6.37 กับ 7.2) ยังเตือนเหมือนเดิม
+local FLOAT_TOLERANCE = 1e-3
+
+local function differs(actual: number, expected: number): boolean
+	return math.abs(actual - expected) > FLOAT_TOLERANCE
+end
+
 -- ⚠️ ความเร็ว**ฐาน**ของผู้เล่นต้องตรงกับ Config.MapDimensions.Player.WalkSpeed
 -- ตั้งไว้ที่ StarterPlayer.CharacterWalkSpeed ใน default.project.json (ไม่ได้ตั้งตอน CharacterAdded)
 -- เพราะ Roblox ใส่ค่าให้ตั้งแต่ตอนสร้าง Humanoid = ไม่ต้องต่อ event สำหรับค่าฐานที่ไม่เปลี่ยน
@@ -91,7 +100,7 @@ end
 -- ⚠️ ตัวคูณจาก `speedLevel` ที่ซื้อด้วยเงิน (§8.8) เป็นคนละชั้นกับค่าฐานนี้ — ต่างจากค่าฐาน
 -- ตัวคูณนี้**ต้องตั้งซ้ำทุกครั้งที่ CharacterAdded** เพราะ Humanoid ใหม่ทุกตัวรีเซ็ตกลับไปที่ค่า
 -- ฐานของ StarterPlayer เสมอ (ดู `EggService.applyWalkSpeed` + hook ท้ายไฟล์นี้)
-if StarterPlayer.CharacterWalkSpeed ~= Config.MapDimensions.Player.WalkSpeed then
+if differs(StarterPlayer.CharacterWalkSpeed, Config.MapDimensions.Player.WalkSpeed) then
 	warn(
 		`[Main] ⚠️ CharacterWalkSpeed = {StarterPlayer.CharacterWalkSpeed} แต่ Config ตั้งไว้ `
 			.. `{Config.MapDimensions.Player.WalkSpeed} — เวลาเดินข้ามแมพจะไม่ตรงกับที่ออกแบบไว้ · `
@@ -112,7 +121,7 @@ if StarterPlayer.CharacterUseJumpPower then
 			.. `ความสูงกระโดดจริงมาจาก JumpPower ({StarterPlayer.CharacterJumpPower}) แทน · `
 			.. `แก้ที่ default.project.json`
 	)
-elseif StarterPlayer.CharacterJumpHeight ~= Config.MapDimensions.Player.JumpHeight then
+elseif differs(StarterPlayer.CharacterJumpHeight, Config.MapDimensions.Player.JumpHeight) then
 	warn(
 		`[Main] ⚠️ CharacterJumpHeight = {StarterPlayer.CharacterJumpHeight} แต่ Config ตั้งไว้ `
 			.. `{Config.MapDimensions.Player.JumpHeight} — เกณฑ์ความสูงกำแพงใสจะคำนวณจากค่าที่ไม่ตรงกับของจริง · `

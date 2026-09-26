@@ -137,7 +137,8 @@ ProductionService.start(EggService.sync)
 -- EggService (อ่าน docs/data-schema.md §7) ต่อ RemoteEvent ของตัวเอง (SetReleaseOrderRequest /
 -- SetSummonEnabledRequest) และเซฟผ่าน DataService path เดิม (stageProgress/currency ก็คือ
 -- PlayerData fields ธรรมดา ไม่มีระบบเซฟแยก)
-CombatService.start()
+-- ⚠️ Phase 4A: inject ตัวแจกไข่รางวัลผ่านด่านเข้าไป (กัน circular require แบบเดียวกับ ProductionService)
+CombatService.start(EggService.grantStageClearBonus)
 
 -- ⚠️ ต่อ BindToClose **ก่อน** ปล่อยให้ใครเข้ามาเล่น
 -- ถ้าต่อทีหลัง มีช่วงที่เซิร์ฟเวอร์ปิดแล้วไม่มีใครเซฟให้เลย

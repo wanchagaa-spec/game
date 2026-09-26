@@ -84,6 +84,7 @@ local buySpeedUpgradeRequest: RemoteEvent
 local eggHatched: RemoteEvent
 local farmStateSync: RemoteEvent
 local actionResult: RemoteEvent
+local stageClearedNotify: RemoteEvent
 
 -- ⚠️ ส่งผลลัพธ์ (สำเร็จ/ล้มเหลว + เหตุผล) ของคำขอกลับไปหาผู้เล่นคนที่ยิงคำขอมาเท่านั้น
 -- ก่อนหน้านี้ผลลัพธ์ไปโผล่แค่ print ใน server console เท่านั้น ผู้เล่นไม่เห็นอะไรเลย
@@ -777,6 +778,25 @@ function EggService.sendMotherToBattle(player: Player, rawUid: unknown): (boolea
 	return ok, message
 end
 
+-- รางวัลผ่านด่าน (Phase 4A) — CombatService.tick ตัดสินแล้วว่าได้ (ติดธงไปแล้ว ให้ซ้ำไม่ได้)
+-- ที่นี่แค่แจกไข่ของรังบอสด่านนั้นผ่าน grantEgg (สุ่มน้ำหนักแบบเดียวกับไข่ทุกแหล่ง) แล้วแจ้ง client
+-- ⚠️ กระเป๋าไข่เต็มกลางทาง = แจกเท่าที่ใส่ได้ ธงติดไปแล้ว (ได้ครั้งเดียว) popup บอกจำนวนที่ได้จริง
+function EggService.grantStageClearBonus(player: Player, stage: number, eggCount: number)
+	local eggId = Config.getBossEggId(stage)
+	local granted = 0
+	for _ = 1, eggCount do
+		local ok, err = EggService.grantEgg(player, eggId)
+		if not ok then
+			warn(`[EggService] รางวัลผ่านด่าน {stage} ของ {player.Name}: แจกได้ {granted}/{eggCount} ฟอง ({err})`)
+			break
+		end
+		granted += 1
+	end
+
+	stageClearedNotify:FireClient(player, stage, granted)
+	print(`[EggService] {player.Name} ผ่านด่าน {stage} ครั้งแรก · ได้ {eggId} ฟรี {granted}/{eggCount} ฟอง`)
+end
+
 --------------------------------------------------------------------------------
 -- ซื้อตัวคูณ damage / ความเร็ว — ทั้งคู่เป็นของบัญชีผู้เล่น (ไม่ใช่ของแม่รายตัว)
 --------------------------------------------------------------------------------
@@ -993,6 +1013,8 @@ function EggService.debugResetAll(player: Player)
 			stageProgressCleared += 1
 		end
 		data.stageProgress[stage] = false
+		-- ธงรางวัลผ่านด่าน (Phase 4A) กลับเป็น false ด้วย — ไม่งั้นรีเซ็ตแล้วตีใหม่จะไม่ได้ไข่ ทดสอบซ้ำไม่ได้
+		data.stageClearBonusGranted[stage] = false
 	end
 	data.wallProgress = Config.Balance.NewPlayer.wallProgress
 
@@ -1428,6 +1450,7 @@ function EggService.start()
 	eggHatched = Remotes.waitFor(Config.RemoteNames.EGG_HATCHED)
 	farmStateSync = Remotes.waitFor(Config.RemoteNames.FARM_STATE_SYNC)
 	actionResult = Remotes.waitFor(Config.RemoteNames.ACTION_RESULT)
+	stageClearedNotify = Remotes.waitFor(Config.RemoteNames.STAGE_CLEARED_NOTIFY)
 
 	placeEggRequest.OnServerEvent:Connect(function(player, rawEggId, rawSlotIndex)
 		local ok, reason = EggService.placeEgg(player, rawEggId, rawSlotIndex)

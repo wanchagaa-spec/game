@@ -664,4 +664,134 @@ return function(t, Config)
 		check("  sync ส่ง charId", sync.battleRoster[1].charId, "wukong")
 		check("  sync ส่งน้ำหนัก", sync.battleRoster[1].weight, 123456)
 	end
+
+	----------------------------------------------------------------------------
+	-- Phase 4A รางวัลผ่านด่าน (ไข่ฟรีครั้งเดียวต่อด่าน)
+	----------------------------------------------------------------------------
+	local EXPECTED_BONUS = { 0, 1, 1, 2, 2, 2, 3, 3, 3 }
+
+	-- ผู้เล่นที่ด่าน 1..stage-1 พังแล้ว · ด่าน stage เหลือกำแพง 1 HP · มีแม่ 1 ตัวใน roster (ตี 10/วิ)
+	local function dataAboutToClear(stage: number)
+		local data = freshData()
+		for index = 1, stage - 1 do
+			data.stageProgress[index] = { defendersRemaining = 0, wallHpRemaining = 0 }
+		end
+		data.stageProgress[stage] = { defendersRemaining = 0, wallHpRemaining = 1 }
+		data.summonEnabled = true
+		table.insert(data.battleRoster, makeMother())
+		return data
+	end
+
+	local function countTrue(flags): number
+		local total = 0
+		for _, flag in flags do
+			if flag == true then
+				total += 1
+			end
+		end
+		return total
+	end
+
+	print("── 4A จำนวนไข่ต่อด่านตรงตาราง (ด่าน 1 = 0 เพราะไม่มีกำแพง · 2–3 = 1 · 4–6 = 2 · 7–9 = 3) ──")
+
+	do
+		for stage = 1, Config.Balance.Stage.COUNT do
+			check(`Config: ด่าน {stage} = {EXPECTED_BONUS[stage]} ฟอง`, Config.getStageClearBonusEggs(stage), EXPECTED_BONUS[stage])
+		end
+		for stage = 2, Config.Balance.Stage.COUNT do
+			check(`ด่าน {stage} ตรงสูตร floor((ด่าน-1)/3)+1`, Config.getStageClearBonusEggs(stage), math.floor((stage - 1) / 3) + 1)
+		end
+		check("ขอบ: ด่าน 3 → 1", Config.getStageClearBonusEggs(3), 1)
+		check("ขอบ: ด่าน 4 → 2", Config.getStageClearBonusEggs(4), 2)
+		check("ขอบ: ด่าน 9 → 3", Config.getStageClearBonusEggs(9), 3)
+		check("นอกช่วง (ด่าน 10) → 0", Config.getStageClearBonusEggs(10), 0)
+
+		-- ผ่าน tick จริงทีละด่าน: ด่านเพิ่งพังต้องคืนจำนวนไข่ตามตาราง + ติดธงเฉพาะด่านนั้น
+		for stage = 2, Config.Balance.Stage.COUNT do
+			local data = dataAboutToClear(stage)
+			local result = CombatService.tick(data, freshMeta(), 1)
+			check(`tick พังด่าน {stage}: clearedStage`, result.clearedStage, stage)
+			check(`tick พังด่าน {stage}: ได้ไข่ {EXPECTED_BONUS[stage]} ฟอง`, result.bonusEggs, EXPECTED_BONUS[stage])
+			check(`  ติดธงด่าน {stage}`, data.stageClearBonusGranted[stage], true)
+			check(`  ติดธงแค่ด่านเดียว`, countTrue(data.stageClearBonusGranted), 1)
+		end
+	end
+
+	print("── 4A ให้รางวัลครั้งเดียวจริง: recompute/tick/claim ซ้ำหลังพังแล้ว ไม่ได้ไข่ซ้ำ ──")
+
+	do
+		local data = dataAboutToClear(2)
+		local meta = freshMeta()
+		local first = CombatService.tick(data, meta, 1)
+		check("รอบแรก: ด่าน 2 พัง ได้ไข่ 1", first.bonusEggs, 1)
+		check("  ธงด่าน 2 = true", data.stageClearBonusGranted[2], true)
+
+		local totalBonus = 0
+		for _ = 1, 5 do
+			CombatService.recomputeWallProgress(data)
+		end
+		for _ = 1, 5 do
+			table.insert(data.battleRoster, makeMother())
+			totalBonus += CombatService.tick(data, meta, 1).bonusEggs
+		end
+		check("recompute ×5 + tick ×5 (ด่าน 3 ยังไม่พัง) → ไม่ได้ไข่เพิ่ม", totalBonus, 0)
+		check("claim ด่าน 2 ซ้ำตรง ๆ → 0", CombatService.claimStageClearBonus(data, 2), 0)
+		check("claim ด่าน 2 ซ้ำอีกรอบ → 0", CombatService.claimStageClearBonus(data, 2), 0)
+		check("ธงยังติดแค่ด่านเดียว (ไม่ถูกเซ็ตซ้ำ/ลาม)", countTrue(data.stageClearBonusGranted), 1)
+	end
+
+	print("── 4A ด่าน 1 (ไม่มีกำแพง) พังฟรีตอนปล่อยครั้งแรก → ไม่ได้ไข่ ไม่ติดธง ──")
+
+	do
+		local data = freshData()
+		data.summonEnabled = true
+		table.insert(data.battleRoster, makeMother())
+		local result = CombatService.tick(data, freshMeta(), 1)
+		check("ด่าน 1 พัง", result.clearedStage, 1)
+		check("  ไม่ได้ไข่", result.bonusEggs, 0)
+		check("  ธงด่าน 1 ยังเป็น false", data.stageClearBonusGranted[1], false)
+		check("claim ด่าน 1 ตรง ๆ ก็ได้ 0", CombatService.claimStageClearBonus(data, 1), 0)
+	end
+
+	print("── 4A ผู้เล่นเก่า (v2) พังด่าน 1–3 ไปก่อนอัปเดต → migrate แล้วไม่ได้ไข่ย้อนหลัง ──")
+
+	do
+		local old = freshData()
+		old.schemaVersion = 2
+		old.stageClearBonusGranted = nil
+		for index = 1, 3 do
+			old.stageProgress[index] = { defendersRemaining = 0, wallHpRemaining = 0 }
+		end
+		old.stageProgress[4] = { defendersRemaining = 0, wallHpRemaining = 1 }
+		old.wallProgress = 3
+
+		local migrated = PlayerData.migrate(old)
+		check("migrate v2 → v3 สำเร็จ", migrated ~= nil, true)
+		check("  ธงเป็น false ทั้ง 9 ช่อง (ด่านที่พังแล้วก็ false)", countTrue(migrated.stageClearBonusGranted), 0)
+		check("  ธงยาว 9 ช่อง", #migrated.stageClearBonusGranted, 9)
+
+		for _ = 1, 3 do
+			CombatService.recomputeWallProgress(migrated)
+		end
+		check("recompute ซ้ำ → ไม่ติดธงให้ด่านเก่า", countTrue(migrated.stageClearBonusGranted), 0)
+
+		migrated.summonEnabled = true
+		table.insert(migrated.battleRoster, makeMother())
+		local result = CombatService.tick(migrated, freshMeta(), 1)
+		check("ด่าน 4 เพิ่งพังหลังอัปเดต → ได้ไข่ของด่าน 4 เท่านั้น (2 ฟอง)", result.bonusEggs, 2)
+		check("  ธงด่าน 4 = true", migrated.stageClearBonusGranted[4], true)
+		check("  ด่าน 1–3 ที่พังก่อนอัปเดตยังไม่ได้รางวัล (false)", countTrue(migrated.stageClearBonusGranted), 1)
+	end
+
+	print("── 4A stageClearBonusGranted ผ่าน encode/decode ครบ ──")
+
+	do
+		local data = dataAboutToClear(5)
+		CombatService.tick(data, freshMeta(), 1)
+		PlayerData.sanitizeForSave(data) -- ต้องไม่ throw (อาเรย์ boolean ยาวคงที่ ไม่มีรู)
+		local back = Json.decode(PlayerData.encode(data))
+		check("ธงด่าน 5 กลับมาเป็น true", back.stageClearBonusGranted[5], true)
+		check("ธงด่าน 4 กลับมาเป็น false", back.stageClearBonusGranted[4], false)
+		check("ยาว 9 ช่องเท่าเดิม", #back.stageClearBonusGranted, 9)
+	end
 end

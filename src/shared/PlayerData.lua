@@ -92,6 +92,11 @@ export type Data = {
 	hatching: { HatchSlot | false },
 	heldEggs: HeldEggs,
 	stageProgress: { StageProgress | false },
+	-- ⚠️ ธงรางวัลผ่านด่าน (Phase 4A · schema v3) อาเรย์ boolean ยาวคงที่ = Stage.COUNT (index ตรงกับ stageProgress)
+	-- true = ได้ไข่ฟรีของด่านนั้นไปแล้ว ห้ามให้ซ้ำ · ติดเฉพาะตอนด่านเพิ่งพังใน CombatService.tick
+	-- ⚠️ false ไม่ได้แปลว่า "ยังไม่พัง" — ผู้เล่นที่พังด่านไปก่อนอัปเดต v3 ได้ false ทั้งหมด
+	-- และจะไม่ได้ไข่ย้อนหลัง (ด่านที่พังแล้วไม่มีวันพังซ้ำ จึงไม่เกิดจังหวะ "เพิ่งพัง" อีก)
+	stageClearBonusGranted: { boolean },
 	summonEnabled: boolean,
 	-- ⚠️ true เฉพาะตอนที่ auto-pause (§7.6) เป็นคนปิด summonEnabled ให้เอง
 	-- ผู้เล่นกดปิดเองไม่ตั้งค่านี้ — ใช้แยกว่าจะโชว์แจ้งเตือน "ตีไม่เข้า" หรือเปล่า (3B)
@@ -124,8 +129,10 @@ function PlayerData.createNew(): Data
 	end
 
 	local stageProgress: { StageProgress | false } = {}
+	local stageClearBonusGranted: { boolean } = {}
 	for index = 1, Config.Balance.Stage.COUNT do
 		stageProgress[index] = false
+		stageClearBonusGranted[index] = false
 	end
 
 	return {
@@ -153,6 +160,7 @@ function PlayerData.createNew(): Data
 		hatching = hatching,
 		heldEggs = { nextEggId = 1, items = {} },
 		stageProgress = stageProgress,
+		stageClearBonusGranted = stageClearBonusGranted,
 		summonEnabled = Config.Balance.Combat.SUMMON_DEFAULT_ON,
 		combatAutoPaused = false,
 		releaseOrder = {},
@@ -246,6 +254,21 @@ MIGRATIONS[1] = function(data: Data): Data
 	return data
 end
 
+-- v2 → v3 (Phase 4A): เพิ่ม stageClearBonusGranted = false ทั้ง 9 ช่อง (hard-code 9 ตามกฎ migration
+-- ห้ามอ่าน Config) · ⚠️ ตั้งใจ false หมดแม้ด่านนั้นจะพังไปแล้ว — รางวัลผูกกับจังหวะ "ด่านเพิ่งพัง" ใน
+-- CombatService.tick ไม่ใช่กับสถานะ "พังอยู่" ด่านที่พังก่อนอัปเดตจึงไม่ได้ไข่ย้อนหลัง
+MIGRATIONS[2] = function(data: Data): Data
+	local raw = data :: any
+	if type(raw.stageClearBonusGranted) ~= "table" then
+		local flags = {}
+		for index = 1, 9 do
+			flags[index] = false
+		end
+		raw.stageClearBonusGranted = flags
+	end
+	return data
+end
+
 PlayerData.MIGRATIONS = MIGRATIONS
 
 -- คืน (data, err) — err ไม่ nil แปลว่า **ห้ามเซฟทับ**
@@ -309,6 +332,9 @@ function PlayerData.normalize(data: Data): Data
 	for index = 1, Config.Balance.Stage.COUNT do
 		if data.stageProgress[index] == nil then
 			data.stageProgress[index] = false
+		end
+		if data.stageClearBonusGranted[index] == nil then
+			data.stageClearBonusGranted[index] = false
 		end
 	end
 
@@ -528,6 +554,7 @@ function PlayerData.buildWorstCase(): Data
 
 	for index = 1, Config.Balance.Stage.COUNT do
 		data.stageProgress[index] = { defendersRemaining = 1000000000, wallHpRemaining = 999999999999 }
+		data.stageClearBonusGranted[index] = true
 	end
 
 	data.sessionLock = { jobId = string.rep("0", 36), placeId = 9999999999, at = 9999999999 }

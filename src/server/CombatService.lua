@@ -231,6 +231,25 @@ function CombatService.killRoster(data: Data, clearedStage: number): number
 end
 
 --------------------------------------------------------------------------------
+-- รางวัลผ่านด่าน (Phase 4A) — ไข่ฟรีครั้งเดียวต่อด่าน
+--------------------------------------------------------------------------------
+-- ⚠️ เรียกจาก tick ตรงจังหวะ "ด่านเพิ่งพัง" เท่านั้น **ห้ามเรียกจาก recomputeWallProgress**
+-- (ฟังก์ชันนั้นไล่นับด่านที่พังอยู่ทั้งหมดใหม่ทุกครั้ง — ถ้าให้รางวัลตรงนั้น ผู้เล่นเก่าที่ธงเป็น false
+-- จะได้ไข่ย้อนหลังทุกด่านที่เคยพัง และ debugSetStageProgress ก็เรียกมันด้วย)
+-- ติดธงก่อนคืนค่าเสมอ → เรียกซ้ำกี่ครั้งก็ได้ 0 · ด่านที่ไม่มีอะไรให้ตี (ด่าน 1) ได้ 0 และไม่ติดธง
+-- คืน "จำนวนไข่ที่ต้องแจก" — การสร้างไข่จริงอยู่ที่ EggService (ผ่าน grantEgg ตัวเดียวกับไข่ทุกแหล่ง)
+function CombatService.claimStageClearBonus(data: Data, clearedStage: number): number
+	if Config.getStageTotalHp(clearedStage) <= 0 then
+		return 0
+	end
+	if data.stageClearBonusGranted[clearedStage] == true then
+		return 0
+	end
+	data.stageClearBonusGranted[clearedStage] = true
+	return Config.getStageClearBonusEggs(clearedStage)
+end
+
+--------------------------------------------------------------------------------
 -- ใส่ damage ให้ด่าน — ทหารฝ่ายรับก่อน ส่วนเกินไหลไปกำแพงในตาเดียวกัน
 --------------------------------------------------------------------------------
 
@@ -325,6 +344,8 @@ export type TickResult = {
 	stageCleared: boolean,
 	autoPaused: boolean,
 	mothersLost: number, -- แม่ใน roster ที่ตายในตานี้ (ด่านพัง) — 0 ถ้าด่านยังไม่พัง
+	clearedStage: number?, -- ด่านที่เพิ่งพังในตานี้ (nil ถ้าไม่มี)
+	bonusEggs: number, -- ไข่ฟรีที่ต้องแจก (Phase 4A) — 0 ถ้าไม่มีด่านพัง หรือเคยได้รางวัลด่านนี้แล้ว
 }
 
 local EMPTY_RESULT: TickResult = {
@@ -334,6 +355,8 @@ local EMPTY_RESULT: TickResult = {
 	stageCleared = false,
 	autoPaused = false,
 	mothersLost = 0,
+	clearedStage = nil,
+	bonusEggs = 0,
 }
 
 -- auto-pause (§7.6): กันทหารถูกป้อนเข้าเครื่องบดหายถาวรโดยไม่ได้ damage เลย
@@ -395,6 +418,7 @@ function CombatService.tick(data: Data, meta: CombatMeta, elapsedSeconds: number
 	local stageCleared = false
 	local progressMade = 0
 	local mothersLost = 0
+	local bonusEggs = 0
 
 	if damageDealt > 0 then
 		local dmgToDefenders, dmgToWall, coins, cleared =
@@ -409,6 +433,8 @@ function CombatService.tick(data: Data, meta: CombatMeta, elapsedSeconds: number
 			CombatService.recomputeWallProgress(data)
 			-- ⚠️ แม่ทั้ง roster ตายถาวรพร้อมกันทันทีที่ด่านที่กำลังตีพัง
 			mothersLost = CombatService.killRoster(data, stage)
+			-- ⚠️ Phase 4A: รางวัลผูกกับจังหวะนี้ (เพิ่งพัง) ไม่ใช่กับสถานะ "พังอยู่" — ดู claimStageClearBonus
+			bonusEggs = CombatService.claimStageClearBonus(data, stage)
 		end
 	end
 
@@ -421,6 +447,8 @@ function CombatService.tick(data: Data, meta: CombatMeta, elapsedSeconds: number
 		stageCleared = stageCleared,
 		autoPaused = autoPaused,
 		mothersLost = mothersLost,
+		clearedStage = if stageCleared then stage else nil,
+		bonusEggs = bonusEggs,
 	}
 end
 
@@ -566,7 +594,10 @@ end
 -- ⚠️ require ของจริงทั้งหมดอยู่ *ในตัวฟังก์ชัน* ไม่ใช่ระดับโมดูล เหมือน ProductionService.start()
 -- เพื่อให้ require ไฟล์นี้จาก tests/run.luau (นอก Roblox) ได้โดยไม่พังตั้งแต่โหลด
 
-function CombatService.start()
+-- `onStageCleared(player, stage, eggCount)` = EggService.grantStageClearBonus (Main.server.lua ส่งเข้ามา)
+-- ⚠️ inject แทน require EggService ตรง ๆ กัน circular require (EggService require ไฟล์นี้อยู่แล้ว)
+-- แบบเดียวกับ ProductionService.start(EggService.sync)
+function CombatService.start(onStageCleared: (Player, number, number) -> ())
 	local Players = game:GetService("Players")
 	local ReplicatedStorage = game:GetService("ReplicatedStorage")
 	local ServerScriptService = game:GetService("ServerScriptService")
@@ -610,7 +641,18 @@ function CombatService.start()
 						then nowClock - meta.lastTickClock
 						else Config.World.SYNC_INTERVAL
 					meta.lastTickClock = nowClock
-					CombatService.tick(data, meta, elapsed)
+					local result = CombatService.tick(data, meta, elapsed)
+					if result.clearedStage and result.bonusEggs > 0 then
+						-- ⚠️ pcall: แจกไข่พังเมื่อไหร่ต้องไม่ลากลูปรบของทั้งเซิร์ฟตายไปด้วย (ธงติดไปแล้ว — log ไว้ตามแก้)
+						local clearedStage, bonusEggs = result.clearedStage, result.bonusEggs
+						local ok, err = pcall(function(): string?
+							onStageCleared(player, clearedStage, bonusEggs)
+							return nil
+						end)
+						if not ok then
+							warn(`[CombatService] แจกรางวัลผ่านด่าน {result.clearedStage} ให้ {player.Name} ไม่สำเร็จ: {err}`)
+						end
+					end
 				end
 			end
 		end

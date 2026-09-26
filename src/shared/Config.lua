@@ -14,7 +14,8 @@ local Config = {}
 -- ⚠️ ทุกครั้งที่เปลี่ยนโครง PlayerData ต้องบวกเลขนี้ + เขียน migration
 -- รายละเอียดใน docs/data-schema.md
 -- v2 (Phase 3C-1): เพิ่ม battleRoster (แม่ที่ส่งไปรบ) — migration อยู่ที่ PlayerData.MIGRATIONS[1]
-Config.SCHEMA_VERSION = 2
+-- v3 (Phase 4A): เพิ่ม stageClearBonusGranted (ธงรางวัลผ่านด่าน 9 ช่อง) — PlayerData.MIGRATIONS[2]
+Config.SCHEMA_VERSION = 3
 
 --------------------------------------------------------------------------------
 -- ทำให้ไฟล์นี้โหลดได้นอก Roblox ด้วย (สำหรับชุดเทสต์ใน tests/)
@@ -562,6 +563,11 @@ Config.RemoteNames = {
 	-- ⚠️ ย้อนกลับไม่ได้ แม่ตายถาวรตอนด่านที่กำลังตีพัง (CombatService.handleSendMotherToBattle)
 	-- client ต้องขึ้นกล่องยืนยันก่อนยิงทุกครั้ง · ผลตอบกลับทาง ACTION_RESULT
 	SEND_MOTHER_TO_BATTLE_REQUEST = "SendMotherToBattleRequest",
+
+	-- server → client : FireClient(stage, eggCount) — กำแพงด่านนั้นเพิ่งพังเป็นครั้งแรก ได้ไข่ฟรี (Phase 4A)
+	-- ⚠️ เหตุการณ์ที่ server เป็นคนเริ่มเอง (ไม่ได้มาจากปุ่มที่ผู้เล่นกด) จึงแยกจาก ACTION_RESULT
+	-- ยิงครั้งเดียวตอนเกิดเหตุ ไม่อยู่ใน FARM_STATE_SYNC — resync กี่รอบ popup ก็ไม่โผล่ซ้ำ
+	STAGE_CLEARED_NOTIFY = "StageClearedNotify",
 }
 
 --------------------------------------------------------------------------------
@@ -1575,6 +1581,13 @@ Balance.Combat = {
 	-- ⚠️ ยามเวลาผ่านด่าน (assertProgressionIsSane) คิดจากผู้เล่นที่ไม่ส่งแม่ — ส่งแม่ = เร็วขึ้น
 	-- แลกกับเสียเครื่องผลิตถาวร ซึ่งเป็นการเลือกของผู้เล่นเอง
 	MAX_BATTLE_MOTHERS = 10,
+
+	-- ══ รางวัลผ่านด่าน (Phase 4A) ══ ไข่ฟรีตอนกำแพงด่านนั้นพังเป็นครั้งแรก (ได้ครั้งเดียวต่อด่าน)
+	-- ไข่ = Config.getBossEggId(ด่าน) คือไข่ของรังบอสที่เพิ่งปลดล็อก · สุ่มน้ำหนักตามปกติผ่าน EggService.grantEgg
+	-- ⚠️ ให้เป็นไข่ ไม่ใช่เงิน — เงินเพิ่งถูกดูดส่วนเกินด้วย DamageUpgrade ใส่เงินก้อนเพิ่ม = ย้อนปัญหาเดิม
+	-- ⚠️ ด่าน 1 = 0 เสมอ: ไม่มีกำแพงให้พัง ("พัง" ฟรีตั้งแต่ตาแรกที่ปล่อยทหาร) · validate() บังคับ
+	-- ด่าน 2–3 = 1 · 4–6 = 2 · 7–9 = 3 → รวม 17 ฟองทั้งเกม (~3% ของไข่จากบอสตลอดทางถึงด่าน 9)
+	STAGE_CLEAR_BONUS_EGGS = { 0, 1, 1, 2, 2, 2, 3, 3, 3 },
 }
 
 --------------------------------------------------------------------------------
@@ -2382,6 +2395,11 @@ end
 function Config.getMinWallThickness(): number
 	local upgrade = Config.Balance.SpeedUpgrade
 	return Config.getMaxWalkSpeed() / upgrade.PHYSICS_FPS * upgrade.THICKNESS_SAFETY
+end
+
+-- จำนวนไข่ฟรีตอนกำแพงด่านนั้นพังครั้งแรก (Phase 4A) — ด่านนอกช่วง = 0
+function Config.getStageClearBonusEggs(stage: number): number
+	return Config.Balance.Combat.STAGE_CLEAR_BONUS_EGGS[stage] or 0
 end
 
 -- อัตราปล่อยทหารของด่านนั้น (ตัว/วินาที)
@@ -4091,6 +4109,18 @@ function Config.validate()
 		combat.MAX_BATTLE_MOTHERS > 0 and combat.MAX_BATTLE_MOTHERS % 1 == 0,
 		"Config: MAX_BATTLE_MOTHERS ต้องเป็นจำนวนเต็มบวก"
 	)
+	-- รางวัลผ่านด่าน: ครบทุกด่าน · จำนวนเต็ม ≥ 0 · ด่านที่ไม่มีอะไรให้ตี (HP รวม 0) ต้องเป็น 0
+	-- (ด่านแบบนั้น "พัง" ฟรีตั้งแต่ตาแรก ไม่มีกำแพงให้พังจริง จึงไม่มีรางวัล)
+	assert(
+		#combat.STAGE_CLEAR_BONUS_EGGS == Config.Balance.Stage.COUNT,
+		`Config: STAGE_CLEAR_BONUS_EGGS มี {#combat.STAGE_CLEAR_BONUS_EGGS} ช่อง แต่มี {Config.Balance.Stage.COUNT} ด่าน`
+	)
+	for bonusStage, eggs in combat.STAGE_CLEAR_BONUS_EGGS do
+		assert(eggs >= 0 and eggs % 1 == 0, `Config: STAGE_CLEAR_BONUS_EGGS ด่าน {bonusStage} ต้องเป็นจำนวนเต็ม ≥ 0`)
+		if Config.getStageTotalHp(bonusStage) <= 0 then
+			assert(eggs == 0, `Config: ด่าน {bonusStage} ไม่มีกำแพง/ทหารให้พัง — STAGE_CLEAR_BONUS_EGGS ต้องเป็น 0`)
+		end
+	end
 	----------------------------------------------------------------------------
 	-- ตัวคูณ damage ที่ซื้อด้วยเงิน
 	----------------------------------------------------------------------------

@@ -263,6 +263,38 @@ return function(t, Config)
 	alreadyHasRoster.battleRoster = { { uid = "777-2", charId = "monkey", weight = 100, statuses = {}, obtainedAt = 0, locked = false } }
 	local kept = PlayerData.migrate(alreadyHasRoster)
 	check("migration ไม่ทับ roster ที่มีอยู่แล้ว", kept and #kept.battleRoster, 1)
+	check("v1 ไล่ถึงปัจจุบันได้ธงรางวัลผ่านด่านด้วย (ผ่าน v2 → v3)", v2 and #v2.stageClearBonusGranted, 9)
+
+	-- v2 → v3 (Phase 4A): เซฟยุค v2 ไม่มี stageClearBonusGranted → ได้ false ทั้ง 9 ช่อง
+	local savedV2 = PlayerData.createNew()
+	savedV2.schemaVersion = 2
+	savedV2.stageClearBonusGranted = nil
+	local v3, v3Err = PlayerData.migrate(savedV2)
+	check("v2 → v3 สำเร็จ", v3Err, nil)
+	check("  schemaVersion = 3", v3 and v3.schemaVersion, 3)
+	local allFalse = true
+	for index = 1, 9 do
+		if v3 and v3.stageClearBonusGranted[index] ~= false then
+			allFalse = false
+		end
+	end
+	check("  ธง 9 ช่องเป็น false ทั้งหมด", allFalse, true)
+
+	-- idempotent: มีธงอยู่แล้ว (migrate ซ้ำ) ห้ามทับ
+	local alreadyHasFlags = PlayerData.createNew()
+	alreadyHasFlags.schemaVersion = 2
+	alreadyHasFlags.stageClearBonusGranted[2] = true
+	local keptFlags = PlayerData.migrate(alreadyHasFlags)
+	check("migration ไม่ทับธงที่มีอยู่แล้ว", keptFlags and keptFlags.stageClearBonusGranted[2], true)
+	check("migration v2→v3 รันซ้ำตรง ๆ ได้ผลเดิม", PlayerData.MIGRATIONS[2](keptFlags).stageClearBonusGranted[2], true)
+
+	-- normalize เติมช่องที่ขาดให้ครบ 9 เป็น false
+	local shortFlags = PlayerData.createNew()
+	shortFlags.stageClearBonusGranted = { true, false }
+	PlayerData.normalize(shortFlags)
+	check("normalize เติมธงให้ครบ 9 ช่อง", #shortFlags.stageClearBonusGranted, 9)
+	check("  ช่องที่เติมเป็น false", shortFlags.stageClearBonusGranted[9], false)
+	check("  ไม่ทับช่องเดิม", shortFlags.stageClearBonusGranted[1], true)
 
 	-- normalize ต้องเติมฟิลด์ที่ขาดโดยไม่ทับของเดิม
 	local partial = PlayerData.createNew()

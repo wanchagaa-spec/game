@@ -28,6 +28,7 @@
 -- (blockout: คล้ำสี + เพิ่มเส้นรอยร้าวทีละขั้น ไม่มีโมเดล/texture รอยร้าวจริง) รายละเอียดอยู่
 -- ตรงตาราง WALL_TIER_* ด้านล่าง — อัปเดตเฉพาะด่านที่ข้าม threshold เท่านั้น ไม่ rebuild ทั้งชุด
 -- ทุก sync อีกต่อไป (ประหยัด work ฝั่ง client)
+-- ⚠️ เลเวลที่วาดอยู่เก็บเป็น **Attribute บนตัวโมเดล** (`WallTier`) ไม่ใช่ตัวแปรในโมดูล — ดู TIER_ATTRIBUTE
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -75,10 +76,13 @@ end
 
 local folder: Folder? = nil
 
--- ⚠️ เก็บ "เลเวลที่วาดอยู่จริงตอนนี้" แยกจาก currentStageProgress (ค่าดิบจาก server)
--- ต่างกันเมื่อไหร่ค่อย rebuild โมเดลด่านนั้นจริง ๆ — เลเวลเดิมไม่ต้องแตะอะไรเลย (ประหยัด work
--- ฝั่ง client ตามที่สั่ง ไม่ใช่คำนวณ/สร้าง Part ใหม่ทุก sync) · nil = ไม่มีโมเดลอยู่ตอนนี้
-local builtTier: { [number]: number? } = {}
+-- ⚠️ "เลเวลที่วาดอยู่จริงตอนนี้" เก็บเป็น Attribute บนโมเดลกำแพงเอง ไม่ใช่ตัวแปรในโมดูลนี้
+-- ต่างจากค่าที่ควรเป็นเมื่อไหร่ค่อย rebuild ด่านนั้น — เลเวลเดิมไม่แตะอะไรเลย (ประหยัด work ฝั่ง client)
+-- ⚠️⚠️ เคยเก็บเป็นตาราง `builtTier` ในโมดูล (Phase 3B-2 · 1fdea01) แล้วบั๊กกำแพงค้างกลับมา:
+-- โมดูลนี้มีได้หลาย instance (StarterPlayerScripts ต้นฉบับ + ตัวที่ก็อปไป PlayerScripts) แต่ใช้โฟลเดอร์
+-- LocalWalls ใบเดียวกัน → instance ที่สองมีตารางว่าง เลยไม่ลบกำแพงที่ instance แรกสร้างไว้ตอนด่านพัง
+-- เก็บบนโมเดลแล้วทุก instance เห็นค่าเดียวกันเสมอ (tools/check-wallrenderer-singleton.py ตรวจข้อนี้)
+local TIER_ATTRIBUTE = "WallTier"
 
 -- ⚠️ ก่อน sync ครั้งแรกมาถึง ยังไม่รู้ค่าจริงจากเซิร์ฟ — สมมติว่ายังไม่พังด่านไหนเลย (ทุกด่าน
 -- ยังเป็น false เหมือนผู้เล่นใหม่) ปลอดภัยกว่าสมมติว่าพังไปแล้ว: กำแพงเกินโผล่มาก่อนแล้วหายไป
@@ -175,6 +179,7 @@ local function buildWall(stage: number, parent: Folder, tier: number)
 
 	local model = Instance.new("Model")
 	model.Name = `Wall{stage}`
+	model:SetAttribute(TIER_ATTRIBUTE, tier)
 	model.Parent = parent
 
 	local body = Instance.new("Part")
@@ -224,7 +229,8 @@ local function buildWall(stage: number, parent: Folder, tier: number)
 end
 
 -- อัปเดตตาม stageProgress ปัจจุบัน — ⚠️ Phase 3B-2: **ไม่ ClearAllChildren + rebuild ทั้งชุดอีก
--- ต่อไปแล้ว** เทียบทีละด่านกับ `builtTier` (เลเวลที่วาดอยู่จริงตอนนี้) rebuild เฉพาะด่านที่
+-- ต่อไปแล้ว** เทียบทีละด่านกับ Attribute `WallTier` บนโมเดล (เลเวลที่วาดอยู่จริงตอนนี้ ไม่ว่า instance
+-- ไหนเป็นคนสร้าง) rebuild เฉพาะด่านที่
 -- เลเวลเปลี่ยนจริง (ข้าม threshold ของ % HP หรือเพิ่ง cleared) ด่านที่ยังอยู่เลเวลเดิมข้ามไปเลย
 -- ไม่แตะ Part สักชิ้น — ประหยัด work ฝั่ง client ตามที่สั่ง เพราะ sync มาถี่ (~ทุก 1 วิ)
 -- แต่ % HP ส่วนใหญ่ไม่ได้ข้าม threshold ทุกรอบ
@@ -239,11 +245,9 @@ function WallRenderer.render()
 
 		if not wallX or isStageCleared(currentStageProgress[stage]) then
 			-- ด่านนี้ไม่มีกำแพงจริง (ด่าน 1) หรือพังเรียบร้อยแล้ว → ต้องไม่มีโมเดล
-			if builtTier[stage] ~= nil then
-				if existingModel then
-					existingModel:Destroy()
-				end
-				builtTier[stage] = nil
+			-- ⚠️ ลบที่มีอยู่เสมอ ไม่ว่า instance ไหนสร้าง (เดิมลบเฉพาะที่ตัวเองจำได้ว่าสร้าง → กำแพงค้าง)
+			if existingModel then
+				existingModel:Destroy()
 				changed += 1
 			end
 			continue
@@ -252,7 +256,7 @@ function WallRenderer.render()
 		local ratio = getWallRatio(currentStageProgress[stage])
 		local tier = getWallTier(ratio)
 
-		if builtTier[stage] == tier and existingModel then
+		if existingModel and existingModel:GetAttribute(TIER_ATTRIBUTE) == tier then
 			continue -- ยังอยู่เลเวลเดิม ไม่ต้องแตะอะไรเลย
 		end
 
@@ -260,7 +264,6 @@ function WallRenderer.render()
 			existingModel:Destroy()
 		end
 		buildWall(stage, parent, tier)
-		builtTier[stage] = tier
 		changed += 1
 	end
 

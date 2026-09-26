@@ -98,6 +98,14 @@ local function newInstance(className)
 \t\tobj.Parent = nil
 \tend
 \traw.PivotTo = function() end
+\t-- WallRenderer เก็บเลเวลกำแพงที่วาดอยู่เป็น Attribute บนโมเดล (แก้บั๊ก builtTier แยกต่อ instance)
+\traw._attributes = {}
+\traw.SetAttribute = function(_, key, value)
+\t\traw._attributes[key] = value
+\tend
+\traw.GetAttribute = function(_, key)
+\t\treturn raw._attributes[key]
+\tend
 
 \treturn obj
 end
@@ -217,7 +225,7 @@ assert(wallIsSolid(2), "เซ็ตอัพเทสต์ผิด — ต้
 RendererB.setWallProgress(3)
 print(string.format("RendererB พังถึงด่าน = %d (ควรเป็น 3)", wallProgressOf(RendererB)))
 print(string.format(
-\t"แต่ RendererA พังถึงด่าน = %d (ค่าจริงที่ผู้เล่นยืนอยู่ ไม่เปลี่ยนถ้ายัง bug)",
+\t"RendererA พังถึงด่าน = %d (ค่าในหน่วยความจำของ instance หลัก ไม่เปลี่ยนเป็นเรื่องปกติ — ตัวตัดสินคือกำแพงจริงข้างล่าง)",
 \twallProgressOf(RendererA)
 ))
 
@@ -230,7 +238,9 @@ print(string.format(
 local wall4Solid = wallIsSolid(4)
 print(string.format("กำแพงด่าน 4 ยังชนอยู่ไหม (ควรเป็น true เสมอ เพราะ 4 > 3) = %s", tostring(wall4Solid)))
 
-print(string.format("RESULT=%s", if stillSolidAfter then "BUG" else "FIXED"))
+-- ⚠️ ตัดสินจากสองข้อ: ด่าน 2 ที่ผู้เล่นชนจริงต้องหาย (บั๊กเดิม) และด่าน 4 ที่ยังไม่พังต้องยังชนอยู่
+-- (กันการแก้เกินจนลบกำแพงทิ้งหมด — เดิมข้อหลังแค่พิมพ์ดู ไม่ได้นับเป็นผล)
+print(string.format("RESULT=%s", if stillSolidAfter or not wall4Solid then "BUG" else "FIXED"))
 '''
 
 
@@ -284,7 +294,8 @@ if proc.returncode != 0:
 print('\n'.join(l for l in proc.stdout.rstrip().split('\n') if not l.startswith('RESULT=')))
 
 if 'RESULT=BUG' in proc.stdout:
-    print('\nบั๊กเกิดจริง: setWallProgress บน WallRenderer อีกอินสแตนซ์ ไม่แตะกำแพงที่ผู้เล่นชนอยู่จริงเลย')
+    print('\nบั๊กเกิดจริง: setWallProgress บน WallRenderer อีกอินสแตนซ์ ไม่แตะกำแพงที่ผู้เล่นชนอยู่จริง '
+          '(ด่าน 2 ยังชน) หรือลบเกินจนกำแพงที่ยังไม่พังหายไปด้วย (ด่าน 4 ไม่ชนแล้ว)')
     sys.exit(1)
 elif 'RESULT=FIXED' in proc.stdout:
     print('\nผ่าน: ไม่ว่าจะเรียกจาก instance ไหน กำแพงที่ผู้เล่นชนจริงก็ถูกอัปเดตถูกต้อง')

@@ -452,6 +452,9 @@ local HATCH_CARD_COLOR = Color3.fromRGB(235, 200, 140)
 local HATCH_STUCK_COLOR = Color3.fromRGB(165, 165, 170)
 
 local CARD_SIZE = 72
+-- การ์ดที่เลือกอยู่ = พื้นเข้มลงเหลือสัดส่วนนี้ของสีเดิม + ตัวอักษรขาว + ขอบขาว
+-- ⚠️ เดิมมีแค่ขอบขาว 2px ซึ่งแทบมองไม่เห็นบนการ์ดสีอ่อน (คลาส C/ไข่) — ทดสอบใน Studio แล้วดูไม่ออกว่าเลือกตัวไหน
+local SELECTED_CARD_BRIGHTNESS = 0.5
 local CARD_GAP = 6
 local BUTTON_ROW_HEIGHT = 28
 
@@ -469,7 +472,13 @@ local function createCard(spec: CardSpec, parent: Instance, layoutOrder: number)
 	card.Name = "Card"
 	card.LayoutOrder = layoutOrder
 	card.Size = UDim2.new(0, CARD_SIZE, 0, CARD_SIZE)
-	card.BackgroundColor3 = spec.color
+	card.BackgroundColor3 = if spec.selected
+		then Color3.new(
+			spec.color.R * SELECTED_CARD_BRIGHTNESS,
+			spec.color.G * SELECTED_CARD_BRIGHTNESS,
+			spec.color.B * SELECTED_CARD_BRIGHTNESS
+		)
+		else spec.color
 	card.BorderSizePixel = 0
 	card.AutoButtonColor = true
 	card.Text = ""
@@ -482,7 +491,7 @@ local function createCard(spec: CardSpec, parent: Instance, layoutOrder: number)
 	if spec.selected then
 		local stroke = Instance.new("UIStroke")
 		stroke.Color = Color3.fromRGB(255, 255, 255)
-		stroke.Thickness = 2
+		stroke.Thickness = 3
 		stroke.Parent = card
 	end
 
@@ -491,7 +500,7 @@ local function createCard(spec: CardSpec, parent: Instance, layoutOrder: number)
 	label.Size = UDim2.new(1, -6, 1, -6)
 	label.Position = UDim2.new(0, 3, 0, 3)
 	label.BackgroundTransparency = 1
-	label.TextColor3 = Color3.fromRGB(30, 30, 30)
+	label.TextColor3 = if spec.selected then Color3.fromRGB(255, 255, 255) else Color3.fromRGB(30, 30, 30)
 	label.TextWrapped = true
 	label.TextXAlignment = Enum.TextXAlignment.Center
 	label.TextYAlignment = Enum.TextYAlignment.Center

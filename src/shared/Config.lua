@@ -1017,7 +1017,7 @@ local Characters: { [string]: Character } = {
 
 	-- C ×1
 	-- modelAssetId = โมเดลกอริลลา low-poly (Model asset ที่ผู้ใช้ publish เอง)
-	monkey = { id = "monkey", name = "ลิง", class = "C", enabled = true, modelAssetId = 108375520093381 },
+	monkey = { id = "monkey", name = "ลิง", class = "C", enabled = true, modelAssetId = 109867818523029 },
 	pig = { id = "pig", name = "หมู", class = "C", enabled = true },
 	horse = { id = "horse", name = "ม้า", class = "C", enabled = true },
 	fish = { id = "fish", name = "ปลา", class = "C", enabled = true },

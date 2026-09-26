@@ -110,6 +110,11 @@ EggService.debugSetStageProgress(player, 5, 0, 0)
   `CombatService.recomputeWallProgress(data)` ต่อท้ายให้เอง — `wallProgress` (เงิน + เพดาน
   damage upgrade) จะ sync ตามจริงทันที ไม่ต้องตั้ง `wallProgress` แยกเองอีกที
 - print ค่าที่ตั้ง + `wallProgress` ก่อน/หลังเสมอ
+- ⚠️ **ตั้ง "พังทั้งด่าน" ตรง ๆ ไม่ได้ไข่รางวัลผ่านด่าน (Phase 4A)** — รางวัลผูกกับจังหวะที่ด่าน
+  เพิ่งพังใน `CombatService.tick` เท่านั้น · อยากทดสอบรางวัล ให้เหลือกำแพง 1 HP แล้วเปิดอัญเชิญให้ตีจริง:
+  ```lua
+  EggService.debugSetStageProgress(player, 2, 0, 1)  -- ตาถัดไปที่มี damage → ด่าน 2 พัง → popup + ไข่ 1 ฟอง
+  ```
 
 ### `EggService.debugSetCurrency(player, coins)`
 
@@ -250,7 +255,7 @@ EggService.debugWipeSavedData(player, player.Name)
 - `EggService.debugFillHatchery(player)` — วางไข่ในกระเป๋าลงสวนฟักจนเต็ม/หมด
 - `EggService.debugClearBag(player)` — ล้างแม่+ไข่ในกระเป๋า (ไม่แตะคอก/สวนฟัก)
 - `EggService.debugResetAll(player)` — ล้างทุกอย่าง (คอก/กระเป๋า/สวนฟัก/stageProgress/
-  wallProgress) กลับสู่สภาพเริ่มต้นจริง — ใช้ล้างสภาพที่ตั้งเองผ่าน `debugSetWallProgress`
+  wallProgress/ธงรางวัลผ่านด่าน) กลับสู่สภาพเริ่มต้นจริง — ใช้ล้างสภาพที่ตั้งเองผ่าน `debugSetWallProgress`
   หรือตีด่านทดสอบค้างไว้ (⚠️ ไม่แตะ `currency` — ล้างแยกด้วย `debugSetCurrency` · และไม่แตะ
   `children`/`releaseOrder` เลย ยังไม่มีคำสั่ง debug สำหรับสองอย่างนี้)
 

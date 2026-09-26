@@ -432,6 +432,10 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   - **3C-2** (UI ปุ่ม "ส่งไปรบ" ในแท็บกระเป๋า + กล่องยืนยัน + บรรทัด roster ใน CombatHud) ✅
     ⚠️ ปุ่ม "ส่งไปรบ" **แค่เปิดกล่องยืนยัน** · remote ยิงจากปุ่ม "ยืนยันส่งรบ" ที่เดียว · "ยกเลิก" ไม่ส่งอะไร
   📄 รายงานสรุป 3C-1 + 3C-2 (ตัดสินอะไร · ผลทดสอบ Studio · ที่ยังขาด) อยู่ใน `docs/phase-3c-report.md`
+- **Phase 4A** — **รางวัลผ่านด่าน** (ไข่ฟรีครั้งเดียวต่อด่านตอนกำแพงพังครั้งแรก) ✅ เขียนเสร็จ ยังไม่ได้ทดสอบใน Studio
+  ⚠️ ชื่อ "4A" ตั้งตามที่สั่ง — **คนละเรื่องกับ Phase 4 (รบด้วยตัวเอง) ข้างล่าง** ซึ่งยังไม่ได้เริ่ม
+  ด่าน 1 = 0 (ไม่มีกำแพง) · 2–3 = 1 · 4–6 = 2 · 7–9 = 3 · ไข่ = `egg_stageN` ผ่าน `grantEgg`
+  · แจ้งด้วย `StageClearedNotify` (server → client ครั้งเดียว ไม่อยู่ใน sync) · รายละเอียด `docs/data-schema.md` §7.12
   📄 วิสัยทัศน์อนาคต **"HP รายตัว + turret"** (ลูก/แม่มี HP รายตัวจริง · turret สุ่มยิงมีจังหวะ
   ของตัวเอง · ทหารฝ่ายรับตีกลับได้ · หลอด HP ลอยทุกตัว) เป็น**เฟสแยกทีหลัง Phase 3C** —
   ยังไม่ได้ตั้งเลขเฟส **ไม่บล็อก 3C** ดู `docs/combat-hp-vision.md`
@@ -459,7 +463,7 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 - `default.project.json` (mapping ของ Rojo — พังแล้ว sync ไม่ได้ทั้งโปรเจกต์)
 - **schema ของ DataStore** — ชื่อ key, โครงสร้าง PlayerData, `schemaVersion`
   (ดู `docs/data-schema.md` — แก้แล้วต้องเขียน migration ด้วยเสมอ)
-  · ตอนนี้ **v2** (v1→v2 = เพิ่ม `battleRoster` · ประวัติใน `docs/data-schema.md` §10.4)
+  · ตอนนี้ **v3** (v1→v2 = `battleRoster` · v2→v3 = `stageClearBonusGranted` · ประวัติใน `docs/data-schema.md` §10.4)
 - **schema ของ mothers / children** — ฟิลด์ในตัวแม่, การแยก `mothersInPen` /
   `mothersInBag` / `battleRoster` เป็นสามอาเรย์ (แม่ 1 ตัวอยู่ได้ที่เดียว), การเก็บลูกเป็นกองไม่ใช่รายตัว,
   `uid` ที่เป็น **global string** และห้าม reuse, `nextUid` ที่ห้ามลด
@@ -468,6 +472,10 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 - **`wallProgress`** — เป็นทั้งสิทธิ์เข้าพื้นที่บอสและตัวคูณเงิน และต้องอยู่ต่อผู้เล่นเสมอ
 - **`stageProgress` — ความคืบหน้าต่อด่าน** (ทหารฝ่ายรับที่เหลือ + HP กำแพงที่เหลือ ทั้ง 9 ด่าน)
   เป็น array ยาวคงที่ ช่องว่างใช้ `false` — แก้โครงเมื่อไหร่ = ผู้เล่นทุกคนที่ตีค้างไว้เสียงานทิ้ง
+- **`stageClearBonusGranted` — ธงรางวัลผ่านด่าน 9 ช่อง** (Phase 4A · schema v3) อาเรย์ boolean ยาวคงที่
+  index ตรงกับ `stageProgress` · ติดเฉพาะใน `CombatService.claimStageClearBonus` ตอนด่าน**เพิ่งพัง**ใน tick
+  ⚠️ **ห้ามย้ายการให้รางวัลไป `recomputeWallProgress`** (ไล่นับด่านที่พังอยู่ใหม่ทุกครั้ง = ผู้เล่นเก่าได้ไข่ย้อนหลัง)
+  · false ≠ "ยังไม่พัง" (ผู้เล่นก่อน v3 ได้ false ทั้งหมดโดยตั้งใจ) · ตารางจำนวนไข่ `Balance.Combat.STAGE_CLEAR_BONUS_EGGS`
 - **cap คลังทหาร** (`STACK_CAP` = 500 ตายตัว) — ผูกกับ cap ออฟไลน์ 8 ชม.
   ลดค่าลงเมื่อไหร่ = ลูกที่ผู้เล่นสะสมเกินเพดานหายทันที
 - **โครงของไข่** — `heldEggs` / `hatching` เก็บ **รายฟองพร้อมน้ำหนัก** ไม่ใช่ตัวนับ
@@ -544,6 +552,7 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 - **จำนวนคอก = `PLAYERS_PER_SERVER`** — `validate()` บังคับสองชั้น
   (`PEN_ROWS × PEN_PER_ROW == MAX_PENS` และ `MAX_PENS == PLAYERS_PER_SERVER`)
 - **RemoteEvent / RemoteFunction** — ชื่อและ signature ที่ client-server ตกลงกัน
+  (รวม `StageClearedNotify(stage, eggCount)` server → client ของ Phase 4A)
 - โครงโฟลเดอร์ `src/server|client|shared` และการแตก/รวมไฟล์
 - อะไรก็ตามที่ทำให้ข้อมูลผู้เล่นเดิมอ่านไม่ออก
 
@@ -579,6 +588,7 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 `SendMotherToBattleRequest` · แม่ตีรวมกับลูก · ด่านพัง = แม่ใน roster ตายทั้งหมด
 **Phase 3C-2 (UI) เขียนเสร็จแล้ว** — ปุ่ม "ส่งไปรบ" + กล่องยืนยัน + "แม่ในสนามรบ: X/10" ใน CombatHud
 **ทั้ง 3C-1 และ 3C-2 ทดสอบใน Studio แล้ว ผ่านครบ** (📄 `docs/phase-3c-report.md`)
+**Phase 4A (รางวัลผ่านด่าน) เขียนเสร็จแล้ว** — schema v3 · ไข่ฟรีครั้งเดียวต่อด่าน + popup · **ยังไม่ได้ทดสอบใน Studio**
 
 ค่าทั้งหมดใน Config ผ่านการทดสอบพฤติกรรมจริงแล้ว 457 เคส (`luau tests/run.luau`)
 (สุ่มน้ำหนัก 5 ล้านครั้ง · สุ่มตัวละคร 300,000 ครั้งต่อไข่ · ไข่รายด่าน 60,000 ครั้งต่อด่าน ·

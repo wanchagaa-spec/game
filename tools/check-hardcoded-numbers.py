@@ -9,6 +9,7 @@
 ⚠️ ตัวนี้ **ไม่ fail อัตโนมัติ** เพราะค่าคงที่เชิงดีไซน์ (เช่น √0.01 = 0.1) ก็ติดมาด้วย
 และค่าพวกนั้นพิมพ์ตรง ๆ ได้ เพราะ validate() ตรึงไว้แล้ว — ต้องใช้ตาคนอ่านผลลัพธ์
 """
+# check-all: advisory  ← tools/check-all.py แสดงตัวนี้เป็น "ข้อมูล" ไม่ใช่ "ผ่าน" (exit 0 เสมอโดยตั้งใจ)
 import os, re, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

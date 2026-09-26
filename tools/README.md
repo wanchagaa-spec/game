@@ -4,7 +4,14 @@
 |---|---|
 | `python3 tools/gen-balance-tables.py` | สร้าง `docs/balance-tables.html` (ตารางสมดุลทั้งหมด) |
 | `luau tools/dump-map.luau` | พิมพ์ผังแมพ + เวลาเดิน — ใช้ประเมินว่าแมพยาวไปไหม |
-| `python3 tools/check-hardcoded-numbers.py` | หาตัวเลขที่พิมพ์มือในย่อหน้าของ generator |
+| `python3 tools/check-hardcoded-numbers.py` | หาตัวเลขที่พิมพ์มือในย่อหน้าของ generator (แจ้งข้อมูล ไม่ตัดสินผ่าน/ตก) |
+| **`python3 tools/check-all.py`** | **รันเทสต์หลัก + `tools/check-*.py` ทุกตัว พิมพ์ตารางผลรวม · exit 1 ถ้ามีตัวตก — รันก่อน commit/รายงานทุกครั้ง** |
+| `python3 tools/check-debug-commands.py` · `check-egg-placement-validation.py` · `check-pen-mother-economy.py` | โหลด `EggService.lua` จริงด้วย loadstring (+ Config/PlayerData/DataService/CombatService ตัวจริง) แล้วทดสอบ logic นอก Studio |
+| `python3 tools/check-wallrenderer-singleton.py` | จำลอง WallRenderer สอง instance ใช้ Workspace เดียวกัน — กำแพงที่ผู้เล่นชนต้องอัปเดตไม่ว่าเรียกจาก instance ไหน |
+| `python3 tools/check-floor-overlap.py` | หาแผ่นพื้นที่ผิวบนอยู่ระนาบเดียวกันและทับกัน (z-fighting) |
+
+⚠️ **อ่านผลจากตารางของ `check-all.py` เท่านั้น** — อย่าใช้ `python3 x.py; echo "$(basename x)=$?"`
+เพราะ `$(...)` ทับ `$?` เป็น 0 เสมอ (เคยทำให้รายงานผิดว่าผ่านมาแล้ว)
 
 ทั้งหมดอ่านค่าจาก `src/shared/Config.lua` ตัวจริง ไม่มีตัวเลขพิมพ์ซ้ำ
 

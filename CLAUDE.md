@@ -356,6 +356,7 @@ Core loop:
 ```
 rojo serve          # dev server ให้ Studio plugin เชื่อม
 rojo build -o game.rbxl   # build ไฟล์ place
+python3 tools/check-all.py   # เทสต์หลัก + สคริปต์ตรวจ tools/check-*.py ทุกตัว → ตารางผลรวม (exit 1 ถ้ามีตัวตก)
 ```
 
 ## โครงสร้างโฟลเดอร์
@@ -376,7 +377,9 @@ src/
   client/   → StarterPlayerScripts (UI ทั้งหมด + ของที่เห็นเฉพาะตัวเอง)
     Main.client.lua      → StarterPlayerScripts.Main (entry point)
     WallRenderer.lua     → ⚠️ วาดกำแพงตาม `stageProgress` จริงจาก sync (ไม่ใช่ wallProgress)
-                            **ต้องอยู่ฝั่ง client เท่านั้น**
+                            **ต้องอยู่ฝั่ง client เท่านั้น** · เลเวลกำแพงที่วาดอยู่เก็บเป็น Attribute
+                            `WallTier` บนโมเดล **ห้ามเก็บเป็นตัวแปรในโมดูล** (โมดูลนี้มีได้หลาย instance —
+                            StarterPlayerScripts + PlayerScripts · ตรวจด้วย `tools/check-wallrenderer-singleton.py`)
     TroopRenderer.lua    → Phase 3B-1: โมเดลทหารฝ่ายเรา/ฝ่ายรับ (คนบล็อก ๆ จาก Part ไม่ใช่
                             Humanoid) เป็นแค่ simulation ภาพประกอบ ไม่ผูกกับ damage จริง 1:1
   shared/   → ReplicatedStorage.Shared (config, constants, type ที่ใช้ร่วมกัน)
@@ -566,6 +569,12 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 - validate ทุก input ที่มาจาก client เสมอ
 - ไม่ต้องเขียนโค้ดล่วงหน้าให้เฟสถัดไป ทำเฉพาะที่สั่ง
 - commit เป็นก้อนย่อยตามงานที่ทำเสร็จ ข้อความ commit ภาษาอังกฤษสั้น ๆ
+- ⚠️⚠️ **ต้องรัน `python3 tools/check-all.py` ก่อน commit และก่อนรายงานผลทุกครั้ง**
+  และ**รายงานผลจากตารางที่มันพิมพ์เท่านั้น** ห้ามอ่านผลจากการรันแยกทีละไฟล์เอง
+  เคยรายงานผิดว่าสคริปต์ตรวจผ่านทั้งที่ตกมาตั้งแต่ Phase 3A เพราะใช้ `echo "$(basename $f)=$?"` —
+  `$(...)` รันก่อนแล้วทับ `$?` เป็น 0 เสมอ · `check-all.py` อ่าน exit code ด้วย Python เอง ไม่ผ่าน shell
+  · หาสคริปต์ `tools/check-*.py` ด้วย glob เอง เพิ่มตัวใหม่ไม่ต้องแก้รายชื่อ · สคริปต์ที่แค่แจ้งข้อมูลให้ตรวจด้วยตา
+  (exit 0 เสมอ) ใส่ `# check-all: advisory` ในไฟล์ ตารางจะแสดงเป็น "ข้อมูล" ไม่ใช่ "ผ่าน"
 
 ## สถานะปัจจุบัน
 **วางโครงแมพ (blockout) เสร็จแล้ว** — `MapBuilder` generate ทั้งแมพจากโค้ด

@@ -283,6 +283,10 @@ Core loop:
   · ⚠️ **ด่านที่กำลังตีพัง = แม่ใน roster ตายทั้งหมดพร้อมกัน** ดึงกลับไม่ได้
   · ปฏิเสธการส่งถ้า lock ไว้ / roster เต็ม / ไม่มีด่านที่มี HP ให้ตี (ด่าน 1 หรือพังครบแล้ว)
   · ค่าเก่า `Inventory.MAX_TEAM_*` (ดีไซน์ "ทีม" ที่ไม่เคยเขียนโค้ด) ยังอยู่แต่ไม่มีโค้ดใช้
+  · จำนวนแม่ที่ตายแจ้งใน **popup ผ่านด่านอันเดียวกับไข่รางวัล** (Phase 4B · `StageClearedNotify` arg ที่ 3)
+- **ล็อกแม่** (Phase 4B) `ToggleMotherLockRequest(uid)` สลับ `mother.locked` ของแม่ในคอก/กระเป๋าของตัวเอง
+  · ล็อกแล้ว **ขายไม่ได้ + ส่งไปรบไม่ได้** (server ตรวจทั้งสองทาง) · **ย้ายคอก↔กระเป๋าไม่โดนกัน** ล็อกติดตัวไปด้วย
+  · ปุ่ม "ขายทั้งหมด" (TEMP) ข้ามแม่ที่ล็อก · ไม่แตะ schema (`locked` มีตั้งแต่ v1)
 - ปุ่ม **"เลือกสัตว์เลี้ยงที่ดีที่สุด"** เป็นปุ่มกดเอง ไม่ใช่ระบบที่ทำงานเอง
   กดแล้วจัดแม่เข้าคอกเรียงตามความสามารถผลิตเงิน · ย้ายกลับกระเป๋าเองได้ตลอด
 - ⚠️ **ความคืบหน้าสะสมถาวร** ทหารฝ่ายรับที่เหลือ + HP กำแพงที่เหลือของแต่ละด่าน
@@ -448,6 +452,10 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   ด่าน 1 = 0 (ไม่มีกำแพง) · 2–3 = 1 · 4–6 = 2 · 7–9 = 3 · ไข่ = `egg_stageN` ผ่าน `grantEgg`
   · แจ้งด้วย `StageClearedNotify` (server → client ครั้งเดียว ไม่อยู่ใน sync) · รายละเอียด `docs/data-schema.md` §7.12
   📄 รายงานสรุป (ตัดสินอะไร · ผลทดสอบ Studio · ที่ยังขาด) อยู่ใน `docs/phase-4a-report.md`
+- **Phase 4B** — **ปุ่มล็อกแม่ + แจ้งแม่ตายรวมกับ popup ผ่านด่าน** ✅ เขียนโค้ด+เทสต์แล้ว **ยังไม่ได้ทดสอบใน Studio**
+  · `ToggleMotherLockRequest(uid)` ใหม่ · ล็อกกันขาย (ใหม่) + กันส่งไปรบ (มีตั้งแต่ 3C-1) · ป้าย 🔒 บนการ์ด
+  · `StageClearedNotify(stage, eggCount, deathCount)` · ยิงเมื่อมีไข่**หรือ**แม่ตาย (`CombatService.shouldNotifyStageCleared`)
+  · ข้อความทุกกรณีอยู่ที่ `Config.formatStageClearedMessage` · รายละเอียด `docs/data-schema.md` §5.6 + §7.12
   📄 วิสัยทัศน์อนาคต **"HP รายตัว + turret"** (ลูก/แม่มี HP รายตัวจริง · turret สุ่มยิงมีจังหวะ
   ของตัวเอง · ทหารฝ่ายรับตีกลับได้ · หลอด HP ลอยทุกตัว) เป็น**เฟสแยกทีหลัง Phase 3C** —
   ยังไม่ได้ตั้งเลขเฟส **ไม่บล็อก 3C** ดู `docs/combat-hp-vision.md`
@@ -564,7 +572,8 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 - **จำนวนคอก = `PLAYERS_PER_SERVER`** — `validate()` บังคับสองชั้น
   (`PEN_ROWS × PEN_PER_ROW == MAX_PENS` และ `MAX_PENS == PLAYERS_PER_SERVER`)
 - **RemoteEvent / RemoteFunction** — ชื่อและ signature ที่ client-server ตกลงกัน
-  (รวม `StageClearedNotify(stage, eggCount)` server → client ของ Phase 4A)
+  (รวม `StageClearedNotify(stage, eggCount, deathCount)` server → client — Phase 4A ยิง 2 ค่า · **4B เพิ่ม `deathCount`**
+  และ `ToggleMotherLockRequest(motherUid)` client → server ของ Phase 4B)
 - โครงโฟลเดอร์ `src/server|client|shared` และการแตก/รวมไฟล์
 - อะไรก็ตามที่ทำให้ข้อมูลผู้เล่นเดิมอ่านไม่ออก
 
@@ -610,8 +619,9 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 **ทั้ง 3C-1 และ 3C-2 ทดสอบใน Studio แล้ว ผ่านครบ** (📄 `docs/phase-3c-report.md`)
 **Phase 4A (รางวัลผ่านด่าน) เสร็จและทดสอบใน Studio แล้ว** — schema v3 · ไข่ฟรีครั้งเดียวต่อด่าน + popup ·
 ผ่านครบ: ผู้เล่นเก่าธง false ทั้งหมดไม่ได้ไข่ย้อนหลัง · ด่าน 2 ได้ 1 ฟอง · พังซ้ำไม่ได้ · popup ไม่โผล่ซ้ำ · ด่าน 4/7 ได้ 2/3 ฟอง
+**Phase 4B (ล็อกแม่ + แม่ตายใน popup ผ่านด่าน) เขียนโค้ด+เทสต์เสร็จแล้ว** — ไม่แตะ schema · **ยังไม่ได้ทดสอบใน Studio**
 
-ชุดเทสต์ `luau tests/run.luau` ผ่านทั้งหมด **1135 เคส** (Config · PlayerData/DataService · Production · Combat ·
+ชุดเทสต์ `luau tests/run.luau` ผ่านทั้งหมด **1160 เคส** (Config · PlayerData/DataService · Production · Combat ·
 Upgrades) + สคริปต์ตรวจใน `tools/` — รันรวมด้วย `python3 tools/check-all.py` · ฝั่ง Config ครอบคลุม (สุ่มน้ำหนัก 5 ล้านครั้ง · สุ่มตัวละคร 300,000 ครั้งต่อไข่ · ไข่รายด่าน 60,000 ครั้งต่อด่าน ·
 stack key · uid · บัฟสถานะ · แหล่งที่มาไข่ · Developer Product · ตารางด่าน · อัตราปล่อย ·
 อัตราผลิตตามน้ำหนัก · cap คลัง · ด่าน 1 ไม่มีกำแพง · turret · ตัวคูณคลาส ·

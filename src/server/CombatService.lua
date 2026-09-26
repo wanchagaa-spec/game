@@ -452,6 +452,14 @@ function CombatService.tick(data: Data, meta: CombatMeta, elapsedSeconds: number
 	}
 end
 
+-- ตานี้ต้องแจ้ง popup "ผ่านด่าน" ไหม (Phase 4B) — ด่านเพิ่งพัง **และ** มีอย่างน้อยหนึ่งอย่างให้บอก:
+-- ไข่ฟรีที่ควรได้ (ครั้งแรกที่ด่านพัง) หรือแม่ใน roster ที่ตาย
+-- ⚠️ ไม่มีทั้งคู่ (ด่าน 1 · พังซ้ำหลังได้รางวัลแล้วโดยไม่มีแม่ในสนาม) = เงียบ ไม่ขึ้น popup ว่าง ๆ
+-- ⚠️ อ่าน mothersLost จาก TickResult ที่ killRoster นับไว้**ก่อน**ล้าง roster แล้ว — ห้ามนับ #battleRoster ตรงนี้
+function CombatService.shouldNotifyStageCleared(result: TickResult): boolean
+	return result.clearedStage ~= nil and (result.bonusEggs > 0 or result.mothersLost > 0)
+end
+
 --------------------------------------------------------------------------------
 -- RemoteEvent: SetReleaseOrderRequest / SetSummonEnabledRequest
 --------------------------------------------------------------------------------
@@ -594,10 +602,10 @@ end
 -- ⚠️ require ของจริงทั้งหมดอยู่ *ในตัวฟังก์ชัน* ไม่ใช่ระดับโมดูล เหมือน ProductionService.start()
 -- เพื่อให้ require ไฟล์นี้จาก tests/run.luau (นอก Roblox) ได้โดยไม่พังตั้งแต่โหลด
 
--- `onStageCleared(player, stage, eggCount)` = EggService.grantStageClearBonus (Main.server.lua ส่งเข้ามา)
+-- `onStageCleared(player, stage, eggCount, deathCount)` = EggService.grantStageClearBonus (Main.server.lua ส่งเข้ามา)
 -- ⚠️ inject แทน require EggService ตรง ๆ กัน circular require (EggService require ไฟล์นี้อยู่แล้ว)
 -- แบบเดียวกับ ProductionService.start(EggService.sync)
-function CombatService.start(onStageCleared: (Player, number, number) -> ())
+function CombatService.start(onStageCleared: (Player, number, number, number) -> ())
 	local Players = game:GetService("Players")
 	local ReplicatedStorage = game:GetService("ReplicatedStorage")
 	local ServerScriptService = game:GetService("ServerScriptService")
@@ -642,11 +650,12 @@ function CombatService.start(onStageCleared: (Player, number, number) -> ())
 						else Config.World.SYNC_INTERVAL
 					meta.lastTickClock = nowClock
 					local result = CombatService.tick(data, meta, elapsed)
-					if result.clearedStage and result.bonusEggs > 0 then
+					local clearedStage = result.clearedStage
+					if clearedStage and CombatService.shouldNotifyStageCleared(result) then
 						-- ⚠️ pcall: แจกไข่พังเมื่อไหร่ต้องไม่ลากลูปรบของทั้งเซิร์ฟตายไปด้วย (ธงติดไปแล้ว — log ไว้ตามแก้)
-						local clearedStage, bonusEggs = result.clearedStage, result.bonusEggs
+						local bonusEggs, mothersLost = result.bonusEggs, result.mothersLost
 						local ok, err = pcall(function(): string?
-							onStageCleared(player, clearedStage, bonusEggs)
+							onStageCleared(player, clearedStage, bonusEggs, mothersLost)
 							return nil
 						end)
 						if not ok then

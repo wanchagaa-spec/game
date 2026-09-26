@@ -85,6 +85,7 @@ local eggHatched: RemoteEvent
 local farmStateSync: RemoteEvent
 local actionResult: RemoteEvent
 local stageClearedNotify: RemoteEvent
+local toggleMotherLockRequest: RemoteEvent
 
 -- ⚠️ ส่งผลลัพธ์ (สำเร็จ/ล้มเหลว + เหตุผล) ของคำขอกลับไปหาผู้เล่นคนที่ยิงคำขอมาเท่านั้น
 -- ก่อนหน้านี้ผลลัพธ์ไปโผล่แค่ print ใน server console เท่านั้น ผู้เล่นไม่เห็นอะไรเลย
@@ -733,6 +734,13 @@ function EggService.sellMother(player: Player, rawUid: unknown): (boolean, strin
 		return false, "uid ไม่ใช่ string"
 	end
 
+	-- ⚠️ Phase 4B: ตรวจล็อก**ก่อน** takeMother — takeMother ถอดแม่ออกจากกระเป๋าทันทีที่เจอ
+	for _, m in data.mothersInBag do
+		if m.uid == rawUid and m.locked then
+			return false, "แม่ตัวนี้ถูกล็อกไว้ ขายไม่ได้"
+		end
+	end
+
 	local mother = takeMother(data.mothersInBag, rawUid)
 	if not mother then
 		-- ข้อความช่วยเหลือ: บอกสาเหตุที่ชัดเจนกว่าถ้าแม่ตัวนี้อยู่ในคอกจริง (ไม่ใช่ข้อมูลของคนอื่น
@@ -760,6 +768,44 @@ function EggService.sellMother(player: Player, rawUid: unknown): (boolean, strin
 	return true, nil
 end
 
+--------------------------------------------------------------------------------
+-- ล็อกแม่ (Phase 4B) — กันขาย/ส่งไปรบพลาด ไม่กันการย้ายคอก↔กระเป๋า
+--------------------------------------------------------------------------------
+
+-- สลับ mother.locked ของแม่ในคอกหรือกระเป๋าของผู้เล่นเอง · คืน (ok, reason?, lockedใหม่?)
+-- ⚠️ แม่ใน battleRoster ไม่อยู่ในสองอาเรย์นี้ → "ไม่พบ" (ส่งไปแล้วดึงกลับไม่ได้ ล็อกไปก็ไม่มีผลอะไร)
+-- `locked` เป็นฟิลด์ของแม่ที่มีอยู่แล้วตั้งแต่ schema v1 — ย้ายคอก↔กระเป๋าย้ายทั้งตาราง ล็อกจึงติดไปด้วย
+function EggService.toggleMotherLock(player: Player, rawUid: unknown): (boolean, string?, boolean?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น", nil
+	end
+
+	if type(rawUid) ~= "string" then
+		return false, "uid ไม่ใช่ string", nil
+	end
+
+	local target: Mother? = nil
+	for _, list in { data.mothersInPen, data.mothersInBag } do
+		for _, mother in list do
+			if mother.uid == rawUid then
+				target = mother
+				break
+			end
+		end
+		if target then
+			break
+		end
+	end
+	if not target then
+		return false, "ไม่พบแม่ตัวนี้ในคอกหรือกระเป๋า", nil
+	end
+
+	target.locked = not target.locked
+	EggService.sync(player)
+	return true, nil, target.locked
+end
+
 -- ส่งแม่จากกระเป๋าไปรบ (Phase 3C-1) — ตรรกะ/การตรวจทั้งหมดอยู่ที่ CombatService.handleSendMotherToBattle
 -- ที่นี่แค่ต่อสายกับผู้เล่น · คืน (ok, message) ภาษาไทยพร้อมโชว์ทั้งสองกรณี
 function EggService.sendMotherToBattle(player: Player, rawUid: unknown): (boolean, string)
@@ -781,7 +827,9 @@ end
 -- รางวัลผ่านด่าน (Phase 4A) — CombatService.tick ตัดสินแล้วว่าได้ (ติดธงไปแล้ว ให้ซ้ำไม่ได้)
 -- ที่นี่แค่แจกไข่ของรังบอสด่านนั้นผ่าน grantEgg (สุ่มน้ำหนักแบบเดียวกับไข่ทุกแหล่ง) แล้วแจ้ง client
 -- ⚠️ กระเป๋าไข่เต็มกลางทาง = แจกเท่าที่ใส่ได้ ธงติดไปแล้ว (ได้ครั้งเดียว) popup บอกจำนวนที่ได้จริง
-function EggService.grantStageClearBonus(player: Player, stage: number, eggCount: number)
+-- Phase 4B: popup เดียวกันบอกจำนวนแม่ใน roster ที่ตายด้วย (`deathCount` — CombatService นับไว้ก่อนล้าง roster)
+-- eggCount = 0 ได้ (ด่านพังซ้ำแต่มีแม่ตาย) → ไม่แจกอะไร แจ้งแค่แม่ตาย
+function EggService.grantStageClearBonus(player: Player, stage: number, eggCount: number, deathCount: number)
 	local eggId = Config.getBossEggId(stage)
 	local granted = 0
 	for _ = 1, eggCount do
@@ -793,8 +841,8 @@ function EggService.grantStageClearBonus(player: Player, stage: number, eggCount
 		granted += 1
 	end
 
-	stageClearedNotify:FireClient(player, stage, granted)
-	print(`[EggService] {player.Name} ผ่านด่าน {stage} ครั้งแรก · ได้ {eggId} ฟรี {granted}/{eggCount} ฟอง`)
+	stageClearedNotify:FireClient(player, stage, granted, deathCount)
+	print(`[EggService] {player.Name} ผ่านด่าน {stage} · ได้ {eggId} ฟรี {granted}/{eggCount} ฟอง · แม่ในสนามตาย {deathCount} ตัว`)
 end
 
 --------------------------------------------------------------------------------
@@ -1451,6 +1499,7 @@ function EggService.start()
 	farmStateSync = Remotes.waitFor(Config.RemoteNames.FARM_STATE_SYNC)
 	actionResult = Remotes.waitFor(Config.RemoteNames.ACTION_RESULT)
 	stageClearedNotify = Remotes.waitFor(Config.RemoteNames.STAGE_CLEARED_NOTIFY)
+	toggleMotherLockRequest = Remotes.waitFor(Config.RemoteNames.TOGGLE_MOTHER_LOCK_REQUEST)
 
 	placeEggRequest.OnServerEvent:Connect(function(player, rawEggId, rawSlotIndex)
 		local ok, reason = EggService.placeEgg(player, rawEggId, rawSlotIndex)
@@ -1496,6 +1545,18 @@ function EggService.start()
 		else
 			local coinsAfter = if data then data.currency.coins else coinsBefore
 			reportResult(player, true, `ขายแม่สำเร็จ +{coinsAfter - coinsBefore} coins`)
+		end
+	end)
+
+	toggleMotherLockRequest.OnServerEvent:Connect(function(player, rawUid)
+		local ok, reason, locked = EggService.toggleMotherLock(player, rawUid)
+		if not ok then
+			print(`[EggService] ปฏิเสธคำขอล็อกแม่ของ {player.Name}: {reason}`)
+			reportResult(player, false, reason or "ล็อกแม่ไม่สำเร็จ")
+		elseif locked then
+			reportResult(player, true, "🔒 ล็อกแม่แล้ว — ขาย/ส่งไปรบไม่ได้จนกว่าจะปลดล็อก")
+		else
+			reportResult(player, true, "🔓 ปลดล็อกแม่แล้ว")
 		end
 	end)
 

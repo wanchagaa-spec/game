@@ -115,6 +115,10 @@ EggService.debugSetStageProgress(player, 5, 0, 0)
   ```lua
   EggService.debugSetStageProgress(player, 2, 0, 1)  -- ตาถัดไปที่มี damage → ด่าน 2 พัง → popup + ไข่ 1 ฟอง
   ```
+- **Phase 4B — popup รวมไข่ + แม่ตาย:** ส่งแม่ไปรบก่อน (ปุ่ม "ส่งไปรบ" ในแท็บกระเป๋า) แล้วค่อยเหลือกำแพง 1 HP
+  → popup เดียว "ผ่านด่าน N สำเร็จ! ได้รับไข่ฟรี X ฟอง • เสียแม่ในสนามรบ Y ตัว" (ขอบแดง)
+  · ด่านที่เคยได้รางวัลแล้ว (ธง `stageClearBonusGranted` = true) ตั้ง HP กลับมาแล้วพังซ้ำพร้อมแม่ในสนาม
+  → "ผ่านด่าน N สำเร็จ! เสียแม่ในสนามรบ Y ตัว" · พังซ้ำโดยไม่มีแม่ในสนาม → ไม่มี popup (ตั้งใจ)
 
 ### `EggService.debugSetCurrency(player, coins)`
 

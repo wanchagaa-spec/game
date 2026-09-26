@@ -794,4 +794,95 @@ return function(t, Config)
 		check("ธงด่าน 4 กลับมาเป็น false", back.stageClearBonusGranted[4], false)
 		check("ยาว 9 ช่องเท่าเดิม", #back.stageClearBonusGranted, 9)
 	end
+
+	----------------------------------------------------------------------------
+	-- Phase 4B แจ้งแม่ในสนามรบที่ตายรวมกับ popup ผ่านด่าน + ล็อกแม่ยังกันส่งไปรบ
+	----------------------------------------------------------------------------
+
+	print("── 4B ข้อความ popup ผ่านด่าน 4 กรณี (Config.formatStageClearedMessage) ──")
+
+	do
+		local function fullText(stage: number, eggs: number, deaths: number): string
+			local title, body = Config.formatStageClearedMessage(stage, eggs, deaths)
+			return `{title} {body}`
+		end
+		check("ไข่ + แม่ตาย", fullText(4, 2, 3), "ผ่านด่าน 4 สำเร็จ! ได้รับไข่ฟรี 2 ฟอง • เสียแม่ในสนามรบ 3 ตัว")
+		check("ไข่อย่างเดียว", fullText(2, 1, 0), "ผ่านด่าน 2 สำเร็จ! ได้รับไข่ฟรี 1 ฟอง")
+		check("แม่ตายอย่างเดียว", fullText(7, 0, 10), "ผ่านด่าน 7 สำเร็จ! เสียแม่ในสนามรบ 10 ตัว")
+		-- (0, 0) มาถึง client ได้กรณีเดียว = ควรได้ไข่แต่กระเป๋าไข่เต็ม (พฤติกรรมเดิม 4A)
+		-- ส่วน "ไม่มีทั้งคู่จริง ๆ" server ไม่ยิงเลย — ตรวจที่ shouldNotifyStageCleared ข้างล่าง
+		check("0/0 = กระเป๋าไข่เต็ม (ข้อความเดิม 4A)", fullText(3, 0, 0), "ผ่านด่าน 3 สำเร็จ! กระเป๋าไข่เต็ม — ไม่ได้รับไข่ฟรีของด่านนี้")
+		local title = Config.formatStageClearedMessage(5, 2, 1)
+		check("หัวข้อแยกออกมาได้ (ใช้กับ label หัวข้อของ popup)", title, "ผ่านด่าน 5 สำเร็จ!")
+	end
+
+	print("── 4B server ตัดสินใจยิง popup: มีไข่ หรือ มีแม่ตาย อย่างใดอย่างหนึ่ง ──")
+
+	do
+		local function result(clearedStage: number?, bonusEggs: number, mothersLost: number)
+			return {
+				unitsReleased = 0,
+				damageDealt = 0,
+				coinsEarned = 0,
+				stageCleared = clearedStage ~= nil,
+				autoPaused = false,
+				mothersLost = mothersLost,
+				clearedStage = clearedStage,
+				bonusEggs = bonusEggs,
+			}
+		end
+		check("ไข่ + แม่ตาย → ยิง", CombatService.shouldNotifyStageCleared(result(4, 2, 3)), true)
+		check("ไข่อย่างเดียว → ยิง", CombatService.shouldNotifyStageCleared(result(2, 1, 0)), true)
+		check("แม่ตายอย่างเดียว → ยิง", CombatService.shouldNotifyStageCleared(result(2, 0, 1)), true)
+		check("ไม่มีทั้งคู่ → ไม่ยิง (ไม่มี popup ว่าง)", CombatService.shouldNotifyStageCleared(result(2, 0, 0)), false)
+		check("ด่านไม่พัง → ไม่ยิง", CombatService.shouldNotifyStageCleared(result(nil, 0, 0)), false)
+	end
+
+	print("── 4B ผ่าน tick จริง: นับแม่ตายก่อนล้าง roster แล้วส่งต่อได้ครบ ──")
+
+	do
+		-- ครั้งแรกที่ด่าน 2 พัง + roster 3 ตัว → ได้ทั้งไข่และแม่ตาย
+		local data = dataAboutToClear(2)
+		table.insert(data.battleRoster, makeMother())
+		table.insert(data.battleRoster, makeMother())
+		local first = CombatService.tick(data, freshMeta(), 1)
+		check("ด่าน 2 พังครั้งแรก: ไข่ 1", first.bonusEggs, 1)
+		check("  แม่ตาย 3 (นับก่อนล้าง roster)", first.mothersLost, 3)
+		check("  roster ถูกล้างแล้วจริง", #data.battleRoster, 0)
+		check("  → ยิง popup", CombatService.shouldNotifyStageCleared(first), true)
+
+		-- พังซ้ำหลังได้รางวัลไปแล้ว (เช่น debug ตั้ง HP ด่าน 2 กลับมา) + มีแม่ในสนาม → แม่ตายอย่างเดียว
+		local again = dataAboutToClear(2)
+		again.stageClearBonusGranted[2] = true
+		local repeatResult = CombatService.tick(again, freshMeta(), 1)
+		check("พังซ้ำ: ไม่ได้ไข่", repeatResult.bonusEggs, 0)
+		check("  แม่ตาย 1", repeatResult.mothersLost, 1)
+		check("  → ยังยิง popup (แจ้งแม่ตาย)", CombatService.shouldNotifyStageCleared(repeatResult), true)
+
+		-- ด่าน 1 (ไม่มีศัตรู) พังฟรี: ไม่มีไข่ แม่ไม่ตาย → ไม่ยิง (คงพฤติกรรมเดิม)
+		local stage1 = freshData()
+		stage1.summonEnabled = true
+		table.insert(stage1.battleRoster, makeMother())
+		local freeClear = CombatService.tick(stage1, freshMeta(), 1)
+		check("ด่าน 1 พังฟรี: clearedStage = 1", freeClear.clearedStage, 1)
+		check("  → ไม่ยิง popup", CombatService.shouldNotifyStageCleared(freeClear), false)
+	end
+
+	print("── 4B แม่ที่ล็อกยังส่งไปรบไม่ได้ · ปลดล็อกแล้วส่งได้ (logic ส่งไปรบเดิม ไม่ได้แก้) ──")
+
+	do
+		local data = dataAtStage2()
+		local mother = makeMother()
+		mother.locked = true
+		table.insert(data.mothersInBag, mother)
+		local ok, message = CombatService.handleSendMotherToBattle(data, mother.uid)
+		check("ล็อกอยู่ → ปฏิเสธ", ok, false)
+		check("  ข้อความเดิม", message, "แม่ตัวนี้ถูกล็อกไว้ ส่งไปรบไม่ได้")
+		check("  ยังอยู่ในกระเป๋า", #data.mothersInBag, 1)
+		check("  roster ว่าง", #data.battleRoster, 0)
+
+		mother.locked = false
+		check("ปลดล็อกแล้ว → ส่งได้", (CombatService.handleSendMotherToBattle(data, mother.uid)), true)
+		check("  ย้ายเข้า roster", #data.battleRoster, 1)
+	end
 end

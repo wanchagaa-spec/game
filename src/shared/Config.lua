@@ -564,10 +564,19 @@ Config.RemoteNames = {
 	-- client ต้องขึ้นกล่องยืนยันก่อนยิงทุกครั้ง · ผลตอบกลับทาง ACTION_RESULT
 	SEND_MOTHER_TO_BATTLE_REQUEST = "SendMotherToBattleRequest",
 
-	-- server → client : FireClient(stage, eggCount) — กำแพงด่านนั้นเพิ่งพังเป็นครั้งแรก ได้ไข่ฟรี (Phase 4A)
+	-- server → client : FireClient(stage, eggCount, deathCount) — ด่านเพิ่งพัง (Phase 4A · ขยาย 4B)
+	-- eggCount = ไข่ฟรีที่แจกได้จริง (ครั้งแรกที่ด่านพังเท่านั้น) · deathCount = แม่ใน roster ที่ตายตอนด่านพัง
+	-- ยิงเมื่อ "ควรได้ไข่" หรือ "มีแม่ตาย" อย่างใดอย่างหนึ่ง ไม่มีทั้งคู่ = ไม่ยิง
+	-- (0, 0) มาถึง client ได้กรณีเดียว = ควรได้ไข่แต่กระเป๋าไข่เต็ม → Config.formatStageClearedMessage
 	-- ⚠️ เหตุการณ์ที่ server เป็นคนเริ่มเอง (ไม่ได้มาจากปุ่มที่ผู้เล่นกด) จึงแยกจาก ACTION_RESULT
 	-- ยิงครั้งเดียวตอนเกิดเหตุ ไม่อยู่ใน FARM_STATE_SYNC — resync กี่รอบ popup ก็ไม่โผล่ซ้ำ
 	STAGE_CLEARED_NOTIFY = "StageClearedNotify",
+
+	-- client → server : FireServer(motherUid) — สลับล็อก/ปลดล็อกแม่ของตัวเอง (Phase 4B)
+	-- แม่ในคอกหรือกระเป๋าเท่านั้น (แม่ใน battleRoster ไม่ได้) · ผลตอบกลับทาง ACTION_RESULT
+	-- ล็อกแล้วกันได้ 2 อย่าง: ขาย (EggService.sellMother) · ส่งไปรบ (CombatService.handleSendMotherToBattle)
+	-- ⚠️ ไม่กันการย้ายคอก↔กระเป๋า (ย้ายไม่ได้ทำให้แม่หาย)
+	TOGGLE_MOTHER_LOCK_REQUEST = "ToggleMotherLockRequest",
 }
 
 --------------------------------------------------------------------------------
@@ -2400,6 +2409,26 @@ end
 -- จำนวนไข่ฟรีตอนกำแพงด่านนั้นพังครั้งแรก (Phase 4A) — ด่านนอกช่วง = 0
 function Config.getStageClearBonusEggs(stage: number): number
 	return Config.Balance.Combat.STAGE_CLEAR_BONUS_EGGS[stage] or 0
+end
+
+-- ข้อความ popup "ผ่านด่าน" (Phase 4B) จาก payload ของ StageClearedNotify → (หัวข้อ, เนื้อความ)
+-- หัวข้อ + " " + เนื้อความ = ข้อความเต็มบรรทัดเดียว เช่น "ผ่านด่าน 4 สำเร็จ! ได้รับไข่ฟรี 2 ฟอง • เสียแม่ในสนามรบ 3 ตัว"
+-- ⚠️ อยู่ใน Config (ไม่ใช่ใน client) เพื่อให้เทสต์ทุกกรณีได้นอก Studio
+-- (0, 0) ไม่ใช่ "ไม่มีอะไรเกิดขึ้น" — server ไม่ยิงกรณีนั้นเลย (CombatService.shouldNotifyStageCleared)
+-- จึงแปลว่า "ควรได้ไข่แต่กระเป๋าไข่เต็ม" เสมอ (พฤติกรรมเดิมของ Phase 4A)
+function Config.formatStageClearedMessage(stage: number, eggCount: number, deathCount: number): (string, string)
+	local title = `ผ่านด่าน {stage} สำเร็จ!`
+	local parts: { string } = {}
+	if eggCount > 0 then
+		table.insert(parts, `ได้รับไข่ฟรี {eggCount} ฟอง`)
+	end
+	if deathCount > 0 then
+		table.insert(parts, `เสียแม่ในสนามรบ {deathCount} ตัว`)
+	end
+	if #parts == 0 then
+		return title, "กระเป๋าไข่เต็ม — ไม่ได้รับไข่ฟรีของด่านนี้"
+	end
+	return title, table.concat(parts, " • ")
 end
 
 -- อัตราปล่อยทหารของด่านนั้น (ตัว/วินาที)

@@ -47,8 +47,11 @@ local buySpeedUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_SPEED_UPGR
 -- ⚠️ Phase 3C-2: ส่งแม่ในกระเป๋าลง battleRoster (3C-1) — ยิงได้**หลังกดยืนยันในกล่องเท่านั้น**
 -- server ตรวจทุกอย่างซ้ำเอง (อยู่ในกระเป๋าจริงไหม · lock · roster เต็ม · มีด่านให้ตี) ผลกลับทาง actionResult
 local sendMotherToBattleRequest = Remotes.waitFor(Config.RemoteNames.SEND_MOTHER_TO_BATTLE_REQUEST)
--- ⚠️ Phase 4A: server แจ้งเองตอนกำแพงด่านพังครั้งแรก (ไม่ได้มาจากปุ่ม) — ยิงครั้งเดียว ไม่อยู่ใน sync
+-- ⚠️ Phase 4A: server แจ้งเองตอนกำแพงด่านพัง (ไม่ได้มาจากปุ่ม) — ยิงครั้งเดียว ไม่อยู่ใน sync
+-- Phase 4B: payload (stage, eggCount, deathCount) — รวมแจ้งแม่ในสนามรบที่ตายไว้ใน popup เดียวกัน
 local stageClearedNotify = Remotes.waitFor(Config.RemoteNames.STAGE_CLEARED_NOTIFY)
+-- ⚠️ Phase 4B: สลับล็อกแม่ (คอก/กระเป๋า) — ล็อกแล้วขาย/ส่งไปรบไม่ได้ · server ตรวจซ้ำเองทั้งสองทาง
+local toggleMotherLockRequest = Remotes.waitFor(Config.RemoteNames.TOGGLE_MOTHER_LOCK_REQUEST)
 
 --------------------------------------------------------------------------------
 -- สร้าง UI
@@ -70,6 +73,8 @@ local TEMP_BUTTON_COLOR = Color3.fromRGB(200, 140, 60)
 local DISABLED_ACTION_COLOR = Color3.fromRGB(70, 74, 82)
 -- ⚠️ สีเสี่ยง (แดง) เฉพาะการกระทำที่ทำให้แม่ตายถาวรได้ — ต่างจากส้ม TEMP ข้างบนที่แค่ "ชั่วคราว"
 local BATTLE_RISK_COLOR = Color3.fromRGB(200, 60, 60)
+-- ปุ่มล็อก/ปลดล็อกแม่ (Phase 4B) + ป้าย 🔒 บนการ์ดแม่ที่ล็อกอยู่
+local LOCK_BUTTON_COLOR = Color3.fromRGB(120, 110, 170)
 local MAX_BATTLE_MOTHERS = Config.Balance.Combat.MAX_BATTLE_MOTHERS
 
 local HEADER_HEIGHT = 36
@@ -456,6 +461,7 @@ type CardSpec = {
 	color: Color3,
 	selected: boolean,
 	onClick: () -> (),
+	locked: boolean?, -- Phase 4B: แม่ที่ล็อกอยู่ → ป้าย 🔒 มุมขวาบนของการ์ด (การ์ดไข่ไม่ใช้)
 }
 
 local function createCard(spec: CardSpec, parent: Instance, layoutOrder: number): TextButton
@@ -498,6 +504,26 @@ local function createCard(spec: CardSpec, parent: Instance, layoutOrder: number)
 	local textConstraint = Instance.new("UITextSizeConstraint")
 	textConstraint.MaxTextSize = 14
 	textConstraint.Parent = label
+
+	if spec.locked then
+		local lockBadge = Instance.new("TextLabel")
+		lockBadge.Name = "LockBadge"
+		lockBadge.AnchorPoint = Vector2.new(1, 0)
+		lockBadge.Position = UDim2.new(1, -2, 0, 2)
+		lockBadge.Size = UDim2.new(0, 18, 0, 18)
+		lockBadge.BackgroundColor3 = LOCK_BUTTON_COLOR
+		lockBadge.BorderSizePixel = 0
+		lockBadge.TextColor3 = Color3.fromRGB(255, 255, 255)
+		lockBadge.TextSize = 12
+		lockBadge.Font = Enum.Font.SourceSansBold
+		lockBadge.Text = "🔒"
+		lockBadge.ZIndex = label.ZIndex + 1
+		lockBadge.Parent = card
+
+		local badgeCorner = Instance.new("UICorner")
+		badgeCorner.CornerRadius = UDim.new(0, 9)
+		badgeCorner.Parent = lockBadge
+	end
 
 	card.Activated:Connect(spec.onClick)
 
@@ -791,6 +817,41 @@ local function showRosterFull()
 	resultLabel.TextColor3 = ERROR_COLOR
 end
 
+--------------------------------------------------------------------------------
+-- ล็อกแม่ (Phase 4B)
+--------------------------------------------------------------------------------
+-- ⚠️ client ตรวจ `locked` ก่อนแค่เพื่อปิดปุ่ม/บอกผู้เล่นเร็ว ๆ — ด่านสุดท้ายคือ server เสมอ
+-- (ขาย: EggService.sellMother · ส่งไปรบ: CombatService.handleSendMotherToBattle)
+
+local function findMotherByUid(list: { any }, uid: string?): any
+	if not uid then
+		return nil
+	end
+	for _, mother in list do
+		if mother.uid == uid then
+			return mother
+		end
+	end
+	return nil
+end
+
+local function showMotherLocked(actionText: string)
+	resultLabel.Text = `แม่ตัวนี้ถูกล็อกไว้ {actionText}ไม่ได้ — กด "🔓 ปลดล็อก" ก่อน`
+	resultLabel.TextColor3 = ERROR_COLOR
+end
+
+-- ปุ่มสลับล็อกของแม่ที่เลือก — ใช้ทั้งแท็บคอกและกระเป๋า · ไม่ได้เลือกแม่ = ปุ่มปิดไว้
+local function addLockButtonRow(mother: any)
+	if not mother then
+		addButtonRow("เลือกแม่ด้านล่างเพื่อล็อก/ปลดล็อก", false, LOCK_BUTTON_COLOR, function() end)
+		return
+	end
+	local text = if mother.locked then "🔓 ปลดล็อก" else "🔒 ล็อก"
+	addButtonRow(text, true, LOCK_BUTTON_COLOR, function()
+		toggleMotherLockRequest:FireServer(mother.uid)
+	end)
+end
+
 local confirmGui = Instance.new("ScreenGui")
 confirmGui.Name = "BattleConfirm"
 confirmGui.ResetOnSpawn = false
@@ -940,12 +1001,16 @@ local function renderPenTab()
 			subtitle = mother.weightText,
 			color = CLASS_COLORS[mother.class] or CLASS_COLORS.C,
 			selected = mother.uid == selectedMotherUid,
+			locked = mother.locked == true,
 			onClick = function()
 				selectedMotherUid = mother.uid
 				renderActiveTab()
 			end,
 		})
 	end
+
+	-- Phase 4B: ล็อกแม่ในคอกได้ด้วย (ล็อกติดตัวแม่ไปตอนย้ายเข้ากระเป๋า) · ย้ายคอก↔กระเป๋าไม่โดนล็อกกัน
+	addLockButtonRow(findMotherByUid(lastPayload.mothersInPen, selectedMotherUid))
 
 	addInfoRow(`คอก {#lastPayload.mothersInPen}/{lastPayload.penCapacity}`, true)
 	if #cards == 0 then
@@ -970,6 +1035,7 @@ local function renderBagTab()
 			subtitle = mother.weightText,
 			color = CLASS_COLORS[mother.class] or CLASS_COLORS.C,
 			selected = mother.uid == selectedMotherUid,
+			locked = mother.locked == true,
 			onClick = function()
 				selectedMotherUid = mother.uid
 				renderActiveTab()
@@ -1001,8 +1067,15 @@ local function renderBagTab()
 			end
 		end
 	end
+	addLockButtonRow(selectedBagMother)
+
 	if not selectedBagMother then
 		addButtonRow("เลือกแม่ด้านล่างเพื่อส่งไปรบ", false, BATTLE_RISK_COLOR, function() end)
+	elseif selectedBagMother.locked then
+		-- Phase 4B: ล็อกอยู่ = ไม่เปิดกล่องยืนยัน ไม่ยิง remote (server ปฏิเสธซ้ำอยู่แล้วถ้าหลุดมา)
+		addButtonRow("ส่งไปรบไม่ได้ — แม่ตัวนี้ถูกล็อกไว้", false, BATTLE_RISK_COLOR, function()
+			showMotherLocked("ส่งไปรบ")
+		end)
 	elseif isBattleRosterFull() then
 		addButtonRow(`ส่งไปรบไม่ได้ — roster เต็มแล้ว ({#lastPayload.battleRoster}/{MAX_BATTLE_MOTHERS})`, false, BATTLE_RISK_COLOR, showRosterFull)
 	else
@@ -1013,22 +1086,38 @@ local function renderBagTab()
 
 	-- ⚠️⚠️ TEMP: ปุ่มขายด่วนสำหรับทดสอบเท่านั้น ไม่ใช่ flow จริงของเกม — ของจริงต้องไปขายที่
 	-- ระบบร้านค้า (ยังไม่ได้ทำ) มีไว้แค่ให้เคลียร์กระเป๋าแม่เร็ว ๆ ระหว่างทดสอบระบบอื่นเท่านั้น
-	if selectedMotherUid and motherLocationByUid[selectedMotherUid] == "bag" then
+	if selectedBagMother and selectedBagMother.locked then
+		addButtonRow("ขายไม่ได้ — แม่ตัวนี้ถูกล็อกไว้ (TEMP)", false, TEMP_BUTTON_COLOR, function()
+			showMotherLocked("ขาย")
+		end)
+	elseif selectedBagMother then
+		local sellUid = selectedBagMother.uid
 		addButtonRow("ขายที่เลือก (TEMP)", true, TEMP_BUTTON_COLOR, function()
-			sellMotherRequest:FireServer(selectedMotherUid)
+			sellMotherRequest:FireServer(sellUid)
 		end)
 	else
 		addButtonRow("เลือกแม่ด้านล่างเพื่อขาย (TEMP)", false, TEMP_BUTTON_COLOR, function() end)
 	end
 
-	if #lastPayload.mothersInBag > 0 then
-		addButtonRow(`ขายทั้งหมดในกระเป๋า ({#lastPayload.mothersInBag}) (TEMP)`, true, TEMP_BUTTON_COLOR, function()
+	-- ⚠️ Phase 4B: "ขายทั้งหมด" ข้ามแม่ที่ล็อกไว้ — ปุ่มนี้คือที่ที่ล็อกกันพลาดได้มากที่สุด
+	local unlockedBag: { any } = {}
+	for _, mother in lastPayload.mothersInBag do
+		if not mother.locked then
+			table.insert(unlockedBag, mother)
+		end
+	end
+	local lockedInBag = #lastPayload.mothersInBag - #unlockedBag
+	if #unlockedBag > 0 then
+		local lockedNote = if lockedInBag > 0 then ` · ข้าม 🔒 {lockedInBag}` else ""
+		addButtonRow(`ขายทั้งหมดในกระเป๋า ({#unlockedBag}{lockedNote}) (TEMP)`, true, TEMP_BUTTON_COLOR, function()
 			-- ⚠️⚠️ TEMP: วน FireServer ทีละตัวจนครบ — ไม่มีคำขอ "ขายทั้งหมด" แบบ batch ฝั่ง
 			-- server เลย (ไม่ต้องมี ของจริงย้ายไปร้านค้าอยู่ดี) server ตัดสินแต่ละคำขอเองอิสระ
-			for _, mother in lastPayload.mothersInBag do
+			for _, mother in unlockedBag do
 				sellMotherRequest:FireServer(mother.uid)
 			end
 		end)
+	elseif lockedInBag > 0 then
+		addButtonRow(`ขายทั้งหมดไม่ได้ — แม่ในกระเป๋าล็อกไว้ทั้ง {lockedInBag} ตัว (TEMP)`, false, TEMP_BUTTON_COLOR, function() end)
 	else
 		addButtonRow("กระเป๋าไม่มีแม่ให้ขาย (TEMP)", false, TEMP_BUTTON_COLOR, function() end)
 	end
@@ -1527,7 +1616,7 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------------------
--- popup "ผ่านด่านสำเร็จ" (Phase 4A)
+-- popup "ผ่านด่านสำเร็จ" (Phase 4A · 4B รวมแจ้งแม่ในสนามรบที่ตายไว้ใน popup เดียวกัน)
 --------------------------------------------------------------------------------
 -- ⚠️ แยกจากกล่องยืนยันส่งแม่ไปรบโดยตั้งใจ (คนละ flow: นี่ server แจ้งเอง ไม่มีอะไรให้ยืนยัน)
 -- ใช้แบบเดียวกัน: ScreenGui แยก DisplayOrder สูง + ฉากหลังมืดเต็มจอ กันกดโดนปุ่มข้างหลัง
@@ -1620,7 +1709,7 @@ local stageClearOkCorner = Instance.new("UICorner")
 stageClearOkCorner.CornerRadius = UDim.new(0, 6)
 stageClearOkCorner.Parent = stageClearOkButton
 
-local stageClearQueue: { { stage: number, eggCount: number } } = {}
+local stageClearQueue: { { stage: number, eggCount: number, deathCount: number } } = {}
 
 local function showNextStageClear()
 	local entry = stageClearQueue[1]
@@ -1628,10 +1717,12 @@ local function showNextStageClear()
 		stageClearGui.Enabled = false
 		return
 	end
-	stageClearTitle.Text = `ผ่านด่าน {entry.stage} สำเร็จ!`
-	stageClearBody.Text = if entry.eggCount > 0
-		then `ได้รับไข่ฟรี {entry.eggCount} ฟอง (อยู่ในกระเป๋าไข่ เอาไปวางฟักได้เลย)`
-		else "กระเป๋าไข่เต็ม — ไม่ได้รับไข่ฟรีของด่านนี้"
+	-- ⚠️ ข้อความทุกกรณีอยู่ที่ Config.formatStageClearedMessage (เทสต์นอก Studio ได้) — ห้ามต่อ string เองตรงนี้
+	local title, body = Config.formatStageClearedMessage(entry.stage, entry.eggCount, entry.deathCount)
+	stageClearTitle.Text = title
+	stageClearBody.Text = body
+	-- มีแม่ตาย = ขอบแดง ให้ต่างจาก popup ข่าวดีล้วน ๆ
+	stageClearStroke.Color = if entry.deathCount > 0 then BATTLE_RISK_COLOR else SUCCESS_COLOR
 	stageClearGui.Enabled = true
 end
 
@@ -1640,8 +1731,8 @@ stageClearOkButton.Activated:Connect(function()
 	showNextStageClear()
 end)
 
-stageClearedNotify.OnClientEvent:Connect(function(stage: number, eggCount: number)
-	table.insert(stageClearQueue, { stage = stage, eggCount = eggCount })
+stageClearedNotify.OnClientEvent:Connect(function(stage: number, eggCount: number, deathCount: number?)
+	table.insert(stageClearQueue, { stage = stage, eggCount = eggCount, deathCount = deathCount or 0 })
 	if #stageClearQueue == 1 then
 		showNextStageClear()
 	end
@@ -1753,7 +1844,7 @@ farmStateSync.OnClientEvent:Connect(function(payload)
 	renderActiveTab()
 end)
 
--- ⚠️ ผลลัพธ์ของ PlaceEgg/MoveMother/UpgradePen/SellMother/AutoFillPen/SendMotherToBattle — ก่อนหน้านี้เห็นแค่ผ่าน
+-- ⚠️ ผลลัพธ์ของ PlaceEgg/MoveMother/UpgradePen/SellMother/AutoFillPen/SendMotherToBattle/ToggleMotherLock — ก่อนหน้านี้เห็นแค่ผ่าน
 -- print ใน server console เท่านั้น ผู้เล่นไม่เห็นอะไรเลยว่าทำไมกดแล้วไม่มีอะไรเกิดขึ้น
 actionResult.OnClientEvent:Connect(function(ok: boolean, message: string)
 	resultLabel.Text = message

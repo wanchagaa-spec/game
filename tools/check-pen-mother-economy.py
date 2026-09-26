@@ -51,7 +51,9 @@ function FakeProductionService.settleAllInPen(_data, _online)
 end
 
 -- fake Remotes — จับ callback ที่ EggService.start() ผูกไว้จริง ๆ
+-- + จำ FireClient ครั้งล่าสุดของแต่ละ remote (ต่อผู้เล่น) ไว้ตรวจสิ่งที่ส่งกลับไปหา client (Phase 4B)
 local capturedHandlers = {}
+local lastFired = {} -- [remoteName][userId] = table.pack(...args ไม่รวม player)
 local FakeRemotes = {}
 function FakeRemotes.waitFor(name)
 \tlocal remote = {}
@@ -61,8 +63,15 @@ function FakeRemotes.waitFor(name)
 \t\t\treturn { Disconnect = function() end }
 \t\tend,
 \t}
-\tremote.FireClient = function(_self, _player, _payload) end
+\tremote.FireClient = function(_self, player, ...)
+\t\tlastFired[name] = lastFired[name] or {}
+\t\tlastFired[name][player.UserId] = table.pack(...)
+\tend
 \treturn remote
+end
+
+local function firedTo(player, remoteName)
+\treturn (lastFired[remoteName] or {})[player.UserId]
 end
 
 -- luau CLI ไม่มี Random ของ Roblox จริง (ดูคอมเมนต์เดียวกันใน tests/config.spec.luau)
@@ -111,6 +120,12 @@ EggService.start()
 local upgradePenHandler = capturedHandlers[Config.RemoteNames.UPGRADE_PEN_REQUEST]
 local sellMotherHandler = capturedHandlers[Config.RemoteNames.SELL_MOTHER_REQUEST]
 local autoFillPenHandler = capturedHandlers[Config.RemoteNames.AUTO_FILL_PEN_REQUEST]
+local toggleLockHandler = capturedHandlers[Config.RemoteNames.TOGGLE_MOTHER_LOCK_REQUEST]
+local sendToBattleHandler = capturedHandlers[Config.RemoteNames.SEND_MOTHER_TO_BATTLE_REQUEST]
+local moveMotherHandler = capturedHandlers[Config.RemoteNames.MOVE_MOTHER_REQUEST]
+assert(toggleLockHandler, "เซ็ตอัพเทสต์ผิด — ไม่ผูก callback ให้ ToggleMotherLockRequest")
+assert(sendToBattleHandler, "เซ็ตอัพเทสต์ผิด — ไม่ผูก callback ให้ SendMotherToBattleRequest")
+assert(moveMotherHandler, "เซ็ตอัพเทสต์ผิด — ไม่ผูก callback ให้ MoveMotherRequest")
 assert(upgradePenHandler, "เซ็ตอัพเทสต์ผิด — ไม่ผูก callback ให้ UpgradePenRequest")
 assert(sellMotherHandler, "เซ็ตอัพเทสต์ผิด — ไม่ผูก callback ให้ SellMotherRequest")
 assert(autoFillPenHandler, "เซ็ตอัพเทสต์ผิด — ไม่ผูก callback ให้ AutoFillPenRequest")
@@ -319,6 +334,167 @@ do
 \tlocal ok = pcall(sellMotherHandler, player, "cheap-mother", 999999999) -- แถม arg ราคาปลอมมา
 \tcheck("ไม่ error/crash", ok)
 \tcheck("เงินได้ตามราคาจริงจาก server เท่านั้น ไม่ใช่ตัวเลขปลอมที่แถมมา", data.currency.coins, correctPrice)
+end
+
+--------------------------------------------------------------------------------
+-- 2.5) ล็อกแม่ (Phase 4B) — กันขาย + กันส่งไปรบ · ไม่กันย้ายคอก↔กระเป๋า
+--------------------------------------------------------------------------------
+
+local ACTION_RESULT = Config.RemoteNames.ACTION_RESULT
+local FARM_STATE_SYNC = Config.RemoteNames.FARM_STATE_SYNC
+
+local function findIn(list, uid)
+\tfor _, m in list do
+\t\tif m.uid == uid then
+\t\t\treturn m
+\t\tend
+\tend
+\treturn nil
+end
+
+print("\\n━━ ล็อกแม่: toggle ในกระเป๋า → locked สลับ + ตอบ ActionResult + sync ส่ง locked ━━")
+do
+\tlocal player, data = freshPlayer("Lock1")
+\ttable.clear(data.mothersInBag)
+\ttable.insert(data.mothersInBag, makeMother("lock-bag", "monkey", 200))
+
+\tlocal ok = pcall(toggleLockHandler, player, "lock-bag")
+\tcheck("ไม่ error/crash", ok)
+\tcheck("ล็อกแล้ว locked = true", data.mothersInBag[1].locked, true)
+\tlocal result = firedTo(player, ACTION_RESULT)
+\tcheck("ActionResult ok = true", result and result[1], true)
+\tcheck("ActionResult บอกว่าล็อกแล้ว", result ~= nil and string.find(result[2], "ล็อกแม่แล้ว", 1, true) ~= nil, true)
+\tlocal payload = firedTo(player, FARM_STATE_SYNC)
+\tlocal synced = payload and findIn(payload[1].mothersInBag, "lock-bag")
+\tcheck("sync ส่ง locked = true ให้ client", synced and synced.locked, true)
+
+\tpcall(toggleLockHandler, player, "lock-bag")
+\tcheck("กดอีกครั้ง → ปลดล็อก locked = false", data.mothersInBag[1].locked, false)
+\tresult = firedTo(player, ACTION_RESULT)
+\tcheck("ActionResult บอกว่าปลดล็อกแล้ว", result ~= nil and string.find(result[2], "ปลดล็อกแม่แล้ว", 1, true) ~= nil, true)
+\tpayload = firedTo(player, FARM_STATE_SYNC)
+\tsynced = payload and findIn(payload[1].mothersInBag, "lock-bag")
+\tcheck("sync ส่ง locked = false ให้ client", synced ~= nil and synced.locked, false)
+end
+
+print("\\n━━ ล็อกแม่: แม่ในคอกล็อกได้ · ย้ายคอก↔กระเป๋าไม่โดนกัน และล็อกติดตัวไปด้วย ━━")
+do
+\tlocal player, data = freshPlayer("Lock2")
+\ttable.clear(data.mothersInPen)
+\ttable.clear(data.mothersInBag)
+\ttable.insert(data.mothersInPen, makeMother("lock-pen", "monkey", 300, { lastProducedAt = os.time() }))
+
+\tpcall(toggleLockHandler, player, "lock-pen")
+\tcheck("แม่ในคอกล็อกได้", data.mothersInPen[1].locked, true)
+
+\tlocal ok = pcall(moveMotherHandler, player, "lock-pen", "bag")
+\tcheck("ไม่ error/crash", ok)
+\tcheck("ล็อกอยู่ก็ย้ายคอก → กระเป๋าได้", #data.mothersInBag, 1)
+\tcheck("  ล็อกติดตัวไปด้วย", data.mothersInBag[1].locked, true)
+\tpcall(moveMotherHandler, player, "lock-pen", "pen")
+\tcheck("ล็อกอยู่ก็ย้ายกระเป๋า → คอกได้", #data.mothersInPen, 1)
+\tcheck("  ล็อกยังติดตัว", data.mothersInPen[1].locked, true)
+end
+
+print("\\n━━ ล็อกแม่: uid ปลอม/ของคนอื่น/ไม่ใช่ string/แม่ใน roster → ปฏิเสธ ไม่แตะอะไร ━━")
+do
+\tlocal playerA, dataA = freshPlayer("Lock3A")
+\ttable.clear(dataA.mothersInBag)
+\ttable.insert(dataA.mothersInBag, makeMother("owned-by-3a", "monkey", 100))
+\ttable.insert(dataA.battleRoster, makeMother("in-roster-3a", "monkey", 100))
+\tlocal playerB = freshPlayer("Lock3B")
+
+\tlocal ok = pcall(toggleLockHandler, playerB, "owned-by-3a")
+\tcheck("ไม่ error/crash", ok)
+\tcheck("B ล็อกแม่ของ A ไม่ได้", dataA.mothersInBag[1].locked, false)
+\tcheck("  B ได้ ActionResult ปฏิเสธ", firedTo(playerB, ACTION_RESULT)[1], false)
+
+\tpcall(toggleLockHandler, playerA, "ไม่มีจริง-1")
+\tcheck("uid ปลอม → ปฏิเสธ", firedTo(playerA, ACTION_RESULT)[1], false)
+\tpcall(toggleLockHandler, playerA, 12345)
+\tcheck("uid ไม่ใช่ string → ปฏิเสธ", firedTo(playerA, ACTION_RESULT)[1], false)
+\tpcall(toggleLockHandler, playerA, "in-roster-3a")
+\tcheck("แม่ใน roster → ปฏิเสธ", firedTo(playerA, ACTION_RESULT)[1], false)
+\tcheck("  แม่ใน roster ไม่ถูกแตะ", dataA.battleRoster[1].locked, false)
+end
+
+print("\\n━━ ล็อกแม่: ขายแม่ที่ล็อก → ปฏิเสธ · ปลดล็อกแล้วขายได้ ━━")
+do
+\tlocal player, data = freshPlayer("Lock4")
+\ttable.clear(data.mothersInBag)
+\ttable.insert(data.mothersInBag, makeMother("locked-sell", "wukong", 1500, { locked = true }))
+\tdata.currency.coins = 0
+
+\tlocal ok = pcall(sellMotherHandler, player, "locked-sell")
+\tcheck("ไม่ error/crash", ok)
+\tcheck("แม่ที่ล็อกไม่ถูกขาย ยังอยู่ในกระเป๋า", #data.mothersInBag, 1)
+\tcheck("  เงินไม่เปลี่ยน", data.currency.coins, 0)
+\tlocal result = firedTo(player, ACTION_RESULT)
+\tcheck("  ActionResult ok = false", result[1], false)
+\tcheck("  ข้อความตามโจทย์", result[2], "แม่ตัวนี้ถูกล็อกไว้ ขายไม่ได้")
+
+\tpcall(toggleLockHandler, player, "locked-sell")
+\tcheck("ปลดล็อกแล้ว", data.mothersInBag[1].locked, false)
+\tlocal expectedPrice = Config.getMotherSellPrice(1500, data.wallProgress, {})
+\tpcall(sellMotherHandler, player, "locked-sell")
+\tcheck("ปลดล็อกแล้วขายได้ แม่หายจากกระเป๋า", #data.mothersInBag, 0)
+\tcheck("  ได้เงินตามสูตรราคาขาย", data.currency.coins, expectedPrice)
+\tcheck("  ActionResult ok = true", firedTo(player, ACTION_RESULT)[1], true)
+end
+
+print("\\n━━ ล็อกแม่: ส่งแม่ที่ล็อกไปรบ → ยังโดนปฏิเสธ · ปลดล็อกแล้วส่งได้ ━━")
+do
+\tlocal player, data = freshPlayer("Lock5")
+\t-- ด่าน 1 พังแล้ว กำลังตีด่าน 2 (ด่าน 1 ไม่มีศัตรู ส่งแม่ไม่ได้อยู่แล้ว)
+\tdata.stageProgress[1] = { defendersRemaining = 0, wallHpRemaining = 0 }
+\tCombatService.ensureStageStarted(data, 2)
+\ttable.clear(data.mothersInBag)
+\ttable.clear(data.battleRoster)
+\ttable.insert(data.mothersInBag, makeMother("locked-send", "monkey", 500, { locked = true }))
+
+\tlocal ok = pcall(sendToBattleHandler, player, "locked-send")
+\tcheck("ไม่ error/crash", ok)
+\tcheck("แม่ที่ล็อกไม่ถูกส่ง ยังอยู่ในกระเป๋า", #data.mothersInBag, 1)
+\tcheck("  roster ว่าง", #data.battleRoster, 0)
+\tlocal result = firedTo(player, ACTION_RESULT)
+\tcheck("  ActionResult ok = false", result[1], false)
+\tcheck("  ข้อความเดิมของ 3C-1", result[2], "แม่ตัวนี้ถูกล็อกไว้ ส่งไปรบไม่ได้")
+
+\tpcall(toggleLockHandler, player, "locked-send")
+\tpcall(sendToBattleHandler, player, "locked-send")
+\tcheck("ปลดล็อกแล้วส่งได้ → เข้า roster", #data.battleRoster, 1)
+\tcheck("  ออกจากกระเป๋า", #data.mothersInBag, 0)
+end
+
+--------------------------------------------------------------------------------
+-- 2.6) popup ผ่านด่าน (Phase 4B) — payload (stage, eggCount, deathCount)
+--------------------------------------------------------------------------------
+
+local STAGE_CLEARED_NOTIFY = Config.RemoteNames.STAGE_CLEARED_NOTIFY
+
+print("\\n━━ popup ผ่านด่าน: ส่ง (ด่าน, ไข่ที่แจกได้จริง, แม่ที่ตาย) ครบ 3 ค่า ━━")
+do
+\tlocal player, data = freshPlayer("Notify1")
+\tlocal eggsBefore = #data.heldEggs.items
+\tEggService.grantStageClearBonus(player, 4, 2, 3)
+\tlocal fired = firedTo(player, STAGE_CLEARED_NOTIFY)
+\tcheck("ไข่ + แม่ตาย: ยิงมา 3 ค่า", fired and fired.n, 3)
+\tcheck("  ด่าน", fired[1], 4)
+\tcheck("  ไข่", fired[2], 2)
+\tcheck("  แม่ตาย", fired[3], 3)
+\tcheck("  ไข่เข้ากระเป๋าจริง 2 ฟอง", #data.heldEggs.items - eggsBefore, 2)
+
+\teggsBefore = #data.heldEggs.items
+\tEggService.grantStageClearBonus(player, 2, 0, 5)
+\tfired = firedTo(player, STAGE_CLEARED_NOTIFY)
+\tcheck("แม่ตายอย่างเดียว: ไข่ 0", fired[2], 0)
+\tcheck("  แม่ตาย 5", fired[3], 5)
+\tcheck("  ไม่มีไข่เข้ากระเป๋า", #data.heldEggs.items - eggsBefore, 0)
+
+\tEggService.grantStageClearBonus(player, 3, 1, 0)
+\tfired = firedTo(player, STAGE_CLEARED_NOTIFY)
+\tcheck("ไข่อย่างเดียว: ไข่ 1", fired[2], 1)
+\tcheck("  แม่ตาย 0", fired[3], 0)
 end
 
 --------------------------------------------------------------------------------

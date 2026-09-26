@@ -439,7 +439,7 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 			visual = meshModel
 		else
 			-- ⚠️ ขนาดต่อตัว ไม่ใช่ค่าคงที่ร่วม — แม่แต่ละตัวหนักไม่เท่ากัน (Config.getMotherVisualSize)
-			-- `inPen = true` ย่อ 1/10 จากขนาดตอนถือ/ส่งรบเสมอ
+			-- `inPen = true` คูณ MOTHER_PEN_SHRINK (ตอนนี้ 1:1 เท่าขนาดตอนถือ/ส่งรบ)
 			local size = Config.getMotherVisualSize(mother.weight, true)
 			-- แม่เป็นทรงกล่อง ครึ่งความสูงจึงเป็น Y/2 ตรง ๆ (ต่างจากไข่ที่เป็นทรงกลม)
 			visualHeight = size.Y

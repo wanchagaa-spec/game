@@ -696,9 +696,10 @@ Balance.VisualScale = {
 	-- tier 1..7 → ตัวคูณขนาด (100kg = ฐานเป๊ะ, 100M kg = ใหญ่กว่าฐาน 5.25 เท่า)
 	WEIGHT_MULTIPLIER = { 1.00, 1.32, 1.74, 2.29, 3.02, 3.98, 5.25 },
 
-	-- แม่ตอนอยู่ในคอก (ฟาร์ม) เล็กกว่าตอน "ถือ" (กระเป๋า/เลือกตัว) หรือ "ส่งรบ" 10 เท่า
-	-- ทุก tier เท่ากัน — ไข่ไม่มีกฎนี้ (ไข่แสดงขนาดเดียวกันทุกที่ที่เห็น)
-	MOTHER_PEN_SHRINK = 0.1,
+	-- ขนาดแม่ในคอก (ฟาร์ม) เทียบกับตอน "ถือ" (กระเป๋า/เลือกตัว) หรือ "ส่งรบ" · ทุก tier เท่ากัน
+	-- ไข่ไม่มีกฎนี้ (ไข่แสดงขนาดเดียวกันทุกที่ที่เห็น)
+	-- เดิม 0.1 (ย่อ 1/10) → เปลี่ยนเป็น 1 (1:1) ตามที่ผู้ใช้สั่ง — ย่อแล้วโมเดลจริง (กอริลลา) เล็กเกินไป
+	MOTHER_PEN_SHRINK = 1,
 }
 
 --------------------------------------------------------------------------------
@@ -2020,8 +2021,8 @@ function Config.getEggVisualSize(weight: number): Vector3
 	return scaleVec3(Config.MapDimensions.Blockout.EggSize, Config.getVisualScaleMultiplier(weight))
 end
 
--- ขนาดโมเดลแม่ตามน้ำหนัก — inPen = true ย่อเหลือ MOTHER_PEN_SHRINK เท่า (แม่ในคอกเล็กกว่า
--- ตอน "ถือ" หรือ "ส่งรบ" เสมอ ทุก tier เท่ากัน)
+-- ขนาดโมเดลแม่ตามน้ำหนัก — inPen = true คูณ MOTHER_PEN_SHRINK (ตอนนี้ = 1 คือ 1:1
+-- เท่ากับตอน "ถือ"/"ส่งรบ" · ทุก tier เท่ากัน)
 function Config.getMotherVisualSize(weight: number, inPen: boolean): Vector3
 	local multiplier = Config.getVisualScaleMultiplier(weight)
 	if inPen then

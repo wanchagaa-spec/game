@@ -1441,12 +1441,12 @@ return function(t, Config)
 	near("แม่ tier 7 ตอนถือ/ส่งรบ กว้าง 18.375 (ฐาน 3.5 × 5.25)", motherHeldTier7.X, 18.375, 0.001)
 	near("แม่ tier 7 ตอนถือ/ส่งรบ ยาว 26.25 (ฐาน 5 × 5.25)", motherHeldTier7.Z, 26.25, 0.001)
 
-	-- ⚠️ กฎ 1/10 ในคอก: ทุก tier เท่ากัน
+	-- ⚠️ ในคอก 1:1 เท่ากับตอนถือ (เดิม 1/10 — ผู้ใช้สั่งเปลี่ยน เพราะโมเดลจริงเล็กเกินไป)
 	local motherPenTier1 = Config.getMotherVisualSize(100, true)
 	local motherPenTier7 = Config.getMotherVisualSize(100000000, true)
-	near("แม่ tier 1 ในคอก = ตอนถือ/10", motherPenTier1.X, motherHeldTier1.X / 10, 0.0001)
-	near("แม่ tier 7 ในคอก = ตอนถือ/10", motherPenTier7.X, motherHeldTier7.X / 10, 0.0001)
-	check("แม่ในคอกเล็กกว่าแม่ตอนถือเสมอ (ไม่ใช่ตัวคูณ > 1 หลุดมา)", motherPenTier7.X < motherHeldTier7.X, true)
+	near("แม่ tier 1 ในคอก = ตอนถือ (1:1)", motherPenTier1.X, motherHeldTier1.X, 0.0001)
+	near("แม่ tier 7 ในคอก = ตอนถือ (1:1)", motherPenTier7.X, motherHeldTier7.X, 0.0001)
+	check("แม่ในคอกไม่ใหญ่กว่าแม่ตอนถือ (ไม่ใช่ตัวคูณ > 1 หลุดมา)", motherPenTier7.X <= motherHeldTier7.X, true)
 
 	-- ยามต้องบังคับว่าตัวคูณต้องไต่ขึ้นเรื่อย ๆ (ตัวเล็กห้ามแสดงใหญ่กว่าตัวใหญ่)
 	local scaleTable = Config.Balance.VisualScale.WEIGHT_MULTIPLIER

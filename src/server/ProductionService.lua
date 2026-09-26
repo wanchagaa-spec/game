@@ -53,6 +53,38 @@ function ProductionService.injectForTests(fake: { now: (() -> number)?, log: ((s
 end
 
 --------------------------------------------------------------------------------
+-- log "คลังลูกเต็ม" — แจ้งครั้งเดียวจนกว่ากองจะลดลงจริง
+--------------------------------------------------------------------------------
+-- ⚠️ เคยแจ้งตาม "ก่อน settle ยังไม่เต็ม → หลัง settle เต็ม" แล้วพบใน Studio ว่ายังขึ้นทุก 5 วิ:
+-- ตอนเปิดอัญเชิญ การรบดึงลูกออกจากกองทุกวินาที กองลดลงนิดหน่อย แล้วแม่เติมกลับถึงเพดานทุกรอบ settle
+-- จึงนับว่า "เพิ่งเต็ม" ใหม่ตลอด · แก้เป็นแจ้งครั้งแรกที่เต็ม แล้วเงียบจนกว่ากองจะลดต่ำกว่า
+-- FULL_LOG_REARM_RATIO ของเพดาน (ถูกดึงไปรบจนเหลือน้อยจริง) ค่อยแจ้งใหม่ได้อีกครั้ง
+-- ⚠️ ค่านี้คุมแค่ log ไม่ใช่ลูกบิดสมดุล จึงไม่อยู่ใน Config.Balance
+local FULL_LOG_REARM_RATIO = 0.5
+
+-- [data ของผู้เล่น][stack key] = true เมื่อแจ้งไปแล้ว · อยู่ในหน่วยความจำเท่านั้น ไม่เซฟ
+-- ⚠️ weak key: ผู้เล่นออกเกม → data หลุดจากแคช DataService → แถวนี้หายเอง ไม่ต้องล้างเอง
+local fullLogged: { [any]: { [string]: boolean } } = setmetatable({}, { __mode = "k" }) :: any
+
+local function logStackFullOnce(data: Data, mother: Mother, key: string, stackBefore: number, stackAfter: number, stackCap: number)
+	local logged = fullLogged[data]
+	if not logged then
+		logged = {}
+		fullLogged[data] = logged
+	end
+
+	-- เช็คจาก stackBefore เพราะการรบดึงลูกออก "ระหว่าง" รอบ settle ไม่ใช่ในรอบนี้
+	if stackBefore < stackCap * FULL_LOG_REARM_RATIO then
+		logged[key] = nil
+	end
+
+	if stackAfter >= stackCap and not logged[key] then
+		logged[key] = true
+		log(`[ProductionService] แม่ {mother.uid} คลังลูก "{key}" เต็ม ({stackCap} ตัว) หยุดผลิตชั่วคราว`)
+	end
+end
+
+--------------------------------------------------------------------------------
 -- settle แม่ 1 ตัว
 --------------------------------------------------------------------------------
 
@@ -125,12 +157,9 @@ function ProductionService.settleMother(data: Data, mother: Mother, online: bool
 
 	mother.lastProducedAt = windowStart + timeUsed
 
-	-- ⚠️ แจ้งเฉพาะรอบที่ "เพิ่งเต็ม" (ก่อน settle ยังไม่เต็ม · หลัง settle ถึงเพดาน) ไม่ใช่ทุกรอบที่ hitCap
-	-- เดิมพิมพ์ทุกรอบ → แม่ที่คลังเต็มค้างพิมพ์ซ้ำทุก tick จน log อื่นจม · ปล่อยลูกออกไปรบจนกองลดแล้ว
-	-- เต็มใหม่ = แจ้งใหม่อีกครั้ง · ค่า hitCap ที่คืนออกไปยังความหมายเดิม (รอบนี้ผลิตไม่ครบเพราะคลังเต็ม)
-	if stackBefore < stackCap and stackBefore + actualChildren >= stackCap then
-		log(`[ProductionService] แม่ {mother.uid} คลังลูก "{key}" เต็ม ({stackCap} ตัว) หยุดผลิตชั่วคราว`)
-	end
+	-- ⚠️ ไม่พิมพ์ทุกรอบที่ hitCap (เคยท่วม console) — ดู logStackFullOnce ข้างบน
+	-- ค่า hitCap ที่คืนออกไปยังความหมายเดิม (รอบนี้ผลิตไม่ครบเพราะคลังเต็ม)
+	logStackFullOnce(data, mother, key, stackBefore, stackBefore + actualChildren, stackCap)
 
 	return actualChildren, coinsEarned, hitCap
 end

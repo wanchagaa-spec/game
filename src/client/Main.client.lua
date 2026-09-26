@@ -47,6 +47,8 @@ local buySpeedUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_SPEED_UPGR
 -- ⚠️ Phase 3C-2: ส่งแม่ในกระเป๋าลง battleRoster (3C-1) — ยิงได้**หลังกดยืนยันในกล่องเท่านั้น**
 -- server ตรวจทุกอย่างซ้ำเอง (อยู่ในกระเป๋าจริงไหม · lock · roster เต็ม · มีด่านให้ตี) ผลกลับทาง actionResult
 local sendMotherToBattleRequest = Remotes.waitFor(Config.RemoteNames.SEND_MOTHER_TO_BATTLE_REQUEST)
+-- ⚠️ Phase 4A: server แจ้งเองตอนกำแพงด่านพังครั้งแรก (ไม่ได้มาจากปุ่ม) — ยิงครั้งเดียว ไม่อยู่ใน sync
+local stageClearedNotify = Remotes.waitFor(Config.RemoteNames.STAGE_CLEARED_NOTIFY)
 
 --------------------------------------------------------------------------------
 -- สร้าง UI
@@ -1521,6 +1523,127 @@ task.spawn(function()
 				renderReleaseOrderPanel()
 			end
 		end
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- popup "ผ่านด่านสำเร็จ" (Phase 4A)
+--------------------------------------------------------------------------------
+-- ⚠️ แยกจากกล่องยืนยันส่งแม่ไปรบโดยตั้งใจ (คนละ flow: นี่ server แจ้งเอง ไม่มีอะไรให้ยืนยัน)
+-- ใช้แบบเดียวกัน: ScreenGui แยก DisplayOrder สูง + ฉากหลังมืดเต็มจอ กันกดโดนปุ่มข้างหลัง
+-- ⚠️ มาจาก StageClearedNotify ครั้งเดียวต่อเหตุการณ์ ไม่อ่านจาก sync → resync กี่รอบก็ไม่โผล่ซ้ำ
+-- · ถ้าแจ้งมาซ้อนกัน (พังหลายด่านติดกัน) ต่อคิว โชว์ทีละอัน กด "ตกลง" แล้วขึ้นอันถัดไป
+
+local stageClearGui = Instance.new("ScreenGui")
+stageClearGui.Name = "StageClearedPopup"
+stageClearGui.ResetOnSpawn = false
+stageClearGui.IgnoreGuiInset = true
+stageClearGui.DisplayOrder = gui.DisplayOrder + 20
+stageClearGui.Enabled = false
+stageClearGui.Parent = playerGui
+
+local stageClearBackdrop = Instance.new("TextButton")
+stageClearBackdrop.Name = "Backdrop"
+stageClearBackdrop.Size = UDim2.fromScale(1, 1)
+stageClearBackdrop.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+stageClearBackdrop.BackgroundTransparency = 0.45
+stageClearBackdrop.BorderSizePixel = 0
+stageClearBackdrop.AutoButtonColor = false
+stageClearBackdrop.Text = ""
+stageClearBackdrop.Parent = stageClearGui
+
+local stageClearBox = Instance.new("Frame")
+stageClearBox.Name = "Dialog"
+stageClearBox.AnchorPoint = Vector2.new(0.5, 0.5)
+stageClearBox.Position = UDim2.fromScale(0.5, 0.5)
+stageClearBox.Size = UDim2.new(0, 340, 0, 0)
+stageClearBox.AutomaticSize = Enum.AutomaticSize.Y
+stageClearBox.BackgroundColor3 = BG
+stageClearBox.BorderSizePixel = 0
+stageClearBox.Parent = stageClearGui
+
+local stageClearCorner = Instance.new("UICorner")
+stageClearCorner.CornerRadius = UDim.new(0, 10)
+stageClearCorner.Parent = stageClearBox
+
+local stageClearStroke = Instance.new("UIStroke")
+stageClearStroke.Color = SUCCESS_COLOR
+stageClearStroke.Thickness = 2
+stageClearStroke.Parent = stageClearBox
+
+local stageClearPadding = Instance.new("UIPadding")
+stageClearPadding.PaddingTop = UDim.new(0, 16)
+stageClearPadding.PaddingBottom = UDim.new(0, 16)
+stageClearPadding.PaddingLeft = UDim.new(0, 16)
+stageClearPadding.PaddingRight = UDim.new(0, 16)
+stageClearPadding.Parent = stageClearBox
+
+local stageClearLayout = Instance.new("UIListLayout")
+stageClearLayout.Padding = UDim.new(0, 10)
+stageClearLayout.SortOrder = Enum.SortOrder.LayoutOrder
+stageClearLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+stageClearLayout.Parent = stageClearBox
+
+local function makeStageClearText(order: number, textSize: number, font: Enum.Font, color: Color3): TextLabel
+	local label = Instance.new("TextLabel")
+	label.LayoutOrder = order
+	label.Size = UDim2.new(1, 0, 0, 0)
+	label.AutomaticSize = Enum.AutomaticSize.Y
+	label.BackgroundTransparency = 1
+	label.TextColor3 = color
+	label.TextXAlignment = Enum.TextXAlignment.Center
+	label.TextWrapped = true
+	label.TextSize = textSize
+	label.Font = font
+	label.Text = ""
+	label.Parent = stageClearBox
+	return label
+end
+
+local stageClearTitle = makeStageClearText(1, 22, Enum.Font.SourceSansBold, SUCCESS_COLOR)
+local stageClearBody = makeStageClearText(2, 16, Enum.Font.SourceSans, FG)
+
+local stageClearOkButton = Instance.new("TextButton")
+stageClearOkButton.Name = "Ok"
+stageClearOkButton.LayoutOrder = 3
+stageClearOkButton.Size = UDim2.new(0, 140, 0, 36)
+stageClearOkButton.BackgroundColor3 = ACCENT
+stageClearOkButton.BorderSizePixel = 0
+stageClearOkButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+stageClearOkButton.TextSize = 16
+stageClearOkButton.Font = Enum.Font.SourceSansBold
+stageClearOkButton.Text = "ตกลง"
+stageClearOkButton.AutoButtonColor = true
+stageClearOkButton.Parent = stageClearBox
+
+local stageClearOkCorner = Instance.new("UICorner")
+stageClearOkCorner.CornerRadius = UDim.new(0, 6)
+stageClearOkCorner.Parent = stageClearOkButton
+
+local stageClearQueue: { { stage: number, eggCount: number } } = {}
+
+local function showNextStageClear()
+	local entry = stageClearQueue[1]
+	if not entry then
+		stageClearGui.Enabled = false
+		return
+	end
+	stageClearTitle.Text = `ผ่านด่าน {entry.stage} สำเร็จ!`
+	stageClearBody.Text = if entry.eggCount > 0
+		then `ได้รับไข่ฟรี {entry.eggCount} ฟอง (อยู่ในกระเป๋าไข่ เอาไปวางฟักได้เลย)`
+		else "กระเป๋าไข่เต็ม — ไม่ได้รับไข่ฟรีของด่านนี้"
+	stageClearGui.Enabled = true
+end
+
+stageClearOkButton.Activated:Connect(function()
+	table.remove(stageClearQueue, 1)
+	showNextStageClear()
+end)
+
+stageClearedNotify.OnClientEvent:Connect(function(stage: number, eggCount: number)
+	table.insert(stageClearQueue, { stage = stage, eggCount = eggCount })
+	if #stageClearQueue == 1 then
+		showNextStageClear()
 	end
 end)
 

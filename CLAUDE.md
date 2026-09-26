@@ -394,6 +394,7 @@ docs/
   hotbar-design.md     → ดีไซน์ Hotbar 10 ช่อง (Phase 5.5 · ยังไม่ได้เขียนโค้ด)
   phase-1.5-rework.md  → บันทึกการรื้อโค้ด Phase 1 ให้ตรงดีไซน์ใหม่ (ทำครบแล้ว) + เช็คลิสต์ที่ต้องทดสอบใน Studio
   debug-commands.md    → คำสั่ง debug ทั้งหมดที่เรียกผ่าน command bar ใน Studio (ไม่ใช่ฟีเจอร์ในเกม)
+  phase-3c-report.md   → รายงานสรุป Phase 3C-1 + 3C-2 (ส่งแม่ไปรบ + ตายถาวร) + ผลทดสอบ Studio
 default.project.json   → mapping ของ Rojo
 ```
 
@@ -430,6 +431,7 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   - **3C-1** (ส่งแม่ไปรบ + ตายถาวร ฝั่ง server — `battleRoster` · schema v2) ✅
   - **3C-2** (UI ปุ่ม "ส่งไปรบ" ในแท็บกระเป๋า + กล่องยืนยัน + บรรทัด roster ใน CombatHud) ✅
     ⚠️ ปุ่ม "ส่งไปรบ" **แค่เปิดกล่องยืนยัน** · remote ยิงจากปุ่ม "ยืนยันส่งรบ" ที่เดียว · "ยกเลิก" ไม่ส่งอะไร
+  📄 รายงานสรุป 3C-1 + 3C-2 (ตัดสินอะไร · ผลทดสอบ Studio · ที่ยังขาด) อยู่ใน `docs/phase-3c-report.md`
   📄 วิสัยทัศน์อนาคต **"HP รายตัว + turret"** (ลูก/แม่มี HP รายตัวจริง · turret สุ่มยิงมีจังหวะ
   ของตัวเอง · ทหารฝ่ายรับตีกลับได้ · หลอด HP ลอยทุกตัว) เป็น**เฟสแยกทีหลัง Phase 3C** —
   ยังไม่ได้ตั้งเลขเฟส **ไม่บล็อก 3C** ดู `docs/combat-hp-vision.md`
@@ -576,7 +578,7 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 **Phase 3C-1 เขียนโค้ดเสร็จแล้ว (server)** — `battleRoster` + migration v1→v2 ·
 `SendMotherToBattleRequest` · แม่ตีรวมกับลูก · ด่านพัง = แม่ใน roster ตายทั้งหมด
 **Phase 3C-2 (UI) เขียนเสร็จแล้ว** — ปุ่ม "ส่งไปรบ" + กล่องยืนยัน + "แม่ในสนามรบ: X/10" ใน CombatHud
-**ทั้ง 3C-1 และ 3C-2 ยังไม่ได้ทดสอบใน Studio**
+**ทั้ง 3C-1 และ 3C-2 ทดสอบใน Studio แล้ว ผ่านครบ** (📄 `docs/phase-3c-report.md`)
 
 ค่าทั้งหมดใน Config ผ่านการทดสอบพฤติกรรมจริงแล้ว 457 เคส (`luau tests/run.luau`)
 (สุ่มน้ำหนัก 5 ล้านครั้ง · สุ่มตัวละคร 300,000 ครั้งต่อไข่ · ไข่รายด่าน 60,000 ครั้งต่อด่าน ·

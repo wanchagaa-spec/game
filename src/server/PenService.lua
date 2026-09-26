@@ -19,6 +19,7 @@
 -- บวกไข่อีกเป็นหมื่นฟอง จะกินโควต้า DataStore ฟรี ๆ โดยไม่ได้อะไรกลับมา
 
 local InsertService = game:GetService("InsertService")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -260,27 +261,25 @@ local CLASS_COLORS: { [string]: Color3 } = {
 local meshTemplates: { [number]: Model } = {}
 -- โหลดไม่สำเร็จ ไม่ลองซ้ำจนกว่าเซิร์ฟจะรีสตาร์ท (กันยิงเน็ต + warn ซ้ำทุกครั้งที่ refresh)
 local failedMeshAssets: { [number]: boolean } = {}
+-- กำลังโหลดอยู่เบื้องหลัง — กันยิง LoadAsset ซ้อนกันหลายรอบกับ asset เดียวกัน
+local loadingMeshAssets: { [number]: boolean } = {}
+-- รายชื่อแม่ในคอกล่าสุดที่วาดให้แต่ละคน — ไว้วาดคอกใหม่เองตอนโมเดลโหลดเสร็จทีหลัง
+local lastMothersByUserId: { [number]: { any } } = {}
 
--- โหลด Model asset ที่ publish ขึ้น Roblox ไว้แล้ว (ดู Character.modelAssetId) ครั้งแรกครั้งเดียว
--- ⚠️ LoadAsset **yield** (ยิงเน็ต) — เรียกครั้งแรกต้องทำก่อนล้างคอกเสมอ (ดู refreshMothers)
--- ล้มเหลวตรงไหนก็ warn() แล้วคืน nil ให้ผู้เรียกตกกลับไปใช้กล่องสีเดิม
--- (asset หลุด/ยังไม่ผ่านการตรวจของ Roblox ไม่ควรทำให้ทั้งคอกพังไปด้วย)
-local function loadMeshTemplate(assetId: number): Model?
-	if failedMeshAssets[assetId] then
-		return nil
-	end
-	local cached = meshTemplates[assetId]
-	if cached then
-		return cached
-	end
+-- โหลดนานเกินนี้ = warn ให้รู้ตัว (LoadAsset ไม่มี timeout ในตัว และเคยค้างเงียบ ๆ ไม่ error เลยจริง)
+local MESH_LOAD_SLOW_WARN_SECONDS = 15
 
+-- ดึง Model asset ที่ publish ขึ้น Roblox ไว้แล้ว (ดู Character.modelAssetId) — **yield** (ยิงเน็ต)
+-- เรียกจาก getMeshTemplate ในเธรดเบื้องหลังเท่านั้น ห้ามเรียกตรงจาก refreshMothers
+-- ล้มเหลวตรงไหนก็ warn() แล้วคืน nil (asset หลุด/ยังไม่ผ่านการตรวจของ Roblox ไม่ควรทำให้คอกพัง)
+local function fetchMeshTemplateAsync(assetId: number): Model?
 	local ok, container = pcall(function()
 		return InsertService:LoadAsset(assetId)
 	end)
 	if not ok or container == nil then
-		-- ⚠️ LoadAsset โหลดได้เฉพาะ asset ของเจ้าของเกม (บัญชี/กลุ่มเดียวกับที่ publish เกม)
-		warn(`[PenService] LoadAsset ล้มเหลวกับ modelAssetId {assetId} — ใช้กล่องสีแทน`)
-		failedMeshAssets[assetId] = true
+		-- ⚠️ LoadAsset โหลดได้เฉพาะ **Model** asset ของเจ้าของเกม (บัญชี/กลุ่มเดียวกับที่ publish เกม)
+		-- เลข Mesh (MeshId ของ MeshPart) ใช้ไม่ได้
+		warn(`[PenService] LoadAsset ล้มเหลวกับ modelAssetId {assetId}: {container} — ใช้กล่องสีแทน`)
 		return nil
 	end
 
@@ -288,7 +287,6 @@ local function loadMeshTemplate(assetId: number): Model?
 	if content == nil then
 		warn(`[PenService] modelAssetId {assetId} ไม่มี Model/BasePart อยู่ข้างใน — ใช้กล่องสีแทน`)
 		container:Destroy()
-		failedMeshAssets[assetId] = true
 		return nil
 	end
 
@@ -316,8 +314,61 @@ local function loadMeshTemplate(assetId: number): Model?
 		end
 	end
 
-	meshTemplates[assetId] = model
 	return model
+end
+
+-- วาดคอกใหม่ให้ทุกคนที่มีแม่ใช้ asset นี้อยู่ — เรียกตอนโมเดลโหลดเสร็จทีหลัง
+local function redrawPensUsing(assetId: number)
+	for userId, mothers in lastMothersByUserId do
+		local uses = false
+		for _, mother in mothers do
+			local character = Config.getCharacter(mother.charId)
+			if character and character.modelAssetId == assetId then
+				uses = true
+				break
+			end
+		end
+		local player = if uses then Players:GetPlayerByUserId(userId) else nil
+		if player then
+			PenService.refreshMothers(player, mothers)
+		end
+	end
+end
+
+-- ⚠️ **ไม่ yield เด็ดขาด** — ครั้งแรกเริ่มโหลดเบื้องหลังแล้วคืน nil ทันที (ผู้เรียกวาดกล่องสีไปก่อน)
+-- โหลดเสร็จเมื่อไหร่ค่อยวาดคอกใหม่เองผ่าน redrawPensUsing
+-- เหตุผล: LoadAsset เคย**ค้างไม่ return เลย**ในเซิร์ฟจริง ถ้า refreshMothers รอ LoadAsset
+-- ทุกอย่างที่เรียก refreshMothers (ย้ายแม่/ขาย/ฟักเข้าคอก) จะค้างตามไปด้วยทั้งหมด
+local function getMeshTemplate(assetId: number): Model?
+	local cached = meshTemplates[assetId]
+	if cached then
+		return cached
+	end
+	if failedMeshAssets[assetId] or loadingMeshAssets[assetId] then
+		return nil
+	end
+
+	loadingMeshAssets[assetId] = true
+	task.delay(MESH_LOAD_SLOW_WARN_SECONDS, function()
+		if loadingMeshAssets[assetId] then
+			warn(
+				`[PenService] modelAssetId {assetId} ยังโหลดไม่เสร็จหลัง {MESH_LOAD_SLOW_WARN_SECONDS} วิ `
+					.. `— ระหว่างนี้ใช้กล่องสีไปก่อน (เช็คว่าเป็นเลข Model ของเจ้าของเกมจริงไหม)`
+			)
+		end
+	end)
+	task.spawn(function()
+		local model = fetchMeshTemplateAsync(assetId)
+		loadingMeshAssets[assetId] = nil
+		if model then
+			meshTemplates[assetId] = model
+			print(`[PenService] โหลด modelAssetId {assetId} สำเร็จ — วาดคอกใหม่`)
+			redrawPensUsing(assetId)
+		else
+			failedMeshAssets[assetId] = true
+		end
+	end)
+	return nil
 end
 
 -- clone จากต้นแบบแล้วสเกลตามน้ำหนักแม่ — ไม่ yield
@@ -339,22 +390,16 @@ end
 
 -- วาดแม่ในคอกใหม่ทั้งชุด (เรียกทุกครั้งที่รายชื่อแม่เปลี่ยน)
 -- ⚠️ ตำแหน่งสุ่มใหม่ทุกครั้ง ไม่ได้จำของเดิม ตามกฎ "ห้ามเซฟตำแหน่ง"
+-- ⚠️ ทั้งฟังก์ชัน**ไม่ yield** (โมเดล mesh โหลดเบื้องหลัง ดู getMeshTemplate) การล้าง+สร้างใหม่จึงจบ
+-- ในรวดเดียวเสมอ ผู้เรียก (EggService) ไม่ต้องรอเน็ต
 function PenService.refreshMothers(player: Player, mothers: { any })
-	-- ⚠️ โหลดโมเดลต้นแบบให้ครบ **ก่อน** ล้างคอก — LoadAsset yield (ยิงเน็ต) ครั้งแรก
-	-- ถ้าไป yield กลางลูปหลังล้างคอกแล้ว refresh สองรอบที่ซ้อนกันจะสร้างแม่ซ้ำสองชุด
-	-- หลังบรรทัดนี้ทั้งฟังก์ชันไม่ yield อีกเลย การล้าง+สร้างใหม่จึงจบในรวดเดียว
-	for _, mother in mothers do
-		local character = Config.getCharacter(mother.charId)
-		if character and character.modelAssetId then
-			loadMeshTemplate(character.modelAssetId)
-		end
-	end
-
-	-- หาคอก **หลัง** yield — ผู้เล่นอาจออกเกมไประหว่างรอโหลด
 	local pen = penByUserId[player.UserId]
 	if not pen then
 		return
 	end
+
+	-- ⚠️ เก็บ reference ของอาเรย์ตัวจริง (data.mothersInPen) ไว้วาดใหม่ตอนโมเดลโหลดเสร็จ
+	lastMothersByUserId[player.UserId] = mothers
 
 	dropRoamersUnder(pen.mothersFolder)
 	pen.mothersFolder:ClearAllChildren()
@@ -376,8 +421,8 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 		local restingY: number
 
 		local assetId = if character then character.modelAssetId else nil
-		-- โหลดไว้แล้วตอนต้นฟังก์ชัน ตรงนี้อ่านจากแคชล้วน ๆ ไม่ yield
-		local template = if assetId then loadMeshTemplate(assetId) else nil
+		-- ยังโหลดไม่เสร็จ/ล้มเหลว = nil → วาดกล่องสีไปก่อน (ไม่ yield)
+		local template = if assetId then getMeshTemplate(assetId) else nil
 
 		if assetId and template then
 			local meshModel = buildMeshMother(template, mother.weight, assetId)
@@ -485,6 +530,7 @@ function PenService.release(player: Player)
 	PenService.clearVisuals(pen)
 	pen.ownerUserId = nil
 	penByUserId[player.UserId] = nil
+	lastMothersByUserId[player.UserId] = nil
 end
 
 function PenService.getPen(player: Player): Pen?

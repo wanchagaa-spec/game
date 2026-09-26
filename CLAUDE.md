@@ -276,6 +276,12 @@ Core loop:
   ⚠️ **แม่ในคอกไม่ขึ้นในกระเป๋าตั้งแต่แรก** จึงเลือกไม่ได้ ไม่ใช่เลือกแล้วโดนปฏิเสธ
   (`mothersInPen` กับ `mothersInBag` เป็นคนละอาเรย์ · ต้อง `moveMother` เข้ากระเป๋าก่อน)
   → **ไม่ต้องมีสิ่งกั้นเชิงกายภาพระหว่างลานคอกกับเลนรบ** กำแพงกันเรื่องนี้ไม่ได้อยู่แล้ว
+- **แม่ในสนามรบ = `battleRoster`** (Phase 3C-1) ที่อยู่ที่ 3 ของแม่ · `SendMotherToBattleRequest(uid)`
+  ย้ายออกจากกระเป๋า (ช่องกระเป๋าว่างทันทีตอนส่ง) · **เพดาน 10 ตัว** (`Combat.MAX_BATTLE_MOTHERS`)
+  · แม่แต่ละตัวตีวินาทีละครั้งด้วย `Config.computeBattlePower` **เฉพาะตอนเปิดอัญเชิญ**
+  · ⚠️ **ด่านที่กำลังตีพัง = แม่ใน roster ตายทั้งหมดพร้อมกัน** ดึงกลับไม่ได้
+  · ปฏิเสธการส่งถ้า lock ไว้ / roster เต็ม / ไม่มีด่านที่มี HP ให้ตี (ด่าน 1 หรือพังครบแล้ว)
+  · ค่าเก่า `Inventory.MAX_TEAM_*` (ดีไซน์ "ทีม" ที่ไม่เคยเขียนโค้ด) ยังอยู่แต่ไม่มีโค้ดใช้
 - ปุ่ม **"เลือกสัตว์เลี้ยงที่ดีที่สุด"** เป็นปุ่มกดเอง ไม่ใช่ระบบที่ทำงานเอง
   กดแล้วจัดแม่เข้าคอกเรียงตามความสามารถผลิตเงิน · ย้ายกลับกระเป๋าเองได้ตลอด
 - ⚠️ **ความคืบหน้าสะสมถาวร** ทหารฝ่ายรับที่เหลือ + HP กำแพงที่เหลือของแต่ละด่าน
@@ -366,6 +372,7 @@ src/
     CombatService.lua    → Phase 3A: ปล่อยทหารจากคลัง (releaseOrder) + ตี defendersRemaining/
                             wallHpRemaining ต่อด่าน + จ่ายเงินตามสัดส่วน HP ทหารฝ่ายรับที่ลด +
                             auto-pause · ไม่มี offline catch-up (รับ elapsedSeconds ตรง ๆ)
+                            · Phase 3C-1: ส่งแม่ลง `battleRoster` + แม่ตาย/ล้าง roster ตอนด่านพัง
   client/   → StarterPlayerScripts (UI ทั้งหมด + ของที่เห็นเฉพาะตัวเอง)
     Main.client.lua      → StarterPlayerScripts.Main (entry point)
     WallRenderer.lua     → ⚠️ วาดกำแพงตาม `stageProgress` จริงจาก sync (ไม่ใช่ wallProgress)
@@ -420,7 +427,8 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   - **3A** (เครื่องยนต์คำนวณรบฝั่ง server — ไม่มีภาพ) ✅ `CombatService.lua`
   - **3B-1** (ภาพ+UI พื้นฐาน — ทำงานได้จริง ยังไม่ polish) ✅ `WallRenderer`/`TroopRenderer`/UI
   - **3B-2** (กำแพงแตกตาม % HP · เลขความเสียหายลอย · เอฟเฟกต์ตอนตี) ยังไม่ทำ
-  - **3C** (ส่งแม่ไปรบ + จัดทีม + ตายถาวร) ยังไม่ทำ
+  - **3C-1** (ส่งแม่ไปรบ + ตายถาวร ฝั่ง server — `battleRoster` · schema v2) ✅
+  - **3C-2** (UI ปุ่ม "ส่งไปรบ" + กล่องยืนยัน + บรรทัด roster ใน CombatHud) ยังไม่ทำ
   📄 วิสัยทัศน์อนาคต **"HP รายตัว + turret"** (ลูก/แม่มี HP รายตัวจริง · turret สุ่มยิงมีจังหวะ
   ของตัวเอง · ทหารฝ่ายรับตีกลับได้ · หลอด HP ลอยทุกตัว) เป็น**เฟสแยกทีหลัง Phase 3C** —
   ยังไม่ได้ตั้งเลขเฟส **ไม่บล็อก 3C** ดู `docs/combat-hp-vision.md`
@@ -448,8 +456,9 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 - `default.project.json` (mapping ของ Rojo — พังแล้ว sync ไม่ได้ทั้งโปรเจกต์)
 - **schema ของ DataStore** — ชื่อ key, โครงสร้าง PlayerData, `schemaVersion`
   (ดู `docs/data-schema.md` — แก้แล้วต้องเขียน migration ด้วยเสมอ)
-- **schema ของ mothers / children** — ฟิลด์ในตัวแม่, การแยก `mothersInPen` กับ
-  `mothersInBag` เป็นสองอาเรย์, การเก็บลูกเป็นกองไม่ใช่รายตัว,
+  · ตอนนี้ **v2** (v1→v2 = เพิ่ม `battleRoster` · ประวัติใน `docs/data-schema.md` §10.4)
+- **schema ของ mothers / children** — ฟิลด์ในตัวแม่, การแยก `mothersInPen` /
+  `mothersInBag` / `battleRoster` เป็นสามอาเรย์ (แม่ 1 ตัวอยู่ได้ที่เดียว), การเก็บลูกเป็นกองไม่ใช่รายตัว,
   `uid` ที่เป็น **global string** และห้าม reuse, `nextUid` ที่ห้ามลด
 - **รูปแบบ stack key** — ตัวคั่น, กฎเรียงสถานะ, การใช้ charId + น้ำหนักแม่เป็น identity
   (เปลี่ยนเมื่อไหร่ = กองลูกของผู้เล่นทุกคนอ่านไม่ออก เจ็บที่สุดในโปรเจกต์)
@@ -563,6 +572,9 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 `TroopRenderer` โมเดลคนบล็อก ๆ · แท็บ "ลูก" โชว์ % ความคืบหน้า+ปุ่มอัญเชิญ · แผงจัดคิวปล่อยทหาร
 เปิดใกล้จุดปล่อย) **ยังไม่ได้ทดสอบใน Studio** · Phase 3B-2/3C/4–7 ออกแบบเสร็จแล้ว + `Config.lua`
 พร้อมแล้ว แต่ยังไม่ได้เขียนโค้ด
+**Phase 3C-1 เขียนโค้ดเสร็จแล้ว (server)** — `battleRoster` + migration v1→v2 ·
+`SendMotherToBattleRequest` · แม่ตีรวมกับลูก · ด่านพัง = แม่ใน roster ตายทั้งหมด
+**ยังไม่มี UI (3C-2)** และยังไม่ได้ทดสอบใน Studio
 
 ค่าทั้งหมดใน Config ผ่านการทดสอบพฤติกรรมจริงแล้ว 457 เคส (`luau tests/run.luau`)
 (สุ่มน้ำหนัก 5 ล้านครั้ง · สุ่มตัวละคร 300,000 ครั้งต่อไข่ · ไข่รายด่าน 60,000 ครั้งต่อด่าน ·

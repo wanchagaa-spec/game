@@ -44,6 +44,9 @@ local setSummonEnabledRequest = Remotes.waitFor(Config.RemoteNames.SET_SUMMON_EN
 -- ⚠️ ปุ่มติดตัว 2 ปุ่ม (damage/ความเร็ว) — ไม่มีแท่นวาปแล้ว จึงต้องกดซื้อได้จากทุกที่ ไม่ต้องเดินมาร้าน
 local buyDamageUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_DAMAGE_UPGRADE_REQUEST)
 local buySpeedUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_SPEED_UPGRADE_REQUEST)
+-- ⚠️ Phase 3C-2: ส่งแม่ในกระเป๋าลง battleRoster (3C-1) — ยิงได้**หลังกดยืนยันในกล่องเท่านั้น**
+-- server ตรวจทุกอย่างซ้ำเอง (อยู่ในกระเป๋าจริงไหม · lock · roster เต็ม · มีด่านให้ตี) ผลกลับทาง actionResult
+local sendMotherToBattleRequest = Remotes.waitFor(Config.RemoteNames.SEND_MOTHER_TO_BATTLE_REQUEST)
 
 --------------------------------------------------------------------------------
 -- สร้าง UI
@@ -63,6 +66,9 @@ local ERROR_COLOR = Color3.fromRGB(235, 130, 130)
 -- ย้อนกลับไม่ได้ (ขายแม่) และของจริงต้องย้ายไปร้านค้า ไม่ใช่ตรงนี้
 local TEMP_BUTTON_COLOR = Color3.fromRGB(200, 140, 60)
 local DISABLED_ACTION_COLOR = Color3.fromRGB(70, 74, 82)
+-- ⚠️ สีเสี่ยง (แดง) เฉพาะการกระทำที่ทำให้แม่ตายถาวรได้ — ต่างจากส้ม TEMP ข้างบนที่แค่ "ชั่วคราว"
+local BATTLE_RISK_COLOR = Color3.fromRGB(200, 60, 60)
+local MAX_BATTLE_MOTHERS = Config.Balance.Combat.MAX_BATTLE_MOTHERS
 
 local HEADER_HEIGHT = 36
 local TAB_BAR_HEIGHT = 32
@@ -533,7 +539,9 @@ local combatHud = Instance.new("Frame")
 combatHud.Name = "CombatHud"
 combatHud.AnchorPoint = Vector2.new(1, 0)
 combatHud.Position = UDim2.new(1, -16, 0, 16)
-combatHud.Size = UDim2.new(0, 260, 0, 108)
+-- ⚠️ สูงตามเนื้อหา (AutomaticSize) — รายการแม่ในสนามรบ (3C-2) ยาวไม่คงที่ 0–10 ตัว
+combatHud.Size = UDim2.new(0, 260, 0, 0)
+combatHud.AutomaticSize = Enum.AutomaticSize.Y
 combatHud.BackgroundColor3 = BG
 combatHud.BackgroundTransparency = 0.15
 combatHud.BorderSizePixel = 0
@@ -618,6 +626,35 @@ combatHudStockpileLabel.TextSize = 13
 combatHudStockpileLabel.Font = Enum.Font.SourceSans
 combatHudStockpileLabel.Text = "-"
 combatHudStockpileLabel.Parent = combatHud
+
+-- ⚠️ Phase 3C-2: แม่ใน battleRoster — อ่านจาก sync ล้วน ๆ (ไม่นับเอง) · ด่านที่กำลังตีพัง = ตายทั้งหมด
+local combatHudRosterLabel = Instance.new("TextLabel")
+combatHudRosterLabel.Name = "Roster"
+combatHudRosterLabel.LayoutOrder = 5
+combatHudRosterLabel.Size = UDim2.new(1, 0, 0, 18)
+combatHudRosterLabel.BackgroundTransparency = 1
+combatHudRosterLabel.TextColor3 = DIM
+combatHudRosterLabel.TextXAlignment = Enum.TextXAlignment.Left
+combatHudRosterLabel.TextSize = 13
+combatHudRosterLabel.Font = Enum.Font.SourceSans
+combatHudRosterLabel.Text = "-"
+combatHudRosterLabel.Parent = combatHud
+
+-- รายการย่อ "คลาส น้ำหนัก" ของแม่แต่ละตัวใน roster — ซ่อนตอน roster ว่าง
+local combatHudRosterListLabel = Instance.new("TextLabel")
+combatHudRosterListLabel.Name = "RosterList"
+combatHudRosterListLabel.LayoutOrder = 6
+combatHudRosterListLabel.Size = UDim2.new(1, 0, 0, 0)
+combatHudRosterListLabel.AutomaticSize = Enum.AutomaticSize.Y
+combatHudRosterListLabel.BackgroundTransparency = 1
+combatHudRosterListLabel.TextColor3 = DIM
+combatHudRosterListLabel.TextXAlignment = Enum.TextXAlignment.Left
+combatHudRosterListLabel.TextWrapped = true
+combatHudRosterListLabel.TextSize = 12
+combatHudRosterListLabel.Font = Enum.Font.SourceSans
+combatHudRosterListLabel.Text = ""
+combatHudRosterListLabel.Visible = false
+combatHudRosterListLabel.Parent = combatHud
 
 local function setHudBar(fill: Frame, text: TextLabel, label: string, ratio: number)
 	local clamped = math.clamp(ratio, 0, 1)
@@ -735,6 +772,157 @@ local lastPayload: any = nil
 -- (คนละลิสต์กันแล้ว ควรเริ่มดูจากบนสุดใหม่)
 local renderActiveTab: (boolean?) -> ()
 
+--------------------------------------------------------------------------------
+-- กล่องยืนยัน "ส่งแม่ไปรบ?" (Phase 3C-2)
+--------------------------------------------------------------------------------
+-- ⚠️ ส่งแม่ไปรบ = แม่ตายถาวรตอนด่านพัง ดึงกลับไม่ได้ (CLAUDE.md: "กดเลือกส่งเองทีละครั้ง + กล่องยืนยัน")
+-- ปุ่ม "ส่งไปรบ" ในแท็บกระเป๋า **แค่เปิดกล่องนี้** ไม่ยิง remote · ยิงเฉพาะตอนกด "ยืนยันส่งรบ"
+-- · "ยกเลิก" แค่ปิดกล่อง ไม่ส่งอะไรไป server เลย
+-- ⚠️ ScreenGui แยก DisplayOrder สูงกว่า + ฉากหลังเป็น TextButton เต็มจอ กันกดโดนแผง/ปุ่มข้างหลัง
+
+local function isBattleRosterFull(): boolean
+	return lastPayload ~= nil and #(lastPayload.battleRoster or {}) >= MAX_BATTLE_MOTHERS
+end
+
+local function showRosterFull()
+	resultLabel.Text = `roster เต็มแล้ว ({#(lastPayload.battleRoster or {})}/{MAX_BATTLE_MOTHERS})`
+	resultLabel.TextColor3 = ERROR_COLOR
+end
+
+local confirmGui = Instance.new("ScreenGui")
+confirmGui.Name = "BattleConfirm"
+confirmGui.ResetOnSpawn = false
+confirmGui.IgnoreGuiInset = true
+confirmGui.DisplayOrder = gui.DisplayOrder + 10
+confirmGui.Enabled = false
+confirmGui.Parent = playerGui
+
+local confirmBackdrop = Instance.new("TextButton")
+confirmBackdrop.Name = "Backdrop"
+confirmBackdrop.Size = UDim2.fromScale(1, 1)
+confirmBackdrop.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+confirmBackdrop.BackgroundTransparency = 0.45
+confirmBackdrop.BorderSizePixel = 0
+confirmBackdrop.AutoButtonColor = false
+confirmBackdrop.Text = ""
+confirmBackdrop.Parent = confirmGui
+
+local confirmBox = Instance.new("Frame")
+confirmBox.Name = "Dialog"
+confirmBox.AnchorPoint = Vector2.new(0.5, 0.5)
+confirmBox.Position = UDim2.fromScale(0.5, 0.5)
+confirmBox.Size = UDim2.new(0, 360, 0, 0)
+confirmBox.AutomaticSize = Enum.AutomaticSize.Y
+confirmBox.BackgroundColor3 = BG
+confirmBox.BorderSizePixel = 0
+confirmBox.Parent = confirmGui
+
+local confirmBoxCorner = Instance.new("UICorner")
+confirmBoxCorner.CornerRadius = UDim.new(0, 10)
+confirmBoxCorner.Parent = confirmBox
+
+local confirmBoxStroke = Instance.new("UIStroke")
+confirmBoxStroke.Color = BATTLE_RISK_COLOR
+confirmBoxStroke.Thickness = 2
+confirmBoxStroke.Parent = confirmBox
+
+local confirmBoxPadding = Instance.new("UIPadding")
+confirmBoxPadding.PaddingTop = UDim.new(0, 14)
+confirmBoxPadding.PaddingBottom = UDim.new(0, 14)
+confirmBoxPadding.PaddingLeft = UDim.new(0, 16)
+confirmBoxPadding.PaddingRight = UDim.new(0, 16)
+confirmBoxPadding.Parent = confirmBox
+
+local confirmBoxLayout = Instance.new("UIListLayout")
+confirmBoxLayout.Padding = UDim.new(0, 8)
+confirmBoxLayout.SortOrder = Enum.SortOrder.LayoutOrder
+confirmBoxLayout.Parent = confirmBox
+
+local function makeConfirmText(order: number, textSize: number, font: Enum.Font, color: Color3): TextLabel
+	local label = Instance.new("TextLabel")
+	label.LayoutOrder = order
+	label.Size = UDim2.new(1, 0, 0, 0)
+	label.AutomaticSize = Enum.AutomaticSize.Y
+	label.BackgroundTransparency = 1
+	label.TextColor3 = color
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextWrapped = true
+	label.TextSize = textSize
+	label.Font = font
+	label.Text = ""
+	label.Parent = confirmBox
+	return label
+end
+
+local confirmTitle = makeConfirmText(1, 20, Enum.Font.SourceSansBold, FG)
+confirmTitle.Text = "ส่งแม่ไปรบ?"
+local confirmMotherInfo = makeConfirmText(2, 15, Enum.Font.SourceSans, FG)
+local confirmWarning = makeConfirmText(3, 14, Enum.Font.SourceSansBold, ERROR_COLOR)
+confirmWarning.Text = "⚠️ แม่ตัวนี้จะตายถาวรทันทีที่ด่านที่กำลังตีอยู่พังสำเร็จ ไม่สามารถดึงกลับได้"
+
+local confirmButtons = Instance.new("Frame")
+confirmButtons.Name = "Buttons"
+confirmButtons.LayoutOrder = 4
+confirmButtons.Size = UDim2.new(1, 0, 0, 36)
+confirmButtons.BackgroundTransparency = 1
+confirmButtons.Parent = confirmBox
+
+local CONFIRM_BUTTON_GAP = 10
+
+local function makeConfirmButton(name: string, text: string, color: Color3, xScale: number, xOffset: number): TextButton
+	local button = Instance.new("TextButton")
+	button.Name = name
+	button.Position = UDim2.new(xScale, xOffset, 0, 0)
+	button.Size = UDim2.new(0.5, -CONFIRM_BUTTON_GAP / 2, 1, 0)
+	button.BackgroundColor3 = color
+	button.BorderSizePixel = 0
+	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.TextSize = 15
+	button.Font = Enum.Font.SourceSansBold
+	button.Text = text
+	button.AutoButtonColor = true
+	button.Parent = confirmButtons
+
+	local buttonCorner = Instance.new("UICorner")
+	buttonCorner.CornerRadius = UDim.new(0, 6)
+	buttonCorner.Parent = button
+
+	return button
+end
+
+local confirmCancelButton = makeConfirmButton("Cancel", "ยกเลิก", TAB_INACTIVE_COLOR, 0, 0)
+local confirmSendButton = makeConfirmButton("Confirm", "ยืนยันส่งรบ", BATTLE_RISK_COLOR, 0.5, CONFIRM_BUTTON_GAP / 2)
+
+-- uid ของแม่ที่กล่องเปิดค้างอยู่ — จับไว้ตอนเปิดกล่อง ไม่อ่าน selectedMotherUid ตอนกดยืนยัน
+-- (sync ทุก 1 วิอาจล้าง/เปลี่ยน selection ระหว่างที่กล่องเปิดอยู่)
+local pendingBattleUid: string? = nil
+
+local function closeBattleConfirm()
+	pendingBattleUid = nil
+	confirmGui.Enabled = false
+end
+
+local function openBattleConfirm(mother: any)
+	pendingBattleUid = mother.uid
+	confirmMotherInfo.Text = `{mother.charName} · คลาส {mother.class} · {mother.weightText} kg`
+	confirmGui.Enabled = true
+end
+
+confirmCancelButton.Activated:Connect(closeBattleConfirm)
+
+confirmSendButton.Activated:Connect(function()
+	local uid = pendingBattleUid
+	closeBattleConfirm()
+	if not uid then
+		return
+	end
+	if isBattleRosterFull() then
+		showRosterFull()
+		return
+	end
+	sendMotherToBattleRequest:FireServer(uid)
+end)
+
 local function renderPenTab()
 	if not lastPayload then
 		return
@@ -797,6 +985,27 @@ local function renderBagTab()
 	else
 		addButtonRow(`จัดแม่เข้าคอกอัตโนมัติ (เหลือที่ว่าง {freeSlots})`, true, ACCENT, function()
 			autoFillPenRequest:FireServer()
+		end)
+	end
+
+	-- ⚠️ Phase 3C-2: ส่งแม่ที่เลือกไปรบ — กดแล้ว**เปิดกล่องยืนยันเท่านั้น** ไม่ยิง remote ตรงนี้
+	-- roster เต็ม = ไม่เปิดกล่อง ไม่ยิง remote แค่บอกผู้เล่น (server ปฏิเสธซ้ำอยู่แล้วถ้าหลุดมา)
+	local selectedBagMother: any = nil
+	if selectedMotherUid and motherLocationByUid[selectedMotherUid] == "bag" then
+		for _, mother in lastPayload.mothersInBag do
+			if mother.uid == selectedMotherUid then
+				selectedBagMother = mother
+				break
+			end
+		end
+	end
+	if not selectedBagMother then
+		addButtonRow("เลือกแม่ด้านล่างเพื่อส่งไปรบ", false, BATTLE_RISK_COLOR, function() end)
+	elseif isBattleRosterFull() then
+		addButtonRow(`ส่งไปรบไม่ได้ — roster เต็มแล้ว ({#lastPayload.battleRoster}/{MAX_BATTLE_MOTHERS})`, false, BATTLE_RISK_COLOR, showRosterFull)
+	else
+		addButtonRow(`ส่งไปรบ (roster {#(lastPayload.battleRoster or {})}/{MAX_BATTLE_MOTHERS})`, true, BATTLE_RISK_COLOR, function()
+			openBattleConfirm(selectedBagMother)
 		end)
 	end
 
@@ -1019,6 +1228,18 @@ local function updateCombatHud()
 		totalStock += stack.count
 	end
 	combatHudStockpileLabel.Text = `ทหารรวมในคลัง: {formatCommaNumber(totalStock)} ตัว`
+
+	local roster = lastPayload.battleRoster or {}
+	combatHudRosterLabel.Text = `แม่ในสนามรบ: {#roster}/{MAX_BATTLE_MOTHERS}`
+	combatHudRosterLabel.TextColor3 = if #roster > 0 then FG else DIM
+	local entries: { string } = {}
+	for _, mother in roster do
+		local character = Config.getCharacter(mother.charId)
+		local class = if character then character.class else "?"
+		table.insert(entries, `{class} {Config.formatWeight(mother.weight)} kg`)
+	end
+	combatHudRosterListLabel.Text = table.concat(entries, " · ")
+	combatHudRosterListLabel.Visible = #entries > 0
 end
 
 -- ⚠️ ปุ่มติดตัว damage/ความเร็ว — เพดานเป็น nil = เต็มแล้ว เหมือนกันกับ penUpgradeCost ด้านบน
@@ -1409,7 +1630,7 @@ farmStateSync.OnClientEvent:Connect(function(payload)
 	renderActiveTab()
 end)
 
--- ⚠️ ผลลัพธ์ของ PlaceEgg/MoveMother/UpgradePen/SellMother/AutoFillPen — ก่อนหน้านี้เห็นแค่ผ่าน
+-- ⚠️ ผลลัพธ์ของ PlaceEgg/MoveMother/UpgradePen/SellMother/AutoFillPen/SendMotherToBattle — ก่อนหน้านี้เห็นแค่ผ่าน
 -- print ใน server console เท่านั้น ผู้เล่นไม่เห็นอะไรเลยว่าทำไมกดแล้วไม่มีอะไรเกิดขึ้น
 actionResult.OnClientEvent:Connect(function(ok: boolean, message: string)
 	resultLabel.Text = message

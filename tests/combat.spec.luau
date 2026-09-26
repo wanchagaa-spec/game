@@ -459,4 +459,209 @@ return function(t, Config)
 
 		check("เงินสะสมของ A กับ B ไม่ผูกกัน (A ตีด่าน 2 ได้เงินจริง ส่วน B ยังไม่ได้เลย)", dataA.currency.coins ~= dataB.currency.coins, true)
 	end
+
+	----------------------------------------------------------------------------
+	-- Phase 3C-1: battleRoster — ส่งแม่ไปรบ
+	----------------------------------------------------------------------------
+	local MAX_ROSTER = Config.Balance.Combat.MAX_BATTLE_MOTHERS
+	local nextTestUid = 0
+
+	-- แม่ลิง (C ×1) 100 kg → พลัง = 10 พอดี (คำนวณมือง่าย) เว้นแต่ระบุอย่างอื่น
+	local function makeMother(weight: number?, charId: string?)
+		nextTestUid += 1
+		return {
+			uid = Config.makeUid(424242, nextTestUid),
+			charId = charId or "monkey",
+			weight = weight or 100,
+			statuses = {},
+			obtainedAt = 0,
+			locked = false,
+		}
+	end
+
+	-- ผู้เล่นที่ผ่านด่าน 1 (ว่างเปล่า) แล้ว กำลังตีด่าน 2 · ไม่มีลูกในคลังเลย
+	local function dataAtStage2()
+		local data = freshData()
+		data.stageProgress[1] = { defendersRemaining = 0, wallHpRemaining = 0 }
+		CombatService.ensureStageStarted(data, 2)
+		data.summonEnabled = true
+		return data
+	end
+
+	print("── 3C-1 ส่งแม่ไปรบ: ย้ายจากกระเป๋าเข้า roster · ปฏิเสธทุกกรณีที่ไม่ควรผ่าน ──")
+
+	do
+		local data = freshData()
+		local mother = makeMother()
+		table.insert(data.mothersInBag, mother)
+
+		-- ด่าน 1 ยังไม่เคยแตะ = ด่านที่กำลังตีคือด่าน 1 ซึ่งไม่มีศัตรู → แม่จะตายฟรี ต้องปฏิเสธ
+		local ok = CombatService.handleSendMotherToBattle(data, mother.uid)
+		check("ด่านที่กำลังตีไม่มีศัตรู (ด่าน 1) → ปฏิเสธ", ok, false)
+		check("  แม่ยังอยู่ในกระเป๋า", #data.mothersInBag, 1)
+		check("  roster ยังว่าง", #data.battleRoster, 0)
+
+		data.stageProgress[1] = { defendersRemaining = 0, wallHpRemaining = 0 }
+		local okSend, message = CombatService.handleSendMotherToBattle(data, mother.uid)
+		check("ด่าน 2 มีศัตรู → ส่งสำเร็จ", okSend, true)
+		check("  ข้อความสำเร็จบอกจำนวนใน roster", string.find(message, `1/{MAX_ROSTER}`, 1, true) ~= nil, true)
+		check("  แม่ออกจากกระเป๋าแล้ว (อยู่ได้ที่เดียว)", #data.mothersInBag, 0)
+		check("  แม่อยู่ใน roster", data.battleRoster[1] and data.battleRoster[1].uid, mother.uid)
+
+		check("ส่ง uid เดิมซ้ำ (อยู่ใน roster แล้ว ไม่อยู่ในกระเป๋า) → ปฏิเสธ",
+			(CombatService.handleSendMotherToBattle(data, mother.uid)), false)
+		check("  roster ไม่เพิ่มซ้ำ", #data.battleRoster, 1)
+
+		local penMother = makeMother()
+		table.insert(data.mothersInPen, penMother)
+		check("แม่ในคอก → ปฏิเสธ (ส่งได้เฉพาะจากกระเป๋า)",
+			(CombatService.handleSendMotherToBattle(data, penMother.uid)), false)
+		check("  แม่ในคอกยังอยู่ในคอก", #data.mothersInPen, 1)
+
+		check("uid ที่ไม่ใช่ของผู้เล่นคนนี้ → ปฏิเสธ",
+			(CombatService.handleSendMotherToBattle(data, Config.makeUid(999, 1))), false)
+		check("uid ไม่ใช่ string → ปฏิเสธ", (CombatService.handleSendMotherToBattle(data, 12345)), false)
+		check("uid เป็น nil → ปฏิเสธ", (CombatService.handleSendMotherToBattle(data, nil)), false)
+
+		local lockedMother = makeMother()
+		lockedMother.locked = true
+		table.insert(data.mothersInBag, lockedMother)
+		check("แม่ที่ล็อกไว้ → ปฏิเสธ", (CombatService.handleSendMotherToBattle(data, lockedMother.uid)), false)
+		check("  แม่ที่ล็อกยังอยู่ในกระเป๋า", #data.mothersInBag, 1)
+	end
+
+	print(`── 3C-1 roster เต็ม {MAX_ROSTER} ตัว → ตัวถัดไปถูกปฏิเสธ ไม่หายจากกระเป๋า ──`)
+
+	do
+		local data = dataAtStage2()
+		for _ = 1, MAX_ROSTER + 1 do
+			table.insert(data.mothersInBag, makeMother())
+		end
+
+		for _ = 1, MAX_ROSTER do
+			CombatService.handleSendMotherToBattle(data, data.mothersInBag[1].uid)
+		end
+		check(`ส่งครบ {MAX_ROSTER} ตัว`, #data.battleRoster, MAX_ROSTER)
+		check("กระเป๋าเหลือ 1 ตัว", #data.mothersInBag, 1)
+
+		local ok, message = CombatService.handleSendMotherToBattle(data, data.mothersInBag[1].uid)
+		check(`ตัวที่ {MAX_ROSTER + 1} → ปฏิเสธ`, ok, false)
+		check("  ข้อความบอกว่า roster เต็ม", string.find(message, "roster เต็มแล้ว", 1, true) ~= nil, true)
+		check("  roster ไม่เกินเพดาน", #data.battleRoster, MAX_ROSTER)
+		check("  ตัวที่ถูกปฏิเสธยังอยู่ในกระเป๋า", #data.mothersInBag, 1)
+	end
+
+	print("── 3C-1 ผ่านครบทุกด่านแล้ว → ส่งแม่ไปรบไม่ได้ (ไม่มีอะไรให้ตี แม่จะค้างใน roster ตลอดไป) ──")
+
+	do
+		local data = freshData()
+		for stage = 1, Config.Balance.Stage.COUNT do
+			data.stageProgress[stage] = { defendersRemaining = 0, wallHpRemaining = 0 }
+		end
+		local mother = makeMother()
+		table.insert(data.mothersInBag, mother)
+		check("ไม่มีด่านให้ตี → ปฏิเสธ", (CombatService.handleSendMotherToBattle(data, mother.uid)), false)
+		check("  แม่ยังอยู่ในกระเป๋า", #data.mothersInBag, 1)
+	end
+
+	print("── 3C-1 แม่ใน roster ตีทุกวินาที แรงเท่า computeBattlePower · แม่ 1 ตัว = ลูก 10 ตัว ──")
+
+	do
+		local motherPower = Config.computeBattlePower(100, "monkey", {}, 0)
+		local childPower = Config.computeBattlePower(Config.getChildWeight(100, {}), "monkey", {}, 0)
+		local near = t.near
+		near("แม่ลิง 100 kg แรง 10 ต่อวินาที", motherPower, 10, 1e-9)
+		near("แม่แรงเป็น 10 เท่าของลูกตัวเอง (กฎ 'แม่ 1 = ลูก 10')", motherPower / childPower, 10, 1e-9)
+
+		local data = dataAtStage2()
+		local meta = freshMeta()
+		table.insert(data.battleRoster, makeMother())
+		table.insert(data.battleRoster, makeMother())
+		local before = data.stageProgress[2].defendersRemaining
+
+		local result = CombatService.tick(data, meta, 2)
+		check("ไม่มีลูกในคลังเลย → ไม่มีหน่วยถูกปล่อย", result.unitsReleased, 0)
+		near("แม่ 2 ตัว × 10 × 2 วินาที = damage 40", result.damageDealt, 40, 1e-9)
+		near("ทหารฝ่ายรับลดลง 40 จริง", before - data.stageProgress[2].defendersRemaining, 40, 1e-9)
+		check("ด่านยังไม่พัง → แม่ยังอยู่ครบ", #data.battleRoster, 2)
+		check("ด่านยังไม่พัง → mothersLost = 0", result.mothersLost, 0)
+
+		-- damageLevel ที่ซื้อไว้มีผลกับแม่ด้วย (ตัวคูณเป็นของบัญชี ไม่ใช่ของลูกอย่างเดียว)
+		data.damageLevel = 8
+		near("damage ของ roster คูณ 1.1^damageLevel ด้วย",
+			CombatService.getRosterDps(data), 2 * Config.computeBattlePower(100, "monkey", {}, 8), 1e-6)
+	end
+
+	print("── 3C-1 ปิดอัญเชิญ → แม่หยุดตี ไม่ตาย รออยู่ใน roster ──")
+
+	do
+		local data = dataAtStage2()
+		data.summonEnabled = false
+		table.insert(data.battleRoster, makeMother())
+		local before = data.stageProgress[2].defendersRemaining
+
+		local result = CombatService.tick(data, freshMeta(), 5)
+		check("ปิดอัญเชิญ → ไม่มี damage", result.damageDealt, 0)
+		check("  HP ทหารฝ่ายรับไม่ลด", data.stageProgress[2].defendersRemaining, before)
+		check("  แม่ยังอยู่ใน roster", #data.battleRoster, 1)
+	end
+
+	print("── 3C-1 ด่านที่กำลังตีพัง → แม่ทั้ง roster ตายถาวรพร้อมกัน · กระเป๋าไม่ถูกแตะ ──")
+
+	do
+		local data = dataAtStage2()
+		local meta = freshMeta()
+		-- เหลือกำแพงแค่ 5 HP — แม่ roster เต็มตีทีเดียวพังแน่นอน
+		data.stageProgress[2] = { defendersRemaining = 0, wallHpRemaining = 5 }
+		for _ = 1, MAX_ROSTER do
+			table.insert(data.battleRoster, makeMother())
+		end
+		table.insert(data.mothersInBag, makeMother())
+		table.insert(data.mothersInBag, makeMother())
+		local lostBefore = data.stats.mothersLost
+
+		local result = CombatService.tick(data, meta, 1)
+		check("ด่าน 2 พัง", result.stageCleared, true)
+		check(`แม่ตายพร้อมกันทั้ง {MAX_ROSTER} ตัว`, result.mothersLost, MAX_ROSTER)
+		check("roster เหลือ 0", #data.battleRoster, 0)
+		check("stats.mothersLost เพิ่มตามจำนวนที่ตาย", data.stats.mothersLost - lostBefore, MAX_ROSTER)
+		check("แม่ในกระเป๋าไม่ถูกแตะ (ยังอยู่ 2 ตัว)", #data.mothersInBag, 2)
+		check("wallProgress ขยับตามด่านที่พัง", data.wallProgress >= 2, true)
+		check("ด่านที่กำลังตีเลื่อนไปด่าน 3", CombatService.getActiveStage(data), 3)
+
+		-- ด่านใหม่: roster ว่างแล้ว ส่งใหม่ได้ตามปกติ
+		local fresh = data.mothersInBag[1]
+		check("หลังด่านพัง ส่งแม่ชุดใหม่เข้าด่าน 3 ได้", (CombatService.handleSendMotherToBattle(data, fresh.uid)), true)
+	end
+
+	print("── 3C-1 ตาข่ายชั้นสอง: ด่านที่ไม่มีศัตรู (HP รวม 0) พัง → ไม่ฆ่าแม่ ──")
+
+	do
+		local data = freshData()
+		table.insert(data.battleRoster, makeMother())
+		check("killRoster(ด่าน 1) ไม่ฆ่าใคร", CombatService.killRoster(data, 1), 0)
+		check("  แม่ยังอยู่", #data.battleRoster, 1)
+		check("killRoster(ด่าน 2) ฆ่าจริง", CombatService.killRoster(data, 2), 1)
+		check("  roster ว่าง", #data.battleRoster, 0)
+	end
+
+	print("── 3C-1 battleRoster ผ่าน encode/decode ครบ + อยู่ใน sync payload ──")
+
+	do
+		local data = dataAtStage2()
+		local mother = makeMother(123456, "wukong")
+		mother.statuses = { "gold" }
+		table.insert(data.battleRoster, mother)
+
+		PlayerData.sanitizeForSave(data) -- ต้องไม่ throw
+		local back = Json.decode(PlayerData.encode(data))
+		check("roster กลับมาครบ (uid)", back.battleRoster[1].uid, mother.uid)
+		check("roster กลับมาครบ (น้ำหนัก)", back.battleRoster[1].weight, 123456)
+		check("roster กลับมาครบ (สถานะ)", back.battleRoster[1].statuses[1], "gold")
+
+		local sync = CombatService.buildSyncFields(data)
+		check("sync มี battleRoster", #sync.battleRoster, 1)
+		check("  sync ส่ง charId", sync.battleRoster[1].charId, "wukong")
+		check("  sync ส่งน้ำหนัก", sync.battleRoster[1].weight, 123456)
+	end
 end

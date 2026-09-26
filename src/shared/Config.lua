@@ -13,7 +13,8 @@ local Config = {}
 -- เวอร์ชันของโครงสร้าง PlayerData ที่โค้ดชุดนี้เขียน/อ่านได้
 -- ⚠️ ทุกครั้งที่เปลี่ยนโครง PlayerData ต้องบวกเลขนี้ + เขียน migration
 -- รายละเอียดใน docs/data-schema.md
-Config.SCHEMA_VERSION = 1
+-- v2 (Phase 3C-1): เพิ่ม battleRoster (แม่ที่ส่งไปรบ) — migration อยู่ที่ PlayerData.MIGRATIONS[1]
+Config.SCHEMA_VERSION = 2
 
 --------------------------------------------------------------------------------
 -- ทำให้ไฟล์นี้โหลดได้นอก Roblox ด้วย (สำหรับชุดเทสต์ใน tests/)
@@ -556,6 +557,11 @@ Config.RemoteNames = {
 	-- ⚠️ เป็น "ผลล่าสุดแบบ broadcast" ไม่ผูกกับ request ไหนเจาะจง (พอสำหรับ UI ทดสอบตอนนี้ที่
 	-- ยิงคำขอทีละอันอยู่แล้ว ไม่มีคำขอค้างซ้อนกันจนสับสนว่าอันไหนตอบอันไหน)
 	ACTION_RESULT = "ActionResult",
+
+	-- client → server : FireServer(motherUid) — ส่งแม่ **จากกระเป๋าเท่านั้น** เข้า battleRoster
+	-- ⚠️ ย้อนกลับไม่ได้ แม่ตายถาวรตอนด่านที่กำลังตีพัง (CombatService.handleSendMotherToBattle)
+	-- client ต้องขึ้นกล่องยืนยันก่อนยิงทุกครั้ง · ผลตอบกลับทาง ACTION_RESULT
+	SEND_MOTHER_TO_BATTLE_REQUEST = "SendMotherToBattleRequest",
 }
 
 --------------------------------------------------------------------------------
@@ -938,6 +944,9 @@ Config.Inventory = {
 
 	MAX_HELD_EGGS_PER_TYPE = 999,
 
+	-- ⚠️ ค่ากลุ่ม MAX_TEAM* เป็นดีไซน์ "ทีม" ยุคก่อน Age of War ที่ไม่เคยเขียนเป็นโค้ด
+	-- **ถูกแทนด้วย battleRoster แล้ว** (Phase 3C-1 · เพดานอยู่ที่ Balance.Combat.MAX_BATTLE_MOTHERS)
+	-- ยังไม่ลบเพราะ Inventory เป็นโครงหลัก — ไม่มีโค้ดไหนอ่านค่าพวกนี้แล้ว
 	MAX_TEAMS = 1, -- Phase 3 เริ่มที่ทีมเดียว โครงเป็น array ไว้เผื่อขยาย
 	MAX_TEAM_MOTHERS = 3, -- แม่ในทีมตายถาวร จำกัดไว้ไม่ให้เสียหายหนักเกินไปในตาเดียว
 	MAX_TEAM_CHILD_STACKS = 5,
@@ -1559,6 +1568,13 @@ Balance.Combat = {
 	-- (กันไม่ให้เผลอส่งเครื่องผลิตไปตาย)
 	ALLOW_AUTO_RELEASE_MOTHERS = false,
 	MOTHERS_SELECTABLE_FROM_PEN = false,
+
+	-- ══ แม่ในสนามรบ (battleRoster · Phase 3C-1) ══
+	-- จำนวนแม่ที่ส่งไปรบพร้อมกันได้สูงสุด — แม่ทั้ง roster ตายถาวรพร้อมกันตอนด่านที่กำลังตีพัง
+	-- แม่แต่ละตัวตีวินาทีละครั้ง แรง = Config.computeBattlePower (แม่ 1 ตัว = ลูก 10 ตัวต่อวินาที)
+	-- ⚠️ ยามเวลาผ่านด่าน (assertProgressionIsSane) คิดจากผู้เล่นที่ไม่ส่งแม่ — ส่งแม่ = เร็วขึ้น
+	-- แลกกับเสียเครื่องผลิตถาวร ซึ่งเป็นการเลือกของผู้เล่นเอง
+	MAX_BATTLE_MOTHERS = 10,
 }
 
 --------------------------------------------------------------------------------
@@ -4070,6 +4086,10 @@ function Config.validate()
 	assert(
 		combat.MOTHERS_SELECTABLE_FROM_PEN == false,
 		"Config: ห้ามให้เลือกแม่จากคอกลงสนาม — เลือกได้เฉพาะแม่ในกระเป๋า กันเผลอส่งเครื่องผลิตไปตาย"
+	)
+	assert(
+		combat.MAX_BATTLE_MOTHERS > 0 and combat.MAX_BATTLE_MOTHERS % 1 == 0,
+		"Config: MAX_BATTLE_MOTHERS ต้องเป็นจำนวนเต็มบวก"
 	)
 	----------------------------------------------------------------------------
 	-- ตัวคูณ damage ที่ซื้อด้วยเงิน

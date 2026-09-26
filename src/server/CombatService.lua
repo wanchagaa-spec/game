@@ -156,6 +156,81 @@ function CombatService.releaseFromQueue(data: Data, unitsToRelease: number): (nu
 end
 
 --------------------------------------------------------------------------------
+-- battleRoster — แม่ที่ส่งไปรบ (Phase 3C-1)
+--------------------------------------------------------------------------------
+-- ⚠️ แม่หนึ่งตัวอยู่ได้ที่เดียว: ส่งไปรบ = ย้ายออกจาก mothersInBag มาไว้ data.battleRoster
+-- ย้อนกลับไม่ได้ · ตายหมดพร้อมกันตอนด่านที่กำลังตีพัง (killRoster) · ไม่มี HP รายตัวในเฟสนี้
+-- (วิสัยทัศน์ HP รายตัวอยู่ใน docs/combat-hp-vision.md — ไม่ใช่เงื่อนไขของเฟสนี้)
+
+-- damage/วินาทีของแม่ทั้ง roster — แม่แต่ละตัวตีวินาทีละครั้ง แรงเท่าพลังของตัวเอง
+-- ใช้ Config.computeBattlePower ตัวเดียวกับลูก (รวมตัวคูณคลาส/สถานะ/damageLevel แล้ว)
+-- ลูกหนัก 1% ของแม่ → แรง 10% ของแม่ → แม่ 1 ตัว = ปล่อยลูก 10 ตัวต่อวินาที
+function CombatService.getRosterDps(data: Data): number
+	local total = 0
+	for _, mother in data.battleRoster do
+		total += Config.computeBattlePower(mother.weight, mother.charId, mother.statuses, data.damageLevel)
+	end
+	return total
+end
+
+-- คืน (ok, message) — message เป็นภาษาไทยพร้อมโชว์ผู้เล่นทาง ActionResult ทั้งกรณีสำเร็จ/ล้มเหลว
+-- ⚠️ ด่านสุดท้ายของการตรวจ — client ตรวจ roster เต็มก่อนเองก็จริง แต่ห้ามเชื่อ client
+function CombatService.handleSendMotherToBattle(data: Data, rawUid: unknown): (boolean, string)
+	if type(rawUid) ~= "string" then
+		return false, "ข้อมูลแม่ไม่ถูกต้อง"
+	end
+
+	local bagIndex: number? = nil
+	for index, mother in data.mothersInBag do
+		if mother.uid == rawUid then
+			bagIndex = index
+			break
+		end
+	end
+	if not bagIndex then
+		-- แม่ในคอก/uid ของคนอื่น/แม่ที่ส่งไปแล้ว ตกมาทางนี้หมด (MOTHERS_SELECTABLE_FROM_PEN = false)
+		return false, "ส่งไปรบได้เฉพาะแม่ในกระเป๋าของตัวเองเท่านั้น"
+	end
+	if data.mothersInBag[bagIndex].locked then
+		return false, "แม่ตัวนี้ถูกล็อกไว้ ส่งไปรบไม่ได้"
+	end
+
+	local maxMothers = Config.Balance.Combat.MAX_BATTLE_MOTHERS
+	if #data.battleRoster >= maxMothers then
+		return false, `roster เต็มแล้ว ({#data.battleRoster}/{maxMothers})`
+	end
+
+	local stage = CombatService.getActiveStage(data)
+	if not stage then
+		return false, "ผ่านครบทุกด่านแล้ว ไม่มีด่านให้ส่งแม่ไปรบ"
+	end
+	-- ⚠️ ด่านที่ไม่มีศัตรูเลย (ด่าน 1) นับว่า "พัง" ตั้งแต่ตาแรกที่แตะ → แม่จะตายฟรีทันที
+	if Config.getStageTotalHp(stage) <= 0 then
+		return false, `ด่าน {stage} ไม่มีศัตรูให้ตี — เปิดอัญเชิญให้ผ่านด่านนี้ไปก่อน`
+	end
+
+	local mother = table.remove(data.mothersInBag, bagIndex)
+	table.insert(data.battleRoster, mother)
+	return true, `ส่งแม่ไปรบแล้ว (roster {#data.battleRoster}/{maxMothers})`
+end
+
+-- แม่ทั้ง roster ตายถาวรพร้อมกัน — เรียกตอนด่านที่กำลังตีพังเท่านั้น · คืนจำนวนที่ตาย
+-- ⚠️ ด่านที่ไม่มีศัตรูเลย (HP รวม 0) "พัง" ได้ฟรีโดยไม่ได้สู้จริง → ไม่ฆ่า (ตาข่ายกันไว้ชั้นสอง
+-- ต่อจากที่ handleSendMotherToBattle ปฏิเสธการส่งตอนด่านแบบนี้อยู่แล้ว)
+function CombatService.killRoster(data: Data, clearedStage: number): number
+	if Config.getStageTotalHp(clearedStage) <= 0 then
+		return 0
+	end
+	local lost = #data.battleRoster
+	if lost > 0 then
+		-- uid ของแม่ที่ตายไม่ถูก reuse — nextUid เดินหน้าอย่างเดียวอยู่แล้ว ไม่ต้องทำอะไรเพิ่ม
+		table.clear(data.battleRoster)
+		data.stats.mothersLost = (data.stats.mothersLost or 0) + lost
+	end
+	return lost
+end
+
+--------------------------------------------------------------------------------
 -- ใส่ damage ให้ด่าน — ทหารฝ่ายรับก่อน ส่วนเกินไหลไปกำแพงในตาเดียวกัน
 --------------------------------------------------------------------------------
 
@@ -249,10 +324,17 @@ export type TickResult = {
 	coinsEarned: number,
 	stageCleared: boolean,
 	autoPaused: boolean,
+	mothersLost: number, -- แม่ใน roster ที่ตายในตานี้ (ด่านพัง) — 0 ถ้าด่านยังไม่พัง
 }
 
-local EMPTY_RESULT: TickResult =
-	{ unitsReleased = 0, damageDealt = 0, coinsEarned = 0, stageCleared = false, autoPaused = false }
+local EMPTY_RESULT: TickResult = {
+	unitsReleased = 0,
+	damageDealt = 0,
+	coinsEarned = 0,
+	stageCleared = false,
+	autoPaused = false,
+	mothersLost = 0,
+}
 
 -- auto-pause (§7.6): กันทหารถูกป้อนเข้าเครื่องบดหายถาวรโดยไม่ได้ damage เลย
 -- นับจาก HP ที่ลดจริง (progressMade) ไม่ใช่จาก damage ที่ "พยายาม" ทำ — สองค่านี้ต่างกัน
@@ -304,11 +386,15 @@ function CombatService.tick(data: Data, meta: CombatMeta, elapsedSeconds: number
 	local unitsToRelease = math.floor(budget)
 	meta.releaseCarry = budget - unitsToRelease
 
-	local unitsReleased, damageDealt = CombatService.releaseFromQueue(data, unitsToRelease)
+	local unitsReleased, childDamage = CombatService.releaseFromQueue(data, unitsToRelease)
+	-- แม่ใน roster ตีต่อเนื่องทุกวินาที ไม่ผ่านคิวปล่อย (ไม่นับเป็น "หน่วยที่ปล่อย" ของ auto-pause)
+	-- ⚠️ ตีเฉพาะตอนเปิดอัญเชิญ — ปิดอัญเชิญแล้ว return ตั้งแต่บรรทัดแรก แม่หยุดรอ ไม่ตาย ไม่ตี
+	local damageDealt = childDamage + CombatService.getRosterDps(data) * elapsedSeconds
 
 	local coinsEarned = 0
 	local stageCleared = false
 	local progressMade = 0
+	local mothersLost = 0
 
 	if damageDealt > 0 then
 		local dmgToDefenders, dmgToWall, coins, cleared =
@@ -321,6 +407,8 @@ function CombatService.tick(data: Data, meta: CombatMeta, elapsedSeconds: number
 		-- wallProgress (เช่น Config.getCoinsPerMinute/getMaxDamageLevel) จะได้ใช้ค่าล่าสุดทันที
 		if stageCleared then
 			CombatService.recomputeWallProgress(data)
+			-- ⚠️ แม่ทั้ง roster ตายถาวรพร้อมกันทันทีที่ด่านที่กำลังตีพัง
+			mothersLost = CombatService.killRoster(data, stage)
 		end
 	end
 
@@ -332,6 +420,7 @@ function CombatService.tick(data: Data, meta: CombatMeta, elapsedSeconds: number
 		coinsEarned = coinsEarned,
 		stageCleared = stageCleared,
 		autoPaused = autoPaused,
+		mothersLost = mothersLost,
 	}
 end
 
@@ -450,12 +539,24 @@ function CombatService.buildSyncFields(data: Data)
 		end
 	end
 
+	-- แม่ในสนามรบ — ส่งแค่ที่ UI ต้องใช้ (เพดานอ่านจาก Config.Balance.Combat.MAX_BATTLE_MOTHERS ฝั่ง client เอง)
+	local battleRoster = table.create(#data.battleRoster)
+	for _, mother in data.battleRoster do
+		table.insert(battleRoster, {
+			uid = mother.uid,
+			charId = mother.charId,
+			weight = mother.weight,
+			statuses = mother.statuses,
+		})
+	end
+
 	return {
 		activeStage = CombatService.getActiveStage(data),
 		stageProgress = stageProgress,
 		summonEnabled = data.summonEnabled,
 		combatAutoPaused = data.combatAutoPaused,
 		releaseOrder = data.releaseOrder,
+		battleRoster = battleRoster,
 	}
 end
 

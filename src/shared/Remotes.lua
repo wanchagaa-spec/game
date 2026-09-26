@@ -29,6 +29,7 @@ local EVENT_NAMES: { string } = {
 	NAMES.SET_SUMMON_ENABLED_REQUEST,
 	NAMES.BUY_DAMAGE_UPGRADE_REQUEST,
 	NAMES.BUY_SPEED_UPGRADE_REQUEST,
+	NAMES.SEND_MOTHER_TO_BATTLE_REQUEST,
 }
 
 -- เรียกจากฝั่ง server ตอนบูตเท่านั้น สร้าง Folder + RemoteEvent ให้ครบ

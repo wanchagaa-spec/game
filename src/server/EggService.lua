@@ -77,6 +77,7 @@ local placeEggRequest: RemoteEvent
 local moveMotherRequest: RemoteEvent
 local upgradePenRequest: RemoteEvent
 local sellMotherRequest: RemoteEvent
+local sendMotherToBattleRequest: RemoteEvent
 local autoFillPenRequest: RemoteEvent
 local buyDamageUpgradeRequest: RemoteEvent
 local buySpeedUpgradeRequest: RemoteEvent
@@ -309,6 +310,8 @@ local function buildSyncPayload(data: Data)
 		summonEnabled = combat.summonEnabled,
 		combatAutoPaused = combat.combatAutoPaused,
 		releaseOrder = combat.releaseOrder,
+		-- Phase 3C-1: แม่ในสนามรบ { uid, charId, weight, statuses } (เพดาน = Config.Balance.Combat.MAX_BATTLE_MOTHERS)
+		battleRoster = combat.battleRoster,
 	}
 end
 
@@ -756,6 +759,24 @@ function EggService.sellMother(player: Player, rawUid: unknown): (boolean, strin
 	return true, nil
 end
 
+-- ส่งแม่จากกระเป๋าไปรบ (Phase 3C-1) — ตรรกะ/การตรวจทั้งหมดอยู่ที่ CombatService.handleSendMotherToBattle
+-- ที่นี่แค่ต่อสายกับผู้เล่น · คืน (ok, message) ภาษาไทยพร้อมโชว์ทั้งสองกรณี
+function EggService.sendMotherToBattle(player: Player, rawUid: unknown): (boolean, string)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น"
+	end
+
+	local ok, message = CombatService.handleSendMotherToBattle(data, rawUid)
+	if ok then
+		-- ส่งไปรบแล้วกระเป๋าว่างขึ้นหนึ่งช่อง — รับแม่ที่ค้างในสวนฟักเข้ามาทันที (ข้อ D เหมือนตอนขาย)
+		processReadyHatchSlots(player, data, os.time())
+		EggService.sync(player)
+		print(`[EggService] {player.Name} ส่งแม่ {rawUid} ไปรบ · roster {#data.battleRoster}`)
+	end
+	return ok, message
+end
+
 --------------------------------------------------------------------------------
 -- ซื้อตัวคูณ damage / ความเร็ว — ทั้งคู่เป็นของบัญชีผู้เล่น (ไม่ใช่ของแม่รายตัว)
 --------------------------------------------------------------------------------
@@ -959,6 +980,7 @@ function EggService.debugResetAll(player: Player)
 
 	table.clear(data.mothersInPen)
 	table.clear(data.mothersInBag)
+	table.clear(data.battleRoster) -- แม่ในสนามรบก็เป็นแม่ รีเซ็ตทั้งหมด = ล้างด้วย
 	table.clear(data.heldEggs.items)
 
 	-- ⚠️ ล้าง stageProgress ทุกด่านกลับเป็น false (รูปแบบเดียวกับ PlayerData.createNew()) แล้วดัน
@@ -1399,6 +1421,7 @@ function EggService.start()
 	moveMotherRequest = Remotes.waitFor(Config.RemoteNames.MOVE_MOTHER_REQUEST)
 	upgradePenRequest = Remotes.waitFor(Config.RemoteNames.UPGRADE_PEN_REQUEST)
 	sellMotherRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHER_REQUEST)
+	sendMotherToBattleRequest = Remotes.waitFor(Config.RemoteNames.SEND_MOTHER_TO_BATTLE_REQUEST)
 	autoFillPenRequest = Remotes.waitFor(Config.RemoteNames.AUTO_FILL_PEN_REQUEST)
 	buyDamageUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_DAMAGE_UPGRADE_REQUEST)
 	buySpeedUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_SPEED_UPGRADE_REQUEST)
@@ -1451,6 +1474,14 @@ function EggService.start()
 			local coinsAfter = if data then data.currency.coins else coinsBefore
 			reportResult(player, true, `ขายแม่สำเร็จ +{coinsAfter - coinsBefore} coins`)
 		end
+	end)
+
+	sendMotherToBattleRequest.OnServerEvent:Connect(function(player, rawUid)
+		local ok, message = EggService.sendMotherToBattle(player, rawUid)
+		if not ok then
+			print(`[EggService] ปฏิเสธคำขอส่งแม่ไปรบของ {player.Name}: {message}`)
+		end
+		reportResult(player, ok, message)
 	end)
 
 	autoFillPenRequest.OnServerEvent:Connect(function(player)

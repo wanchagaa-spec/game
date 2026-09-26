@@ -77,6 +77,10 @@ export type Data = {
 	currency: { coins: number, gems: number },
 	mothersInPen: { Mother },
 	mothersInBag: { Mother },
+	-- ⚠️ ที่อยู่แห่งที่สามของแม่ (Phase 3C-1 · schema v2) — แม่ที่ส่งไปรบแล้ว
+	-- แม่หนึ่งตัวอยู่ได้ที่เดียวเสมอ (คอก / กระเป๋า / roster) ส่งไปรบ = ย้ายออกจากกระเป๋ามาไว้นี่
+	-- ย้อนกลับไม่ได้ · ตายหมดพร้อมกันตอนด่านที่กำลังตีพัง (CombatService) · uid ไม่ถูก reuse
+	battleRoster: { Mother },
 	nextUid: number,
 	children: { [string]: number },
 	penLevel: number,
@@ -131,6 +135,7 @@ function PlayerData.createNew(): Data
 
 		mothersInPen = {},
 		mothersInBag = {},
+		battleRoster = {},
 		nextUid = 1,
 		children = {},
 
@@ -230,6 +235,16 @@ end
 -- ⚠️ แต่ละตัวต้อง idempotent และ **ห้ามอ่านค่าจาก Config ปัจจุบัน**
 -- Config เปลี่ยนได้ แต่ migration ต้องให้ผลเดิมเสมอ ต้องใช้ค่าคงที่ก็ hard-code ไว้ในตัวมันเอง
 local MIGRATIONS: { [number]: (Data) -> Data } = {}
+
+-- v1 → v2 (Phase 3C-1): เพิ่ม battleRoster — ข้อมูลเก่ายังไม่เคยส่งแม่ไปรบ เริ่มว่างเสมอ
+-- ไม่ทับของที่มีอยู่แล้ว (idempotent — รันซ้ำกับข้อมูลที่มีแล้วไม่เปลี่ยนอะไร)
+MIGRATIONS[1] = function(data: Data): Data
+	local raw = data :: any
+	if type(raw.battleRoster) ~= "table" then
+		raw.battleRoster = {}
+	end
+	return data
+end
 
 PlayerData.MIGRATIONS = MIGRATIONS
 
@@ -475,6 +490,10 @@ function PlayerData.buildWorstCase(): Data
 	end
 	for index = 1, Config.Balance.Bag.CAPACITY do
 		table.insert(data.mothersInBag, heavyMother(index, false))
+	end
+	-- roster เต็มพร้อมกันด้วย (uid ไม่ชนกับกระเป๋า — แม่ตัวเดียวอยู่ได้ที่เดียว)
+	for index = 1, Config.Balance.Combat.MAX_BATTLE_MOTHERS do
+		table.insert(data.battleRoster, heavyMother(Config.Balance.Bag.CAPACITY + index, false))
 	end
 
 	-- กองลูก: key ยาวสุด × จำนวนกองสูงสุด × จำนวนลูกสูงสุดต่อกอง

@@ -242,6 +242,28 @@ return function(t, Config)
 	ancient.schemaVersion = nil
 	check("ไม่มี schemaVersion → ถือว่า v1", (select(1, PlayerData.migrate(ancient))) ~= nil, true)
 
+	-- v1 → v2 (Phase 3C-1): เซฟยุค v1 ไม่มี battleRoster เลย ต้องได้ roster ว่างหลัง migrate
+	-- ⚠️ นี่คือ migration แรกของโปรเจกต์ — พลาด = โหลดไม่ขึ้น = ผู้เล่นโดนเตะออก
+	local savedV1 = PlayerData.createNew()
+	savedV1.schemaVersion = 1
+	savedV1.battleRoster = nil
+	table.insert(savedV1.mothersInBag, {
+		uid = "777-1", charId = "monkey", weight = 500, statuses = {}, obtainedAt = 0, locked = false,
+	})
+	local v2, v2Err = PlayerData.migrate(savedV1)
+	check("v1 → v2 สำเร็จ", v2Err, nil)
+	check("  schemaVersion ขึ้นเป็นปัจจุบัน", v2 and v2.schemaVersion, Config.SCHEMA_VERSION)
+	check("  ได้ battleRoster เป็นตาราง", v2 and type(v2.battleRoster), "table")
+	check("  battleRoster เริ่มว่าง", v2 and #v2.battleRoster, 0)
+	check("  แม่ในกระเป๋าเดิมไม่ถูกแตะ", v2 and v2.mothersInBag[1].uid, "777-1")
+
+	-- idempotent: ถ้ามี roster อยู่แล้ว (เช่น migrate ซ้ำ) ห้ามทับของเดิม
+	local alreadyHasRoster = PlayerData.createNew()
+	alreadyHasRoster.schemaVersion = 1
+	alreadyHasRoster.battleRoster = { { uid = "777-2", charId = "monkey", weight = 100, statuses = {}, obtainedAt = 0, locked = false } }
+	local kept = PlayerData.migrate(alreadyHasRoster)
+	check("migration ไม่ทับ roster ที่มีอยู่แล้ว", kept and #kept.battleRoster, 1)
+
 	-- normalize ต้องเติมฟิลด์ที่ขาดโดยไม่ทับของเดิม
 	local partial = PlayerData.createNew()
 	partial.currency.coins = 999

@@ -81,6 +81,7 @@ local upgradePenRequest: RemoteEvent
 local sellMotherRequest: RemoteEvent
 local sellMothersBatchRequest: RemoteEvent
 local sendMotherToBattleRequest: RemoteEvent
+local sendMothersToBattleBatchRequest: RemoteEvent
 local autoFillPenRequest: RemoteEvent
 local buyDamageUpgradeRequest: RemoteEvent
 local buySpeedUpgradeRequest: RemoteEvent
@@ -264,14 +265,21 @@ local function buildSyncPayload(data: Data)
 	for key, count in data.children do
 		local charId, weight, statuses = Config.parseStackKey(key)
 		local character = if charId then Config.getCharacter(charId) else nil
+		-- UI-3: พลังต่อตัว — สูตรเดียวกับที่ CombatService.releaseFromQueue ใช้ตีจริง (รวมสถานะ + damageLevel)
+		-- ⚠️ คิดที่ server (client ห้ามคิดเอง) · key เพี้ยน = nil (ไม่น่าเกิด — key มาจาก makeStackKey เท่านั้น)
+		local power = if charId and weight
+			then Config.computeBattlePower(Config.getChildWeight(weight, statuses), charId, statuses, data.damageLevel)
+			else nil
 		table.insert(children, {
 			key = key,
+			charId = charId,
 			charName = if character then character.name else charId,
 			class = if character then character.class else "?",
 			weight = weight,
 			weightText = if weight then Config.formatWeight(Config.getChildWeight(weight)) else "?",
 			statuses = statuses,
 			count = count,
+			power = power,
 		})
 	end
 
@@ -321,8 +329,10 @@ local function buildSyncPayload(data: Data)
 		summonEnabled = combat.summonEnabled,
 		combatAutoPaused = combat.combatAutoPaused,
 		releaseOrder = combat.releaseOrder,
-		-- Phase 3C-1: แม่ในสนามรบ { uid, charId, weight, statuses } (เพดาน = Config.Balance.Combat.MAX_BATTLE_MOTHERS)
+		-- Phase 3C-1: แม่ในสนามรบ { uid, charId, charName, class, weight, weightText, statuses }
+		-- (เพดาน = Config.Balance.Combat.MAX_BATTLE_MOTHERS)
 		battleRoster = combat.battleRoster,
+		sendStageBlockReason = combat.sendStageBlockReason, -- UI-3: nil = ส่งแม่ไปรบได้
 	}
 end
 
@@ -857,42 +867,25 @@ export type SellBatchSummary = {
 	coins: number,
 }
 
--- อ่านรายการ uid จาก client · คืน (รายการ, nil) หรือ (nil, เหตุผลที่ปฏิเสธทั้งชุด)
--- ⚠️ ต้องเป็น array จริง (key = 1..n ครบไม่มีรู ไม่มี key อื่น) · สมาชิกเป็น string ทุกตัว · 1..limit ตัว
-local function readUidArray(raw: unknown, limit: number): ({ string }?, string?)
-	if type(raw) ~= "table" then
-		return nil, "รายการแม่ที่จะขายต้องเป็น array"
+-- อ่านรายการ uid ที่จะขาย · คืน (รายการ, nil) หรือ (nil, เหตุผลที่ปฏิเสธทั้งชุด)
+-- ⚠️ ตรวจรูปร่างด้วย Config.parseUidList ตัวเดียวกับส่งแม่ไปรบเป็นชุด (UI-3) — ที่นี่แค่แปลงรหัสเป็นข้อความ
+local function readSellUids(raw: unknown, limit: number): ({ string }?, string?)
+	local list, listError = Config.parseUidList(raw, limit)
+	if list then
+		return list, nil
 	end
-	local count = 0
-	for key, value in raw :: { [any]: any } do
-		if type(key) ~= "number" or key % 1 ~= 0 or key < 1 then
-			return nil, "รายการแม่ที่จะขายต้องเป็น array"
-		end
-		if type(value) ~= "string" then
-			return nil, "uid ในรายการต้องเป็น string"
-		end
-		count += 1
-		-- ⚠️ หยุดนับทันทีที่เกิน — ไม่ไล่ตาราง "ขยะ" ขนาดใหญ่จนจบ
-		if count > limit then
-			return nil, `ขายได้ครั้งละไม่เกิน {limit} ตัว (ความจุกระเป๋า)`
-		end
-	end
-	if count == 0 then
+	if listError == "not_string" then
+		return nil, "uid ในรายการต้องเป็น string"
+	elseif listError == "too_many" then
+		return nil, `ขายได้ครั้งละไม่เกิน {limit} ตัว (ความจุกระเป๋า)`
+	elseif listError == "empty" then
 		return nil, "ยังไม่ได้เลือกแม่ที่จะขาย"
 	end
-	local list: { string } = table.create(count)
-	for index = 1, count do
-		local value = (raw :: { any })[index]
-		if value == nil then
-			return nil, "รายการแม่ที่จะขายต้องเป็น array" -- มีรู (key ไม่ต่อเนื่อง)
-		end
-		list[index] = value
-	end
-	return list, nil
+	return nil, "รายการแม่ที่จะขายต้องเป็น array"
 end
 
 -- ขายแม่เป็นชุด (UI-2 · SellMothersBatchRequest) — ร้านขายแม่ยิงครั้งเดียวแทนทีละตัว
--- ⚠️ ตรวจรูปร่างทั้งชุดก่อน (readUidArray) ไม่ผ่าน = ปฏิเสธทั้งชุด ไม่ขายสักตัว
+-- ⚠️ ตรวจรูปร่างทั้งชุดก่อน (readSellUids) ไม่ผ่าน = ปฏิเสธทั้งชุด ไม่ขายสักตัว
 --   เพดาน = ความจุกระเป๋า — ขายได้เฉพาะแม่ในกระเป๋า ส่งมาเกินนั้นไม่ใช่คำขอจาก UI จริง
 -- ⚠️ แต่ละตัวผ่าน sellOneMother ตัวเดียวกับขายทีละตัว (ราคา · ล็อก · เฉพาะกระเป๋า เหมือนเดิมทุกอย่าง)
 --   ตัวที่ขายไม่ได้ (ล็อก / ไม่ใช่ของตัวเอง / อยู่ในคอก / uid ซ้ำในชุด) ข้าม แล้วขายตัวอื่นต่อ
@@ -904,7 +897,7 @@ function EggService.sellMothersBatch(player: Player, rawUids: unknown): (boolean
 		return false, "ยังไม่มีข้อมูลผู้เล่น", nil
 	end
 
-	local uids, rejectReason = readUidArray(rawUids, Config.Balance.Bag.CAPACITY)
+	local uids, rejectReason = readSellUids(rawUids, Config.Balance.Bag.CAPACITY)
 	if not uids then
 		return false, rejectReason, nil
 	end
@@ -996,6 +989,32 @@ function EggService.sendMotherToBattle(player: Player, rawUid: unknown): (boolea
 		print(`[EggService] {player.Name} ส่งแม่ {rawUid} ไปรบ · roster {#data.battleRoster}`)
 	end
 	return ok, message
+end
+
+-- ส่งแม่ไปรบเป็นชุด (UI-3 · แท่นอัญเชิญ) — ตรรกะ/การตรวจทั้งหมดอยู่ที่ CombatService.handleSendMothersToBattleBatch
+-- (ใช้แกนส่งทีละตัวตัวเดิม) · ที่นี่ต่อสายกับผู้เล่น + ย้ายแม่ที่ค้างในสวนฟัก + sync ครั้งเดียวท้ายชุด
+function EggService.sendMothersToBattleBatch(
+	player: Player,
+	rawUids: unknown
+): (boolean, string?, CombatService.SendBatchSummary?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น", nil
+	end
+
+	local ok, reason, summary = CombatService.handleSendMothersToBattleBatch(data, rawUids)
+	if not summary then
+		return false, reason, nil -- ปฏิเสธทั้งชุด ไม่มีอะไรเปลี่ยน ไม่ต้อง sync
+	end
+	if summary.sent > 0 then
+		-- ส่งไปรบแล้วกระเป๋าว่างขึ้น — รับแม่ที่ค้างในสวนฟักเข้ามาทันที (ข้อ D เหมือนตอนขาย)
+		processReadyHatchSlots(player, data, os.time())
+	end
+	EggService.sync(player)
+	print(
+		`[EggService] {player.Name} ส่งแม่ไปรบเป็นชุด: ส่ง {summary.sent} · ข้าม {summary.skipped} · roster {summary.rosterCount}`
+	)
+	return ok, reason, summary
 end
 
 -- รางวัลผ่านด่าน (Phase 4A) — CombatService.tick ตัดสินแล้วว่าได้ (ติดธงไปแล้ว ให้ซ้ำไม่ได้)
@@ -1670,6 +1689,7 @@ function EggService.start()
 	sellMotherRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHER_REQUEST)
 	sellMothersBatchRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHERS_BATCH_REQUEST)
 	sendMotherToBattleRequest = Remotes.waitFor(Config.RemoteNames.SEND_MOTHER_TO_BATTLE_REQUEST)
+	sendMothersToBattleBatchRequest = Remotes.waitFor(Config.RemoteNames.SEND_MOTHERS_TO_BATTLE_BATCH_REQUEST)
 	autoFillPenRequest = Remotes.waitFor(Config.RemoteNames.AUTO_FILL_PEN_REQUEST)
 	buyDamageUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_DAMAGE_UPGRADE_REQUEST)
 	buySpeedUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_SPEED_UPGRADE_REQUEST)
@@ -1755,6 +1775,17 @@ function EggService.start()
 			print(`[EggService] ปฏิเสธคำขอส่งแม่ไปรบของ {player.Name}: {message}`)
 		end
 		reportResult(player, ok, message)
+	end)
+
+	-- UI-3: แท่นอัญเชิญส่งแม่เป็นชุด — ข้อความสรุปครั้งเดียวต่อชุด (ไม่ใช่ทีละตัว)
+	sendMothersToBattleBatchRequest.OnServerEvent:Connect(function(player, rawUids)
+		local ok, reason, summary = EggService.sendMothersToBattleBatch(player, rawUids)
+		if summary then
+			reportResult(player, ok, Config.formatSendBatchMessage(summary.sent, summary.rosterCount, summary.skipped))
+		else
+			print(`[EggService] ปฏิเสธคำขอส่งแม่ไปรบเป็นชุดของ {player.Name}: {reason}`)
+			reportResult(player, false, reason or "ส่งแม่ไปรบไม่สำเร็จ")
+		end
 	end)
 
 	autoFillPenRequest.OnServerEvent:Connect(function(player)

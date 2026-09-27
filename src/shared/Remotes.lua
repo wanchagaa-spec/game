@@ -33,6 +33,7 @@ local EVENT_NAMES: { string } = {
 	NAMES.STAGE_CLEARED_NOTIFY,
 	NAMES.TOGGLE_MOTHER_LOCK_REQUEST,
 	NAMES.SELL_MOTHERS_BATCH_REQUEST,
+	NAMES.SEND_MOTHERS_TO_BATTLE_BATCH_REQUEST,
 }
 
 -- เรียกจากฝั่ง server ตอนบูตเท่านั้น สร้าง Folder + RemoteEvent ให้ครบ

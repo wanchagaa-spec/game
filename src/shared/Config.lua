@@ -607,6 +607,15 @@ Config.RemoteNames = {
 	-- sync ครั้งเดียวท้ายชุด · ผลสรุปครั้งเดียวทาง ACTION_RESULT (Config.formatSellBatchMessage)
 	-- · SELL_MOTHER_REQUEST (ทีละตัว) ยังอยู่ ไม่ได้ลบ
 	SELL_MOTHERS_BATCH_REQUEST = "SellMothersBatchRequest",
+
+	-- client → server : FireServer(motherUids: { string }) — ส่งแม่ไปรบเป็นชุด (UI-3 · แท่นอัญเชิญ)
+	-- ⚠️ ไม่ใช่ array / สมาชิกไม่ใช่ string / ว่าง / เกิน MAX_BATTLE_MOTHERS ตัว → ปฏิเสธทั้งชุด
+	-- ⚠️ ไม่มีด่านให้ส่ง (ผ่านครบทุกด่าน / ด่านที่กำลังตี HP 0) → ปฏิเสธทั้งชุด
+	-- แต่ละตัวผ่านแกนเดียวกับ SEND_MOTHER_TO_BATTLE_REQUEST (CombatService.handleSendMotherToBattle) ตามลำดับที่ส่ง
+	-- ตัวที่ส่งไม่ได้ (ล็อก / ไม่ใช่ของตัวเอง / อยู่ในคอก / roster เต็ม / uid ซ้ำในชุด) ข้าม · roster ไม่เกินเพดาน
+	-- sync ครั้งเดียวท้ายชุด · ผลสรุปครั้งเดียวทาง ACTION_RESULT (Config.formatSendBatchMessage)
+	-- · client ต้องขึ้นกล่องยืนยันก่อนยิงทุกครั้ง · SEND_MOTHER_TO_BATTLE_REQUEST (ทีละตัว) ยังอยู่ ไม่ได้ลบ
+	SEND_MOTHERS_TO_BATTLE_BATCH_REQUEST = "SendMothersToBattleBatchRequest",
 }
 
 --------------------------------------------------------------------------------
@@ -2180,6 +2189,44 @@ function Config.parseUid(uid: string): (number?, number?)
 	return userId, counter
 end
 
+-- รายการ uid ที่ client ส่งมาเป็นชุด (ขายเป็นชุด UI-2 · ส่งแม่ไปรบเป็นชุด UI-3) — ตรวจรูปร่างอย่างเดียว
+-- คืน (รายการ, nil) หรือ (nil, เหตุผลแบบรหัส) → ผู้เรียกแปลงเป็นข้อความของตัวเอง
+-- ⚠️ ต้องเป็น array จริง (key = 1..n ครบไม่มีรู ไม่มี key อื่น) · สมาชิกเป็น string ทุกตัว · 1..limit ตัว
+-- ⚠️ ไม่ตรวจว่า uid มีอยู่จริง/เป็นของใคร/ซ้ำไหม — เป็นงานของแกนที่เรียกต่อ (ขาย/ส่งไปรบ ทีละตัว)
+export type UidListError = "not_array" | "not_string" | "empty" | "too_many"
+
+function Config.parseUidList(raw: unknown, limit: number): ({ string }?, UidListError?)
+	if type(raw) ~= "table" then
+		return nil, "not_array"
+	end
+	local count = 0
+	for key, value in raw :: { [any]: any } do
+		if type(key) ~= "number" or key % 1 ~= 0 or key < 1 then
+			return nil, "not_array"
+		end
+		if type(value) ~= "string" then
+			return nil, "not_string"
+		end
+		count += 1
+		-- ⚠️ หยุดนับทันทีที่เกิน — ไม่ไล่ตาราง "ขยะ" ขนาดใหญ่จนจบ
+		if count > limit then
+			return nil, "too_many"
+		end
+	end
+	if count == 0 then
+		return nil, "empty"
+	end
+	local list: { string } = table.create(count)
+	for index = 1, count do
+		local value = (raw :: { any })[index]
+		if value == nil then
+			return nil, "not_array" -- มีรู (key ไม่ต่อเนื่อง)
+		end
+		list[index] = value
+	end
+	return list, nil
+end
+
 --------------------------------------------------------------------------------
 -- Stack key
 --------------------------------------------------------------------------------
@@ -2477,6 +2524,16 @@ function Config.formatSellBatchMessage(sold: number, coins: number, skipped: num
 		return `ขายไม่ได้สักตัว{skippedText}`
 	end
 	return `ขายแม่ {sold} ตัว ได้ ฿{Config.formatCoins(coins)}{skippedText}`
+end
+
+-- ข้อความสรุปผลส่งแม่ไปรบเป็นชุด (UI-3 · SendMothersToBattleBatchRequest) — ขึ้นครั้งเดียวต่อชุด
+function Config.formatSendBatchMessage(sent: number, rosterCount: number, skipped: number): string
+	local maxMothers = Config.Balance.Combat.MAX_BATTLE_MOTHERS
+	local skippedText = if skipped > 0 then ` · ข้าม {skipped} ตัว (ล็อก / ไม่อยู่ในกระเป๋า / roster เต็ม / ซ้ำ)` else ""
+	if sent <= 0 then
+		return `ส่งแม่ไปรบไม่ได้สักตัว (roster {rosterCount}/{maxMothers}){skippedText}`
+	end
+	return `ส่งแม่ {sent} ตัวไปรบ (roster {rosterCount}/{maxMothers}){skippedText}`
 end
 
 -- อัตราปล่อยทหารของด่านนั้น (ตัว/วินาที)

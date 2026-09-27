@@ -95,21 +95,11 @@ end
 -- releaseOrder — คิวปล่อยทหารที่ผู้เล่นจัดลำดับเอง
 --------------------------------------------------------------------------------
 
--- กองใน data.children ที่ยังไม่เคยอยู่ใน releaseOrder (เพิ่งผลิตครั้งแรก) → ต่อท้ายอัตโนมัติ
+-- ⚠️ UI-3: **ปล่อยเฉพาะกองที่ผู้เล่นติ๊กไว้** — releaseOrder = กองที่เลือกเรียงตามลำดับติ๊ก
+-- กองที่ไม่อยู่ในนี้ไม่ถูกปล่อยเลย (เดิมมี reconcileReleaseOrder ต่อท้ายกองใหม่ให้อัตโนมัติทุก tick
+-- = ทุกกองถูกปล่อยหมด · ผู้ใช้ตัดสินให้ตัดทิ้งตอน UI-3) · ไม่แตะ schema (ฟิลด์เดิม ความหมายแคบลง)
 -- ⚠️ ไม่ลบ key ออกจาก releaseOrder แม้กองนั้นจะว่างแล้ว (เผื่อผลิตเพิ่มมาเติมทีหลัง
--- จะได้กลับมาอยู่คิวเดิมโดยไม่ต้องจัดใหม่)
-function CombatService.reconcileReleaseOrder(data: Data)
-	local present: { [string]: boolean } = {}
-	for _, key in data.releaseOrder do
-		present[key] = true
-	end
-	for key in data.children do
-		if not present[key] then
-			table.insert(data.releaseOrder, key)
-			present[key] = true
-		end
-	end
-end
+-- จะได้ถูกปล่อยต่อในลำดับเดิมโดยไม่ต้องติ๊กใหม่) · เขียนได้ทางเดียวคือ handleSetReleaseOrder
 
 -- ดึงทหาร `unitsToRelease` ตัวจากหัวคิว ข้ามกองที่ว่าง (count<=0/ไม่มี) โดยไม่ลบออกจากลำดับ
 -- คืน (unitsActuallyReleased, totalPower) — totalPower ผ่าน Config.computeBattlePower() ต่อหน่วย
@@ -173,6 +163,20 @@ function CombatService.getRosterDps(data: Data): number
 	return total
 end
 
+-- ด่านที่กำลังตีรับแม่ได้ไหม · คืนเหตุผลภาษาไทยถ้าไม่ได้ (nil = ส่งได้)
+-- ⚠️ ใช้ร่วมกันทั้งส่งทีละตัวและส่งเป็นชุด (UI-3) — client ใช้ข้อความเดียวกันนี้ (ผ่าน sync) บอกว่าทำไมติ๊กแม่ไม่ได้
+function CombatService.getSendStageBlockReason(data: Data): string?
+	local stage = CombatService.getActiveStage(data)
+	if not stage then
+		return "ผ่านครบทุกด่านแล้ว ไม่มีด่านให้ส่งแม่ไปรบ"
+	end
+	-- ⚠️ ด่านที่ไม่มีศัตรูเลย (ด่าน 1) นับว่า "พัง" ตั้งแต่ตาแรกที่แตะ → แม่จะตายฟรีทันที
+	if Config.getStageTotalHp(stage) <= 0 then
+		return `ด่าน {stage} ไม่มีศัตรูให้ตี — เปิดอัญเชิญให้ผ่านด่านนี้ไปก่อน`
+	end
+	return nil
+end
+
 -- คืน (ok, message) — message เป็นภาษาไทยพร้อมโชว์ผู้เล่นทาง ActionResult ทั้งกรณีสำเร็จ/ล้มเหลว
 -- ⚠️ ด่านสุดท้ายของการตรวจ — client ตรวจ roster เต็มก่อนเองก็จริง แต่ห้ามเชื่อ client
 function CombatService.handleSendMotherToBattle(data: Data, rawUid: unknown): (boolean, string)
@@ -200,18 +204,70 @@ function CombatService.handleSendMotherToBattle(data: Data, rawUid: unknown): (b
 		return false, `roster เต็มแล้ว ({#data.battleRoster}/{maxMothers})`
 	end
 
-	local stage = CombatService.getActiveStage(data)
-	if not stage then
-		return false, "ผ่านครบทุกด่านแล้ว ไม่มีด่านให้ส่งแม่ไปรบ"
-	end
-	-- ⚠️ ด่านที่ไม่มีศัตรูเลย (ด่าน 1) นับว่า "พัง" ตั้งแต่ตาแรกที่แตะ → แม่จะตายฟรีทันที
-	if Config.getStageTotalHp(stage) <= 0 then
-		return false, `ด่าน {stage} ไม่มีศัตรูให้ตี — เปิดอัญเชิญให้ผ่านด่านนี้ไปก่อน`
+	local stageBlock = CombatService.getSendStageBlockReason(data)
+	if stageBlock then
+		return false, stageBlock
 	end
 
 	local mother = table.remove(data.mothersInBag, bagIndex)
 	table.insert(data.battleRoster, mother)
 	return true, `ส่งแม่ไปรบแล้ว (roster {#data.battleRoster}/{maxMothers})`
+end
+
+export type SendBatchSummary = {
+	sent: number,
+	skipped: number,
+	rosterCount: number,
+}
+
+-- ส่งแม่เป็นชุด (UI-3 · SendMothersToBattleBatchRequest) — แท่นอัญเชิญยิงครั้งเดียวแทนทีละตัว
+-- ⚠️ ตรวจรูปร่างทั้งชุดก่อน (Config.parseUidList · 1..MAX_BATTLE_MOTHERS ตัว) ไม่ผ่าน = ปฏิเสธทั้งชุด
+-- ⚠️ ไม่มีด่านให้ส่ง (ผ่านครบ / ด่านที่กำลังตี HP 0) = ปฏิเสธทั้งชุดด้วยข้อความเดียวกับส่งทีละตัว
+-- แต่ละตัวผ่าน handleSendMotherToBattle ตัวเดียวกับส่งทีละตัว (กฎไม่ได้เขียนใหม่) เรียงตามที่ส่งมา
+--   ตัวที่ส่งไม่ได้ (ล็อก / ไม่ใช่ของตัวเอง / อยู่ในคอก / roster เต็ม / uid ซ้ำในชุด) ข้าม ส่งตัวถัดไปต่อ
+--   → roster ไม่มีวันเกิน MAX_BATTLE_MOTHERS (แกนเดิมเช็คทุกตัว) · ลำดับใน roster = ลำดับที่ส่งมา
+-- คืน (ok, reason?, summary?) · summary = nil เฉพาะตอนปฏิเสธทั้งชุด · ไม่ sync (ผู้เรียกทำครั้งเดียว)
+function CombatService.handleSendMothersToBattleBatch(data: Data, rawUids: unknown): (boolean, string?, SendBatchSummary?)
+	local maxMothers = Config.Balance.Combat.MAX_BATTLE_MOTHERS
+	local uids, listError = Config.parseUidList(rawUids, maxMothers)
+	if not uids then
+		if listError == "empty" then
+			return false, "ยังไม่ได้เลือกแม่ที่จะส่งไปรบ", nil
+		elseif listError == "too_many" then
+			return false, `ส่งแม่ไปรบได้ครั้งละไม่เกิน {maxMothers} ตัว`, nil
+		elseif listError == "not_string" then
+			return false, "uid ในรายการต้องเป็น string", nil
+		end
+		return false, "รายการแม่ที่จะส่งไปรบต้องเป็น array", nil
+	end
+
+	local stageBlock = CombatService.getSendStageBlockReason(data)
+	if stageBlock then
+		return false, stageBlock, nil
+	end
+
+	local summary: SendBatchSummary = { sent = 0, skipped = 0, rosterCount = #data.battleRoster }
+	local seen: { [string]: boolean } = {}
+	for _, uid in uids do
+		-- ⚠️ uid ซ้ำในชุด = ข้าม (ตัวแรกย้ายเข้า roster ไปแล้ว ตัวที่สองหาในกระเป๋าไม่เจออยู่ดี — นับให้ชัด)
+		if seen[uid] then
+			summary.skipped += 1
+		else
+			seen[uid] = true
+			local ok = CombatService.handleSendMotherToBattle(data, uid)
+			if ok then
+				summary.sent += 1
+			else
+				summary.skipped += 1
+			end
+		end
+	end
+	summary.rosterCount = #data.battleRoster
+
+	if summary.sent == 0 then
+		return false, "ไม่มีแม่ตัวไหนส่งไปรบได้", summary
+	end
+	return true, nil, summary
 end
 
 -- แม่ทั้ง roster ตายถาวรพร้อมกัน — เรียกตอนด่านที่กำลังตีพังเท่านั้น · คืนจำนวนที่ตาย
@@ -402,7 +458,6 @@ function CombatService.tick(data: Data, meta: CombatMeta, elapsedSeconds: number
 	end
 
 	CombatService.ensureStageStarted(data, stage)
-	CombatService.reconcileReleaseOrder(data)
 
 	local rate = Config.getReleaseRate(stage)
 	local budget = meta.releaseCarry + rate * elapsedSeconds
@@ -576,12 +631,17 @@ function CombatService.buildSyncFields(data: Data)
 	end
 
 	-- แม่ในสนามรบ — ส่งแค่ที่ UI ต้องใช้ (เพดานอ่านจาก Config.Balance.Combat.MAX_BATTLE_MOTHERS ฝั่ง client เอง)
+	-- UI-3: + ชื่อ/คลาส/น้ำหนักพร้อมโชว์ ให้การ์ด "ในสนาม" ของหน้าต่างอัญเชิญ (แบบเดียวกับการ์ดกระเป๋า)
 	local battleRoster = table.create(#data.battleRoster)
 	for _, mother in data.battleRoster do
+		local character = Config.getCharacter(mother.charId)
 		table.insert(battleRoster, {
 			uid = mother.uid,
 			charId = mother.charId,
+			charName = if character then character.name else mother.charId,
+			class = if character then character.class else "?",
 			weight = mother.weight,
+			weightText = Config.formatWeight(mother.weight),
 			statuses = mother.statuses,
 		})
 	end
@@ -593,6 +653,9 @@ function CombatService.buildSyncFields(data: Data)
 		combatAutoPaused = data.combatAutoPaused,
 		releaseOrder = data.releaseOrder,
 		battleRoster = battleRoster,
+		-- UI-3: เหตุผลที่ส่งแม่ไปรบไม่ได้ตอนนี้ (nil = ส่งได้) — ข้อความเดียวกับที่ server ใช้ปฏิเสธจริง
+		-- client ใช้โชว์ในแท็บแม่ + ปิดการติ๊ก · ⚠️ แค่ช่วยแสดงผล server ยังตรวจซ้ำทุกคำขอ
+		sendStageBlockReason = CombatService.getSendStageBlockReason(data),
 	}
 end
 

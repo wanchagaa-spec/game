@@ -1522,6 +1522,26 @@ return function(t, Config)
 	check("remote ขายเป็นชุดมีชื่อ", Config.RemoteNames.SELL_MOTHERS_BATCH_REQUEST, "SellMothersBatchRequest")
 	check("remote ขายทีละตัวยังอยู่", Config.RemoteNames.SELL_MOTHER_REQUEST, "SellMotherRequest")
 
+	print("── ส่งแม่ไปรบเป็นชุด (UI-3): ข้อความ + ตรวจรูปร่างรายการ uid ──")
+	check("ส่งครบ ไม่มีข้าม", Config.formatSendBatchMessage(3, 5, 0), "ส่งแม่ 3 ตัวไปรบ (roster 5/10)")
+	check("ส่งได้บางตัว บอกจำนวนที่ข้าม", Config.formatSendBatchMessage(5, 10, 5),
+		"ส่งแม่ 5 ตัวไปรบ (roster 10/10) · ข้าม 5 ตัว (ล็อก / ไม่อยู่ในกระเป๋า / roster เต็ม / ซ้ำ)")
+	check("ส่งไม่ได้สักตัว", Config.formatSendBatchMessage(0, 10, 2),
+		"ส่งแม่ไปรบไม่ได้สักตัว (roster 10/10) · ข้าม 2 ตัว (ล็อก / ไม่อยู่ในกระเป๋า / roster เต็ม / ซ้ำ)")
+	check("remote ส่งเป็นชุดมีชื่อ", Config.RemoteNames.SEND_MOTHERS_TO_BATTLE_BATCH_REQUEST, "SendMothersToBattleBatchRequest")
+	check("remote ส่งทีละตัวยังอยู่", Config.RemoteNames.SEND_MOTHER_TO_BATTLE_REQUEST, "SendMotherToBattleRequest")
+	do
+		local list, err = Config.parseUidList({ "1-1", "1-2" }, 10)
+		check("parseUidList array ปกติ", list and table.concat(list, ","), "1-1,1-2")
+		check("  ไม่มี error", err, nil)
+		check("parseUidList ไม่ใช่ตาราง", select(2, Config.parseUidList("x", 10)), "not_array")
+		check("parseUidList ว่าง", select(2, Config.parseUidList({}, 10)), "empty")
+		check("parseUidList สมาชิกไม่ใช่ string", select(2, Config.parseUidList({ 1 }, 10)), "not_string")
+		check("parseUidList เกินเพดาน", select(2, Config.parseUidList({ "a", "b", "c" }, 2)), "too_many")
+		check("parseUidList มีรู", select(2, Config.parseUidList({ [1] = "a", [3] = "b" }, 10)), "not_array")
+		check("parseUidList key ไม่ใช่ตัวเลข", select(2, Config.parseUidList({ "a", x = "b" }, 10)), "not_array")
+	end
+
 	print("── ป้ายบนแมพ (UI-2) ──")
 	local signDim = Config.MapDimensions
 	local signHalf = signDim.MapSign.BoardSize.X / 2

@@ -167,25 +167,39 @@ return function(t, Config)
 	end
 
 	----------------------------------------------------------------------------
-	-- กองใหม่ที่ไม่เคยอยู่ใน releaseOrder ถูกต่อท้ายอัตโนมัติ
+	-- UI-3: ปล่อยเฉพาะกองที่ติ๊ก — กองที่ไม่อยู่ใน releaseOrder ไม่ถูกปล่อย ไม่ถูกต่อท้ายให้เอง
 	----------------------------------------------------------------------------
-	print("── กองใหม่ที่ไม่เคยอยู่ใน releaseOrder ถูกต่อท้ายอัตโนมัติ ──")
+	print("── UI-3 ปล่อยเฉพาะกองที่ติ๊ก: กองนอก releaseOrder ไม่ถูกปล่อย ไม่ถูกต่อท้ายอัตโนมัติ ──")
 
 	do
 		local data = freshData()
+		local meta = freshMeta()
 		local keyA = Config.makeStackKey("wukong", 10000, {})
 		local keyB = Config.makeStackKey("wukong", 250000, {})
 		data.releaseOrder = { keyA }
 		data.children[keyA] = 5
-		data.children[keyB] = 3 -- เพิ่งผลิตครั้งแรก ยังไม่เคยอยู่ในลำดับ
+		data.children[keyB] = 3 -- ผลิตมาแต่ผู้เล่นไม่ได้ติ๊ก
 
-		CombatService.reconcileReleaseOrder(data)
-		check("ลำดับยาวขึ้นเป็น 2 (ต่อท้าย keyB)", #data.releaseOrder, 2)
-		check("keyA ยังอยู่หัวแถวเหมือนเดิม", data.releaseOrder[1], keyA)
-		check("keyB ถูกต่อท้าย", data.releaseOrder[2], keyB)
+		-- ด่าน 1 ว่างเปล่า (พังฟรีตาแรก) → ตาที่สองเริ่มด่าน 2 (อัตรา 1 ตัว/วิ)
+		CombatService.tick(data, meta, 1)
+		local result = CombatService.tick(data, meta, 60)
+		check("ปล่อยได้แค่กองที่ติ๊ก (keyA หมดทั้ง 5 ตัวทั้งที่ budget 60)", data.children[keyA], nil)
+		check("กองที่ไม่ติ๊ก (keyB) ไม่ถูกแตะเลย", data.children[keyB], 3)
+		check("ลำดับยังยาว 1 — ไม่ต่อท้าย keyB ให้เอง", #data.releaseOrder, 1)
+		check("keyA ที่หมดแล้วยังค้างในลำดับ (รอผลิตเติม)", data.releaseOrder[1], keyA)
+		check("ตานี้ปล่อยแค่ 4 ตัวที่เหลือของ keyA (ตาแรกปล่อยไป 1) ไม่ไปแตะ keyB", result.unitsReleased, 4)
+		check("ไม่มีกองติ๊ก ไม่ได้ปล่อย → auto-pause ไม่ทำงาน (ไม่ใช่ 'ตีไม่เข้า')", data.summonEnabled, true)
 
-		CombatService.reconcileReleaseOrder(data)
-		check("เรียกซ้ำไม่ต่อท้ายซ้ำ (idempotent)", #data.releaseOrder, 2)
+		-- releaseOrder ว่าง = ไม่ปล่อยอะไรเลย แม้คลังมีของ
+		local data2 = freshData()
+		local meta2 = freshMeta()
+		data2.children[keyB] = 100
+		CombatService.tick(data2, meta2, 1)
+		local r2 = CombatService.tick(data2, meta2, 10)
+		check("releaseOrder ว่าง → ปล่อย 0 ตัว", r2.unitsReleased, 0)
+		check("releaseOrder ว่าง → คลังไม่ลด", data2.children[keyB], 100)
+		check("releaseOrder ว่าง → ลำดับยังว่าง (ไม่เติมให้)", #data2.releaseOrder, 0)
+		check("ไม่มีฟังก์ชันต่อท้ายอัตโนมัติเหลืออยู่", CombatService.reconcileReleaseOrder, nil)
 	end
 
 	----------------------------------------------------------------------------
@@ -282,6 +296,7 @@ return function(t, Config)
 		local data = freshData()
 		local key = Config.makeStackKey("wukong", 10000, {})
 		data.children[key] = 100000 -- คลังเยอะพอไม่ให้ชนเพดานระหว่างเทสต์
+		data.releaseOrder = { key } -- UI-3: ปล่อยเฉพาะกองที่ติ๊ก
 
 		local meta1 = CombatService.newMeta()
 		local result1 = CombatService.tick(data, meta1, 1) -- ออนไลน์ปกติ 1 วิ (อัตราด่าน 1 = 1 ตัว/วิ)
@@ -317,6 +332,7 @@ return function(t, Config)
 		local meta = freshMeta()
 		local key = Config.makeStackKey("wukong", 10000, {}) -- power 360/ตัว (damageLevel=0)
 		data.children[key] = 100000
+		data.releaseOrder = { key } -- UI-3: ปล่อยเฉพาะกองที่ติ๊ก
 
 		check("ผู้เล่นใหม่ wallProgress = ค่าเริ่มต้น", data.wallProgress, Config.Balance.NewPlayer.wallProgress)
 
@@ -442,6 +458,8 @@ return function(t, Config)
 		local key = Config.makeStackKey("wukong", 10000, {})
 		dataA.children[key] = 100000
 		dataB.children[key] = 100000
+		dataA.releaseOrder = { key } -- UI-3: ปล่อยเฉพาะกองที่ติ๊ก
+		dataB.releaseOrder = { key }
 
 		-- A ตีไปสองตา: พังด่าน 1 (ว่างเปล่าอยู่แล้ว) แล้วเริ่มตีด่าน 2 ต่อทันที
 		CombatService.tick(dataA, metaA, 1)
@@ -884,5 +902,150 @@ return function(t, Config)
 		mother.locked = false
 		check("ปลดล็อกแล้ว → ส่งได้", (CombatService.handleSendMotherToBattle(data, mother.uid)), true)
 		check("  ย้ายเข้า roster", #data.battleRoster, 1)
+	end
+
+	----------------------------------------------------------------------------
+	-- UI-3: ส่งแม่ไปรบเป็นชุด (SendMothersToBattleBatchRequest) — แกนเดียวกับส่งทีละตัว
+	----------------------------------------------------------------------------
+	print("── UI-3 ส่งแม่เป็นชุด: ผลเท่ากับส่งทีละตัว · ลำดับ roster = ลำดับที่ส่ง ──")
+
+	do
+		local batchData = dataAtStage2()
+		local singleData = dataAtStage2()
+		local uids = {}
+		for index = 1, 4 do
+			local mother = makeMother(100 * index)
+			table.insert(uids, mother.uid)
+			table.insert(batchData.mothersInBag, table.clone(mother))
+			table.insert(singleData.mothersInBag, table.clone(mother))
+		end
+		-- ส่งสลับลำดับ (3, 1, 4) ไม่ส่งตัวที่ 2
+		local order = { uids[3], uids[1], uids[4] }
+		local ok, reason, summary = CombatService.handleSendMothersToBattleBatch(batchData, order)
+		for _, uid in order do
+			CombatService.handleSendMotherToBattle(singleData, uid)
+		end
+		check("ส่งเป็นชุดสำเร็จ", ok, true)
+		check("  reason เป็น nil", reason, nil)
+		check("  ส่งได้ 3 ข้าม 0", summary and `{summary.sent}/{summary.skipped}`, "3/0")
+		check("  roster 3 ตัว", summary and summary.rosterCount, 3)
+		check("roster เท่ากับส่งทีละตัว (จำนวน)", #batchData.battleRoster, #singleData.battleRoster)
+		for index = 1, 3 do
+			check(`  roster ช่อง {index} = uid ลำดับที่ส่ง`, batchData.battleRoster[index].uid, order[index])
+			check(`  ช่อง {index} ตรงกับส่งทีละตัว`, batchData.battleRoster[index].uid, singleData.battleRoster[index].uid)
+		end
+		check("กระเป๋าเหลือตัวที่ไม่ได้ส่ง (ตัวที่ 2)", batchData.mothersInBag[1] and batchData.mothersInBag[1].uid, uids[2])
+		check("กระเป๋าเท่ากับส่งทีละตัว", #batchData.mothersInBag, #singleData.mothersInBag)
+	end
+
+	print(`── UI-3 ส่งเป็นชุด: ในสนามแล้ว 5 ตัว ส่งเพิ่ม 10 → roster ไม่เกิน {MAX_ROSTER} ──`)
+
+	do
+		local data = dataAtStage2()
+		for _ = 1, 5 do
+			table.insert(data.battleRoster, makeMother())
+		end
+		local uids = {}
+		for _ = 1, 10 do
+			local mother = makeMother()
+			table.insert(data.mothersInBag, mother)
+			table.insert(uids, mother.uid)
+		end
+		local ok, _, summary = CombatService.handleSendMothersToBattleBatch(data, uids)
+		check("ส่งได้บางตัว = สำเร็จ", ok, true)
+		check(`  roster = {MAX_ROSTER} พอดี ไม่เกิน`, #data.battleRoster, MAX_ROSTER)
+		check("  ส่งได้ 5 · ข้าม 5 (roster เต็ม)", summary and `{summary.sent}/{summary.skipped}`, "5/5")
+		check("  5 ตัวแรกที่ส่งเข้า roster (ตามลำดับ)", data.battleRoster[6].uid, uids[1])
+		check("  ตัวที่ถูกข้ามยังอยู่ในกระเป๋า", #data.mothersInBag, 5)
+		check("  ตัวที่ถูกข้ามคือ 5 ตัวท้าย", data.mothersInBag[1].uid, uids[6])
+	end
+
+	print("── UI-3 ส่งเป็นชุด: ข้ามแม่ล็อก / แม่ในคอก / ของคนอื่น / uid ซ้ำ แล้วส่งตัวอื่นต่อ ──")
+
+	do
+		local data = dataAtStage2()
+		local good1, good2 = makeMother(), makeMother()
+		local locked = makeMother()
+		locked.locked = true
+		local inPen = makeMother()
+		table.insert(data.mothersInBag, good1)
+		table.insert(data.mothersInBag, locked)
+		table.insert(data.mothersInBag, good2)
+		table.insert(data.mothersInPen, inPen)
+		local foreign = Config.makeUid(999, 7)
+
+		local ok, _, summary = CombatService.handleSendMothersToBattleBatch(
+			data,
+			{ good1.uid, locked.uid, inPen.uid, foreign, good1.uid, good2.uid }
+		)
+		check("สำเร็จ (มีตัวที่ส่งได้)", ok, true)
+		check("  ส่ง 2 · ข้าม 4 (ล็อก · คอก · คนอื่น · ซ้ำ)", summary and `{summary.sent}/{summary.skipped}`, "2/4")
+		check("  roster = good1, good2 ตามลำดับ", `{data.battleRoster[1].uid},{data.battleRoster[2].uid}`, `{good1.uid},{good2.uid}`)
+		check("  แม่ล็อกยังอยู่ในกระเป๋า", data.mothersInBag[1] and data.mothersInBag[1].uid, locked.uid)
+		check("  แม่ในคอกยังอยู่ในคอก", #data.mothersInPen, 1)
+
+		local okNone, reasonNone, summaryNone = CombatService.handleSendMothersToBattleBatch(data, { locked.uid })
+		check("ส่งไม่ได้สักตัว → ok = false", okNone, false)
+		check("  ยังมี summary (ไม่ใช่ปฏิเสธทั้งชุด)", summaryNone ~= nil, true)
+		check("  มีเหตุผล", type(reasonNone), "string")
+	end
+
+	print("── UI-3 ส่งเป็นชุด: ไม่มีด่านให้ส่ง (ด่าน HP 0 / ผ่านครบ) → ปฏิเสธทั้งชุด ──")
+
+	do
+		-- ด่านที่กำลังตีคือด่าน 1 (HP 0)
+		local data = freshData()
+		local mother = makeMother()
+		table.insert(data.mothersInBag, mother)
+		local ok, reason, summary = CombatService.handleSendMothersToBattleBatch(data, { mother.uid })
+		check("ด่านที่กำลังตี HP 0 → ปฏิเสธ", ok, false)
+		check("  ไม่มี summary (ปฏิเสธทั้งชุด)", summary, nil)
+		check("  ข้อความเดียวกับส่งทีละตัว", reason, (select(2, CombatService.handleSendMotherToBattle(data, mother.uid))))
+		check("  แม่ยังอยู่ในกระเป๋า", #data.mothersInBag, 1)
+
+		local cleared = freshData()
+		for stage = 1, Config.Balance.Stage.COUNT do
+			cleared.stageProgress[stage] = { defendersRemaining = 0, wallHpRemaining = 0 }
+		end
+		local m2 = makeMother()
+		table.insert(cleared.mothersInBag, m2)
+		local ok2, reason2, summary2 = CombatService.handleSendMothersToBattleBatch(cleared, { m2.uid })
+		check("ผ่านครบทุกด่าน → ปฏิเสธ", ok2, false)
+		check("  ไม่มี summary", summary2, nil)
+		check("  ข้อความ 'ผ่านครบทุกด่าน'", reason2, "ผ่านครบทุกด่านแล้ว ไม่มีด่านให้ส่งแม่ไปรบ")
+		check("  roster ว่าง", #cleared.battleRoster, 0)
+
+		check("sync บอกเหตุผลเดียวกัน (ด่าน HP 0)", CombatService.buildSyncFields(data).sendStageBlockReason, reason)
+		check("sync บอกเหตุผลเดียวกัน (ผ่านครบ)", CombatService.buildSyncFields(cleared).sendStageBlockReason, reason2)
+		check("ด่าน 2 มีศัตรู → sync ไม่มีเหตุผลกั้น", CombatService.buildSyncFields(dataAtStage2()).sendStageBlockReason, nil)
+	end
+
+	print("── UI-3 ส่งเป็นชุด: ข้อมูลขยะ → ปฏิเสธทั้งชุด ไม่แตะอะไรเลย ──")
+
+	do
+		local data = dataAtStage2()
+		local mother = makeMother()
+		table.insert(data.mothersInBag, mother)
+		local tooMany = {}
+		for _ = 1, MAX_ROSTER + 1 do
+			table.insert(tooMany, mother.uid)
+		end
+		local junk = {
+			{ "ไม่ใช่ตาราง", "abc" },
+			{ "nil", nil },
+			{ "ตารางว่าง", {} },
+			{ "สมาชิกเป็นตัวเลข", { 1, 2 } },
+			{ "มี key ที่ไม่ใช่ตัวเลข", { mother.uid, extra = "x" } },
+			{ "มีรู", { [1] = mother.uid, [3] = mother.uid } },
+			{ `เกิน {MAX_ROSTER} ตัว`, tooMany },
+		}
+		for _, case in junk do
+			local ok, reason, summary = CombatService.handleSendMothersToBattleBatch(data, case[2])
+			check(`{case[1]} → ปฏิเสธ`, ok, false)
+			check("  ไม่มี summary", summary, nil)
+			check("  มีเหตุผล", type(reason), "string")
+		end
+		check("แม่ยังอยู่ในกระเป๋าครบ", #data.mothersInBag, 1)
+		check("roster ว่าง", #data.battleRoster, 0)
 	end
 end

@@ -1020,6 +1020,152 @@ end
 
 '''
 
+# UI-3: ส่งแม่ไปรบเป็นชุด (SendMothersToBattleBatchRequest) — ต่อสายจริงผ่าน EggService.start()
+CHECK_SEND_BATCH = r'''
+--------------------------------------------------------------------------------
+-- 2.7) ส่งแม่ไปรบเป็นชุด (UI-3 · SendMothersToBattleBatchRequest)
+--------------------------------------------------------------------------------
+
+local sendBatchHandler = capturedHandlers[Config.RemoteNames.SEND_MOTHERS_TO_BATTLE_BATCH_REQUEST]
+assert(sendBatchHandler, "เซ็ตอัพเทสต์ผิด — ไม่ผูก callback ให้ SendMothersToBattleBatchRequest")
+
+-- ผู้เล่นที่ผ่านด่าน 1 (ว่าง) แล้ว กำลังตีด่าน 2 · กระเป๋ามีแม่ s-1..s-n
+local function sendReady(tag, count)
+	local player, data = freshPlayer(tag)
+	data.stageProgress[1] = { defendersRemaining = 0, wallHpRemaining = 0 }
+	CombatService.ensureStageStarted(data, 2)
+	table.clear(data.mothersInBag)
+	table.clear(data.battleRoster)
+	for i = 1, count do
+		table.insert(data.mothersInBag, makeMother(`s-{i}`, "monkey", 100 * i))
+	end
+	return player, data
+end
+local function rosterUids(data)
+	local list = {}
+	for _, m in data.battleRoster do
+		table.insert(list, m.uid)
+	end
+	return table.concat(list, ",")
+end
+
+print("\n━━ ส่งเป็นชุด: ผลเท่ากับส่งทีละตัว · sync + ข้อความสรุปครั้งเดียว ━━")
+do
+	local single, singleData = sendReady("SendSingle", 4)
+	for _, uid in { "s-3", "s-1", "s-4" } do
+		pcall(sendToBattleHandler, single, uid)
+	end
+
+	local batch, batchData = sendReady("SendBatch", 4)
+	local syncBefore, resultBefore = syncCount(batch), resultCount(batch)
+	local ok = pcall(sendBatchHandler, batch, { "s-3", "s-1", "s-4" })
+	check("ไม่ error/crash", ok)
+	check("roster ตรงกับส่งทีละตัว (ลำดับด้วย)", rosterUids(batchData), rosterUids(singleData))
+	check("  roster = s-3,s-1,s-4 ตามลำดับที่ส่ง", rosterUids(batchData), "s-3,s-1,s-4")
+	check("กระเป๋าเหลือ s-2 เหมือนส่งทีละตัว", batchData.mothersInBag[1] and batchData.mothersInBag[1].uid, "s-2")
+	check("sync ครั้งเดียวต่อชุด (ไม่ใช่ทีละตัว)", syncCount(batch) - syncBefore, 1)
+	check("ข้อความสรุปครั้งเดียว", resultCount(batch) - resultBefore, 1)
+	local okResult, message = batchResult(batch)
+	check("  ผลสำเร็จ", okResult, true)
+	check("  ข้อความ = ส่งแม่ N ตัวไปรบ (roster X/10)", message, Config.formatSendBatchMessage(3, 3, 0))
+end
+
+print("\n━━ ส่งเป็นชุด: ในสนามแล้ว 5 ส่งเพิ่ม 10 → roster ไม่เกิน 10 ━━")
+do
+	local player, data = sendReady("SendCap", 15)
+	local first = {}
+	for i = 1, 5 do
+		table.insert(first, `s-{i}`)
+	end
+	pcall(sendBatchHandler, player, first)
+	check("ในสนาม 5 ตัว", #data.battleRoster, 5)
+	local more = {}
+	for i = 6, 15 do
+		table.insert(more, `s-{i}`)
+	end
+	pcall(sendBatchHandler, player, more)
+	check("roster = 10 พอดี", #data.battleRoster, Config.Balance.Combat.MAX_BATTLE_MOTHERS)
+	check("ตัวที่ล้น 5 ตัวยังอยู่ในกระเป๋า", #data.mothersInBag, 5)
+	local _, message = batchResult(player)
+	check("  ข้อความบอกส่ง 5 ข้าม 5", message, Config.formatSendBatchMessage(5, 10, 5))
+end
+
+print("\n━━ ส่งเป็นชุด: แม่ล็อก / อยู่ในคอก / ของคนอื่น / uid ซ้ำ ถูกข้าม ━━")
+do
+	local _other, otherData = freshPlayer("SendOther")
+	table.clear(otherData.mothersInBag)
+	table.insert(otherData.mothersInBag, makeMother("their-mom", "wukong", 5000))
+
+	local player, data = sendReady("SendSkip", 3)
+	data.mothersInBag[1].locked = true -- s-1
+	table.clear(data.mothersInPen)
+	table.insert(data.mothersInPen, makeMother("pen-mom", "monkey", 300, { lastProducedAt = os.time() }))
+
+	local ok = pcall(sendBatchHandler, player, { "s-1", "pen-mom", "their-mom", "s-2", "s-2", "s-3" })
+	check("ไม่ error/crash", ok)
+	check("roster = s-2,s-3", rosterUids(data), "s-2,s-3")
+	check("แม่ล็อกยังอยู่ในกระเป๋า", data.mothersInBag[1] and data.mothersInBag[1].uid, "s-1")
+	check("แม่ในคอกยังอยู่ในคอก", #data.mothersInPen, 1)
+	check("แม่ของคนอื่นไม่ถูกแตะ", #otherData.mothersInBag, 1)
+	local okResult, message = batchResult(player)
+	check("  ผลสำเร็จ (ส่งได้บางตัว)", okResult, true)
+	check("  ข้อความบอกว่าข้าม 4 ตัว", message, Config.formatSendBatchMessage(2, 2, 4))
+end
+
+print("\n━━ ส่งเป็นชุด: ด่านที่กำลังตี HP 0 / ผ่านครบทุกด่าน → ปฏิเสธทั้งชุด ไม่ sync ━━")
+do
+	local player, data = freshPlayer("SendStage1")
+	table.clear(data.mothersInBag)
+	table.clear(data.battleRoster)
+	table.insert(data.mothersInBag, makeMother("z-1", "monkey", 100))
+	local syncBefore = syncCount(player)
+	pcall(sendBatchHandler, player, { "z-1" })
+	check("ด่าน 1 (HP 0) → ไม่ส่ง", #data.battleRoster, 0)
+	check("  ไม่ sync", syncCount(player) - syncBefore, 0)
+	local okResult, message = batchResult(player)
+	check("  ผลไม่สำเร็จ", okResult, false)
+	check("  ข้อความบอกด่าน 1 ไม่มีศัตรู", message, "ด่าน 1 ไม่มีศัตรูให้ตี — เปิดอัญเชิญให้ผ่านด่านนี้ไปก่อน")
+
+	for stage = 1, Config.Balance.Stage.COUNT do
+		data.stageProgress[stage] = { defendersRemaining = 0, wallHpRemaining = 0 }
+	end
+	pcall(sendBatchHandler, player, { "z-1" })
+	check("ผ่านครบทุกด่าน → ไม่ส่ง", #data.battleRoster, 0)
+	local okAll, messageAll = batchResult(player)
+	check("  ผลไม่สำเร็จ", okAll, false)
+	check("  ข้อความ", messageAll, "ผ่านครบทุกด่านแล้ว ไม่มีด่านให้ส่งแม่ไปรบ")
+end
+
+print("\n━━ ส่งเป็นชุด: ข้อมูลขยะ → ปฏิเสธทั้งชุด ไม่ส่งสักตัว ━━")
+do
+	local player, data = sendReady("SendJunk", 2)
+	local eleven = {}
+	for i = 1, Config.Balance.Combat.MAX_BATTLE_MOTHERS + 1 do
+		table.insert(eleven, if i <= 2 then `s-{i}` else `ghost-{i}`)
+	end
+	local junk = {
+		{ "string", "s-1" },
+		{ "number", 42 },
+		{ "nil", nil },
+		{ "array ว่าง", {} },
+		{ "key เป็น string", { a = "s-1" } },
+		{ "มีรู", { [1] = "s-1", [3] = "s-2" } },
+		{ "สมาชิกเป็นตัวเลข", { "s-1", 5 } },
+		{ "เกิน 10 ตัว", eleven },
+	}
+	for _, case in junk do
+		local syncBefore = syncCount(player)
+		local ok = pcall(sendBatchHandler, player, case[2])
+		check(`{case[1]}: ไม่ error/crash`, ok)
+		check(`  {case[1]}: ไม่ส่งสักตัว`, #data.battleRoster == 0 and #data.mothersInBag == 2)
+		check(`  {case[1]}: ไม่ sync`, syncCount(player) - syncBefore, 0)
+		local okResult = batchResult(player)
+		check(`  {case[1]}: ผลไม่สำเร็จ`, okResult, false)
+	end
+end
+
+'''
+
 FOOTER = '''
 print(string.format("\\n=== ผ่าน %d / ตก %d ===", passCount, failCount))
 if failCount > 0 then
@@ -1061,7 +1207,7 @@ def build_harness() -> str:
     src = src.replace('--!strict', '--!nocheck' + PRELUDE)
 
     escaped = src.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
-    check = (CHECK + CHECK_BATCH + FOOTER).replace('__EGGSERVICE_SOURCE', f'"{escaped}"')
+    check = (CHECK + CHECK_BATCH + CHECK_SEND_BATCH + FOOTER).replace('__EGGSERVICE_SOURCE', f'"{escaped}"')
     return STUB + check
 
 

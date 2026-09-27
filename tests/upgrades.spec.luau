@@ -144,6 +144,7 @@ return function(t, Config)
 		-- ไม่กระทบผลของเทสต์นี้เลย เพราะเช็คแค่ว่าด่านพังจริงหรือไม่ ไม่ได้เช็คเศษ HP ที่เหลือ
 		local key = Config.makeStackKey("wukong", 10000, {})
 		data.children[key] = 100000
+		data.releaseOrder = { key } -- UI-3: ปล่อยเฉพาะกองที่ติ๊ก
 
 		for _ = 1, Config.getMaxDamageLevel(1) do
 			simulateBuyDamageUpgrade(data)

@@ -194,6 +194,28 @@ local function describeMother(mother: Mother, wallProgress: number)
 	}
 end
 
+-- กองลูก 1 กอง (stack key + จำนวน) ในรูปพร้อมโชว์
+local function describeStack(key: string, count: number, damageLevel: number)
+	local charId, weight, statuses = Config.parseStackKey(key)
+	local character = if charId then Config.getCharacter(charId) else nil
+	-- UI-3: พลังต่อตัว — สูตรเดียวกับที่ CombatService.releaseFromQueue ใช้ตีจริง (รวมสถานะ + damageLevel)
+	-- ⚠️ คิดที่ server (client ห้ามคิดเอง) · key เพี้ยน = nil (ไม่น่าเกิด — key มาจาก makeStackKey เท่านั้น)
+	local power = if charId and weight
+		then Config.computeBattlePower(Config.getChildWeight(weight, statuses), charId, statuses, damageLevel)
+		else nil
+	return {
+		key = key,
+		charId = charId,
+		charName = if character then character.name else charId,
+		class = if character then character.class else "?",
+		weight = weight,
+		weightText = if weight then Config.formatWeight(Config.getChildWeight(weight)) else "?",
+		statuses = statuses,
+		count = count,
+		power = power,
+	}
+end
+
 -- ⚠️ กระเป๋าไข่จุได้ถึง 10,000 ฟอง — **ห้ามส่งทั้งหมดทุกครั้งที่ sync**
 -- sync วิ่งทุก SYNC_INTERVAL วินาที ส่งหมื่นฟองทุกวินาทีคือถล่มแบนด์วิดท์ของตัวเอง
 -- ส่งเท่าที่ UI แสดงจริง + จำนวนรวม ที่เหลือรอจนกว่า UI จะทำ virtualize (Phase 5.5)
@@ -263,24 +285,21 @@ local function buildSyncPayload(data: Data)
 	-- ต่างจากกระเป๋าไข่ (10,000 ฟอง) ที่ต้อง virtualize เพราะเป็นคนละขนาดกัน
 	local children = {}
 	for key, count in data.children do
-		local charId, weight, statuses = Config.parseStackKey(key)
-		local character = if charId then Config.getCharacter(charId) else nil
-		-- UI-3: พลังต่อตัว — สูตรเดียวกับที่ CombatService.releaseFromQueue ใช้ตีจริง (รวมสถานะ + damageLevel)
-		-- ⚠️ คิดที่ server (client ห้ามคิดเอง) · key เพี้ยน = nil (ไม่น่าเกิด — key มาจาก makeStackKey เท่านั้น)
-		local power = if charId and weight
-			then Config.computeBattlePower(Config.getChildWeight(weight, statuses), charId, statuses, data.damageLevel)
-			else nil
-		table.insert(children, {
-			key = key,
-			charId = charId,
-			charName = if character then character.name else charId,
-			class = if character then character.class else "?",
-			weight = weight,
-			weightText = if weight then Config.formatWeight(Config.getChildWeight(weight)) else "?",
-			statuses = statuses,
-			count = count,
-			power = power,
-		})
+		table.insert(children, describeStack(key, count, data.damageLevel))
+	end
+
+	-- UI-3: กองที่ติ๊กไว้ใน releaseOrder แต่ตอนนี้หมด (ปล่อยออกไปหมดแล้ว) **และแม่ในคอกยังผลิตเติมอยู่**
+	-- → หน้าต่างอัญเชิญโชว์เป็นการ์ด "0 ตัว · รอผลิต" ที่ยังติ๊กอยู่ตามลำดับเดิม ไม่หายไปเฉย ๆ
+	-- (กองที่หมดและไม่มีแม่ผลิตเติมแล้ว — ขาย/ย้าย/ตาย — ไม่ส่ง · ติ๊กชุดใหม่แล้วหลุดจากลำดับเอง)
+	local producing: { [string]: boolean } = {}
+	for _, mother in data.mothersInPen do
+		producing[Config.makeStackKey(mother.charId, mother.weight, mother.statuses)] = true
+	end
+	local waitingStacks = {}
+	for _, key in data.releaseOrder do
+		if producing[key] and not data.children[key] then
+			table.insert(waitingStacks, describeStack(key, 0, data.damageLevel))
+		end
 	end
 
 	-- ⚠️ Phase 3A: ฟิลด์การรบ (stageProgress/summonEnabled/releaseOrder/...) มาจาก
@@ -321,6 +340,7 @@ local function buildSyncPayload(data: Data)
 		walkSpeed = Config.getWalkSpeed(data.speedLevel),
 		speedUpgradeCost = Config.getSpeedUpgradeCost(data.speedLevel), -- nil = เต็มเพดานแล้ว
 		children = children,
+		waitingStacks = waitingStacks, -- UI-3: กองที่ติ๊กไว้แต่หมดชั่วคราว (count 0 · แม่ในคอกผลิตเติมอยู่)
 		-- ⚠️ ข้อ D: จำนวนแม่ที่ฟักเสร็จแล้วแต่ยังค้างในสวนฟักเพราะคอก+กระเป๋าเต็มพร้อมกัน
 		-- client ใช้ค่านี้โชว์ข้อความ "กระเป๋าแม่เต็ม ขายแม่บางตัวเพื่อรับแม่ที่ฟักเสร็จแล้ว" (ยังไม่ทำ UI เฟสนี้)
 		stuckHatchCount = stuckHatchCount,

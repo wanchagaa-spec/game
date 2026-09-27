@@ -1136,6 +1136,46 @@ do
 	check("  ข้อความ", messageAll, "ผ่านครบทุกด่านแล้ว ไม่มีด่านให้ส่งแม่ไปรบ")
 end
 
+print("\n━━ sync (UI-3): พลังต่อตัวของกองลูก + กองที่ติ๊กไว้แต่หมด (รอผลิต) ━━")
+do
+	local player, data = freshPlayer("SyncWaiting")
+	table.clear(data.mothersInPen)
+	local penMom = makeMother("pen-a", "wukong", 1500, { lastProducedAt = os.time() })
+	table.insert(data.mothersInPen, penMom)
+	local keyPen = Config.makeStackKey("wukong", 1500, {})
+	local keyGone = Config.makeStackKey("pig", 800, {}) -- ไม่มีแม่ผลิตเติมแล้ว
+	local keyStock = Config.makeStackKey("monkey", 100, {})
+	table.clear(data.children)
+	data.children[keyStock] = 12
+	data.releaseOrder = { keyPen, keyGone, keyStock }
+	data.damageLevel = 3
+	EggService.sync(player)
+	local payload = firedTo(player, Config.RemoteNames.FARM_STATE_SYNC)[1]
+	local waiting = payload.waitingStacks or {}
+	check("กองที่ติ๊กไว้ + หมด + แม่ในคอกผลิตเติม → อยู่ใน waitingStacks", #waiting == 1 and waiting[1].key == keyPen, true)
+	check("  count = 0", waiting[1] and waiting[1].count, 0)
+	check("  กองที่หมดและไม่มีแม่ผลิตเติม → ไม่ส่ง", #waiting, 1)
+	local stock = nil
+	for _, stack in payload.children do
+		if stack.key == keyStock then
+			stock = stack
+		end
+	end
+	local expected = Config.computeBattlePower(Config.getChildWeight(100, {}), "monkey", {}, 3)
+	check("children มี power = computeBattlePower (รวม damageLevel)", stock and stock.power, expected)
+	check("  มี charId ให้วาดรูป", stock and stock.charId, "monkey")
+	check("กองที่มีของไม่ซ้ำใน waitingStacks", waiting[1] and waiting[1].key ~= keyStock, true)
+	check("ผู้เล่นใหม่ (ด่าน 1 ไม่มีศัตรู) → sync บอกเหตุผลที่ส่งแม่ไม่ได้", payload.sendStageBlockReason,
+		"ด่าน 1 ไม่มีศัตรูให้ตี — เปิดอัญเชิญให้ผ่านด่านนี้ไปก่อน")
+
+	table.insert(data.battleRoster, makeMother("field-1", "tang", 900))
+	EggService.sync(player)
+	local roster = firedTo(player, Config.RemoteNames.FARM_STATE_SYNC)[1].battleRoster
+	local character = Config.getCharacter("tang")
+	check("battleRoster ใน sync มีชื่อ/คลาส/น้ำหนักพร้อมโชว์", roster[1] and `{roster[1].charName}/{roster[1].class}/{roster[1].weightText}`,
+		`{character.name}/{character.class}/{Config.formatWeight(900)}`)
+end
+
 print("\n━━ ส่งเป็นชุด: ข้อมูลขยะ → ปฏิเสธทั้งชุด ไม่ส่งสักตัว ━━")
 do
 	local player, data = sendReady("SendJunk", 2)

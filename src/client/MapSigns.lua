@@ -1,0 +1,332 @@
+--!strict
+-- egg-army-game :: ป้ายอัปเกรดบนแมพ + จุดเปิดร้านขายแม่ — UI-2
+--
+-- ตัวป้าย (เสา + แผ่นไม้) server สร้างใน MapBuilder.buildMapSigns — ไฟล์นี้ติดของที่เป็น "ของแต่ละคน":
+--   · SurfaceGui (อยู่ใน PlayerGui · Adornee = แผ่นป้าย) โชว์เลเวล/ราคาของ**ผู้เล่นที่มองอยู่**
+--     ห้ามเขียนค่าของใครลงป้ายฝั่ง server — คนอื่นจะเห็นเลขของคนนั้นไปด้วย
+--   · ProximityPrompt (กด E · มือถือขึ้นเป็นปุ่มให้แตะ) สร้างฝั่ง client → กดแล้วยิง remote ซื้อเดิม
+-- ⚠️ ป้ายค่าวิ่ง/อัปคอกมีทุกคอก แต่ติดจุดกดเฉพาะคอกตัวเอง (Attribute Config.PEN_INDEX_ATTRIBUTE)
+--   คอกคนอื่นไม่มีปุ่มให้กดเลย · ค่าวิ่งเป็นของบัญชีก็จริง แต่ให้ซื้อที่คอกตัวเองที่เดียวกันงง
+-- ⚠️ client ไม่ตัดสินอะไร: ราคา/เพดานอ่านจาก sync · server ตรวจเงิน/เพดานซ้ำเองทุกครั้ง
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local UiKit = require(script.Parent:WaitForChild("UiKit"))
+
+local MapSigns = {}
+
+export type SignKind = "damage" | "speed" | "pen"
+export type Tone = "price" | "poor" | "max" | "capped" | "dim"
+export type SignView = { title: string, level: string, detail: string, tone: Tone }
+
+export type Actions = {
+	buy: (kind: SignKind) -> (),
+	openSellShop: () -> (),
+	closeSellShop: () -> (),
+	isSellShopOpen: () -> boolean,
+}
+
+type Sign = {
+	kind: SignKind,
+	penIndex: number?, -- nil = ป้ายดาเมจ (จุดเดียวใช้ร่วมกัน)
+	name: string,
+	gui: SurfaceGui,
+	titleLabel: TextLabel,
+	levelLabel: TextLabel,
+	detailLabel: TextLabel,
+	board: BasePart?,
+	prompt: ProximityPrompt?,
+}
+
+local TITLES: { [string]: string } = {
+	damage = "⚔️ อัปดาเมจ",
+	speed = "👟 อัปความเร็ว",
+	pen = "🏠 อัปคอก",
+}
+
+local TONE_COLORS: { [string]: Color3 } = {
+	price = Color3.fromRGB(255, 220, 90),
+	poor = Color3.fromRGB(255, 85, 85), -- เงินไม่พอ
+	max = Color3.fromRGB(120, 235, 120),
+	capped = Color3.fromRGB(255, 170, 70),
+	dim = Color3.fromRGB(205, 205, 205),
+}
+
+local PIXELS_PER_STUD = 40
+local SIGN_GUI_MAX_DISTANCE = 150
+local CLOSE_POLL_SECONDS = 0.25
+local SELL_COUNTER_NAME = "Counter" -- ชิ้นเคาน์เตอร์ของแผงร้าน (MapBuilder.buildShop)
+
+local actions: Actions
+local signs: { Sign } = {}
+local lastPayload: any = nil
+
+--------------------------------------------------------------------------------
+-- ข้อความบนป้าย — ฟังก์ชันล้วน ไม่แตะ Instance (เทสต์นอก Studio ได้ · tools/check-ui-smoke.py)
+--------------------------------------------------------------------------------
+
+-- payload = FarmStateSync ล่าสุด (nil = ยังไม่มา) · isOwn = false → ป้ายของคอกคนอื่น
+function MapSigns.describe(kind: SignKind, payload: any, isOwn: boolean): SignView
+	local title = TITLES[kind]
+	if not isOwn then
+		return { title = title, level = "", detail = "กดได้ที่คอกของตัวเอง", tone = "dim" }
+	end
+	if not payload then
+		return { title = title, level = "", detail = "กำลังโหลด...", tone = "dim" }
+	end
+
+	-- ⚠️ ราคา nil = ซื้อต่อไม่ได้ (server คิดมาให้แล้วใน sync) — ไม่คิดเพดานเองฝั่งนี้
+	local level: number
+	local cost: number?
+	if kind == "damage" then
+		level, cost = payload.damageLevel, payload.damageUpgradeCost
+	elseif kind == "speed" then
+		level, cost = payload.speedLevel, payload.speedUpgradeCost
+	else
+		level, cost = payload.penLevel, payload.penUpgradeCost
+	end
+	local levelText = `Lv. {level}`
+
+	if cost == nil then
+		-- ดาเมจมีสองแบบ: ชนเพดานของด่านนี้ (พังด่านถัดไปแล้วซื้อต่อได้) กับซื้อครบทั้งเกมแล้ว (MAX)
+		if kind == "damage" and level < Config.Balance.DamageUpgrade.MAX_LEVEL then
+			return { title = title, level = levelText, detail = "เต็มแล้ว — พังด่านถัดไปเพื่อปลดล็อก", tone = "capped" }
+		end
+		return { title = title, level = levelText, detail = "MAX", tone = "max" }
+	end
+
+	local tone: Tone = if (payload.coins or 0) < cost then "poor" else "price"
+	return { title = title, level = levelText, detail = `฿{UiKit.formatShort(cost)}`, tone = tone }
+end
+
+--------------------------------------------------------------------------------
+-- ป้ายแต่ละอัน
+--------------------------------------------------------------------------------
+
+local function ownPenIndex(): number?
+	local value = Players.LocalPlayer:GetAttribute(Config.PEN_INDEX_ATTRIBUTE)
+	return if type(value) == "number" then value else nil
+end
+
+local function isOwn(sign: Sign): boolean
+	return sign.penIndex == nil or sign.penIndex == ownPenIndex()
+end
+
+-- หน้าป้ายที่หันไปทาง facing (แผ่นป้ายวางตรงแกนเสมอ — MapBuilder.buildMapSign)
+local function faceFor(facing: Vector3): Enum.NormalId
+	if facing.X > 0.5 then
+		return Enum.NormalId.Right
+	elseif facing.X < -0.5 then
+		return Enum.NormalId.Left
+	elseif facing.Z > 0.5 then
+		return Enum.NormalId.Back
+	end
+	return Enum.NormalId.Front
+end
+
+local function render()
+	for _, sign in signs do
+		local view = MapSigns.describe(sign.kind, lastPayload, isOwn(sign))
+		sign.titleLabel.Text = view.title
+		sign.levelLabel.Text = view.level
+		sign.levelLabel.Visible = view.level ~= ""
+		sign.detailLabel.Text = view.detail
+		sign.detailLabel.TextColor3 = TONE_COLORS[view.tone]
+	end
+end
+
+-- จุดกด E ติดเฉพาะป้ายที่กดได้ (ดาเมจ + ป้ายของคอกตัวเอง) · คอกคนอื่นไม่มีปุ่มให้กด
+local function syncPrompt(sign: Sign)
+	local wanted = isOwn(sign) and sign.board ~= nil
+	if wanted and not sign.prompt then
+		local prompt = Instance.new("ProximityPrompt")
+		prompt.Name = "UpgradePrompt"
+		prompt.ActionText = "อัปเกรด"
+		prompt.ObjectText = TITLES[sign.kind]
+		-- กดครั้งเดียวซื้อ 1 ขั้น · กดซ้ำได้ต่อเนื่อง (ไม่ต้องกดค้าง)
+		prompt.HoldDuration = 0
+		prompt.MaxActivationDistance = Config.MapDimensions.MapSign.PromptDistance
+		prompt.RequiresLineOfSight = false
+		prompt.Triggered:Connect(function()
+			actions.buy(sign.kind)
+		end)
+		prompt.Parent = sign.board
+		sign.prompt = prompt
+	elseif not wanted and sign.prompt then
+		sign.prompt:Destroy()
+		sign.prompt = nil
+	end
+end
+
+local function refreshOwnership()
+	for _, sign in signs do
+		syncPrompt(sign)
+	end
+	render()
+end
+
+local function createSign(parent: Instance, kind: SignKind, penIndex: number?, facing: Vector3): Sign
+	local name = Config.getMapSignName(kind, penIndex)
+
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = `Sign_{name}`
+	gui.ResetOnSpawn = false
+	gui.Face = faceFor(facing)
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = PIXELS_PER_STUD
+	gui.LightInfluence = 0
+	gui.MaxDistance = SIGN_GUI_MAX_DISTANCE
+	gui.ClipsDescendants = true
+
+	local titleLabel = UiKit.label({
+		Name = "Title",
+		Position = UDim2.fromScale(0.05, 0.05),
+		Size = UDim2.fromScale(0.9, 0.3),
+		FontFace = UiKit.FONT_HEAVY,
+	})
+	UiKit.textStroke(titleLabel, 2)
+	titleLabel.Parent = gui
+
+	local levelLabel = UiKit.label({
+		Name = "Level",
+		Position = UDim2.fromScale(0.05, 0.37),
+		Size = UDim2.fromScale(0.9, 0.26),
+		FontFace = UiKit.FONT_HEAVY_ITALIC,
+	})
+	UiKit.textStroke(levelLabel, 2)
+	levelLabel.Parent = gui
+
+	local detailLabel = UiKit.label({
+		Name = "Detail",
+		Position = UDim2.fromScale(0.05, 0.66),
+		Size = UDim2.fromScale(0.9, 0.29),
+		FontFace = UiKit.FONT_HEAVY,
+		TextWrapped = true,
+	})
+	UiKit.textStroke(detailLabel, 2)
+	detailLabel.Parent = gui
+
+	gui.Parent = parent
+
+	local sign: Sign = {
+		kind = kind,
+		penIndex = penIndex,
+		name = name,
+		gui = gui,
+		titleLabel = titleLabel,
+		levelLabel = levelLabel,
+		detailLabel = detailLabel,
+		board = nil,
+		prompt = nil,
+	}
+	table.insert(signs, sign)
+	return sign
+end
+
+-- ⚠️ แผ่นป้ายเป็นของ server — client รอให้ replicate มาก่อน (โมเดลป้ายตั้ง Persistent ไว้แล้ว
+-- ถ้าเปิด StreamingEnabled ก็ไม่ถูก stream ออก) · ไม่ yield ใน start()
+local function attachBoard(sign: Sign)
+	task.spawn(function()
+		local map = Workspace:WaitForChild("Map")
+		local folder = map and map:WaitForChild(Config.MAP_SIGN_FOLDER)
+		local model = folder and folder:WaitForChild(sign.name)
+		local board = model and model:WaitForChild("Board")
+		if board and board:IsA("BasePart") then
+			sign.board = board
+			sign.gui.Adornee = board
+			syncPrompt(sign)
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- ร้านขายแม่ — จุดกด E ที่เคาน์เตอร์แผงร้าน + เดินออกห่างแล้วปิดหน้าต่างเอง
+--------------------------------------------------------------------------------
+
+local function attachSellShop()
+	task.spawn(function()
+		local map = Workspace:WaitForChild("Map")
+		local shop = map and map:WaitForChild("Shop")
+		local stall = shop and shop:WaitForChild(`Stall{Config.MapDimensions.MapSign.SellStallIndex}`)
+		local counter = stall and stall:WaitForChild(SELL_COUNTER_NAME)
+		if not (counter and counter:IsA("BasePart")) then
+			return
+		end
+		local prompt = Instance.new("ProximityPrompt")
+		prompt.Name = "SellShopPrompt"
+		prompt.ActionText = "เปิดร้าน"
+		prompt.ObjectText = "ร้านขายแม่"
+		prompt.HoldDuration = 0
+		prompt.MaxActivationDistance = Config.MapDimensions.MapSign.SellPromptDistance
+		prompt.RequiresLineOfSight = false
+		prompt.Triggered:Connect(function()
+			actions.openSellShop()
+		end)
+		prompt.Parent = counter
+	end)
+end
+
+-- ⚠️ โพลระยะแทน Heartbeat — แค่ปิดหน้าต่าง ไม่ต้องละเอียดระดับเฟรม (แบบเดียวกับแผงจัดคิวปล่อย)
+local function watchSellDistance()
+	task.spawn(function()
+		local spot = Config.getSellShopSpot()
+		local limit = Config.MapDimensions.MapSign.SellCloseDistance
+		while true do
+			task.wait(CLOSE_POLL_SECONDS)
+			if actions.isSellShopOpen() then
+				local character = Players.LocalPlayer.Character
+				local root = character and character.PrimaryPart
+				local far = true
+				if root then
+					local offset = Vector3.new(root.Position.X - spot.X, 0, root.Position.Z - spot.Z)
+					far = offset.Magnitude > limit
+				end
+				if far then
+					actions.closeSellShop()
+				end
+			end
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- API
+--------------------------------------------------------------------------------
+
+-- parent = PlayerGui (SurfaceGui ต้องอยู่ใน PlayerGui ถึงจะรับข้อความรายคนได้)
+function MapSigns.start(parent: Instance, signActions: Actions)
+	actions = signActions
+
+	local _, damageFacing = Config.getDamageSignSpot()
+	createSign(parent, "damage", nil, damageFacing)
+	for index = 1, Config.World.MAX_PENS do
+		-- ⚠️ ต้องประกาศชนิดของ kind เอง — ไม่งั้น Luau ขยาย "speed" | "pen" เป็น string แล้วส่งเข้าฟังก์ชันไม่ได้
+		local kinds: { Config.PenSignKind } = Config.getPenSignKinds()
+		for kindIndex = 1, #kinds do
+			local kind: Config.PenSignKind = kinds[kindIndex]
+			local _, facing = Config.getPenUpgradeSignSpot(index, kind)
+			createSign(parent, kind, index, facing)
+		end
+	end
+	render()
+
+	for _, sign in signs do
+		attachBoard(sign)
+	end
+	attachSellShop()
+	watchSellDistance()
+
+	-- จองคอกเสร็จหลังเข้าเกม (หรือย้ายคอก) → ย้ายจุดกดไปป้ายของคอกใหม่
+	Players.LocalPlayer:GetAttributeChangedSignal(Config.PEN_INDEX_ATTRIBUTE):Connect(refreshOwnership)
+end
+
+-- ⚠️ เรียกทุก sync — ซื้อแล้ว server sync ทันที ป้ายจึงเปลี่ยนเลขทันที
+function MapSigns.setPayload(payload: any)
+	lastPayload = payload
+	render()
+end
+
+return MapSigns

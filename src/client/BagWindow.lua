@@ -19,7 +19,6 @@ local BagWindow = {}
 export type Actions = {
 	moveMother: (uid: string, target: string) -> (),
 	toggleLock: (uid: string) -> (),
-	sellMother: (uid: string) -> (),
 	sendToBattle: (mother: any) -> (),
 	placeEgg: (heldEggId: number) -> (),
 	notify: (text: string, ok: boolean) -> (),
@@ -421,8 +420,8 @@ local function renderMotherDetail(item: Item)
 				actions.moveMother(mother.uid, "bag")
 			end
 		)
-		-- ขาย/ส่งไปรบได้เฉพาะแม่ในกระเป๋า (กฎเดิม — กันขาย/ส่งตัวที่กำลังผลิต)
-		setDetailButton(3, nil, TEMP_COLOR, false, nil)
+		-- ส่งไปรบได้เฉพาะแม่ในกระเป๋า (กฎเดิม — กันส่งตัวที่กำลังผลิต)
+		setDetailButton(3, nil, BATTLE_COLOR, false, nil)
 		setDetailButton(4, nil, BATTLE_COLOR, false, nil)
 		return
 	end
@@ -438,27 +437,22 @@ local function renderMotherDetail(item: Item)
 		end
 	)
 
-	-- ⚠️ TEMP: ปุ่มขาย/ส่งไปรบอยู่ตรงนี้ชั่วคราว — ขายย้ายไปร้านหลังแมพใน UI-2 · ส่งไปรบย้ายไปแท่นอัญเชิญใน UI-3
-	local price = math.floor((mother.coinsPerMinute or 0) * Config.Balance.Economy.SELL_MOTHER_MINUTES)
+	-- ⚠️ TEMP: ปุ่มส่งไปรบอยู่ตรงนี้ชั่วคราว — ย้ายไปแท่นอัญเชิญใน UI-3
+	-- (ปุ่มขายย้ายไปร้านขายแม่หลังแมพแล้วใน UI-2 · SellWindow.lua)
+	setDetailButton(4, nil, BATTLE_COLOR, false, nil)
 	if locked then
-		setDetailButton(3, "ขายไม่ได้ — ล็อกอยู่ (TEMP)", TEMP_COLOR, false, function()
-			actions.notify(`แม่ตัวนี้ถูกล็อกไว้ ขายไม่ได้ — กด "🔓 ปลดล็อก" ก่อน`, false)
-		end)
-		setDetailButton(4, "ส่งไปรบไม่ได้ — ล็อกอยู่ (TEMP)", BATTLE_COLOR, false, function()
+		setDetailButton(3, "ส่งไปรบไม่ได้ — ล็อกอยู่ (TEMP)", BATTLE_COLOR, false, function()
 			actions.notify(`แม่ตัวนี้ถูกล็อกไว้ ส่งไปรบไม่ได้ — กด "🔓 ปลดล็อก" ก่อน`, false)
 		end)
 		return
 	end
-	setDetailButton(3, `ขาย ฿{UiKit.formatShort(price)} (TEMP)`, TEMP_COLOR, true, function()
-		actions.sellMother(mother.uid)
-	end)
 	if actions.isRosterFull() then
-		setDetailButton(4, "ส่งไปรบไม่ได้ — roster เต็ม (TEMP)", BATTLE_COLOR, false, function()
+		setDetailButton(3, "ส่งไปรบไม่ได้ — roster เต็ม (TEMP)", BATTLE_COLOR, false, function()
 			actions.notify("roster เต็มแล้ว", false)
 		end)
 	else
 		-- ปุ่มนี้**แค่เปิดกล่องยืนยันเดิม** (Phase 3C-2) ไม่ยิง remote ตรง ๆ
-		setDetailButton(4, "ส่งไปรบ (TEMP)", BATTLE_COLOR, true, function()
+		setDetailButton(3, "ส่งไปรบ (TEMP)", BATTLE_COLOR, true, function()
 			actions.sendToBattle(mother)
 		end)
 	end

@@ -141,6 +141,14 @@ function UiKit.formatShort(value: number): string
 	return sign .. text .. SHORT_SUFFIXES[tier]
 end
 
+-- 1234567 → "1,234,567" (จำนวนเต็มเต็มหลัก — ใช้ตอนต้องเทียบยอดเงินได้ตรงตัว เช่น ราคารวมที่ร้านขายแม่)
+function UiKit.formatComma(value: number): string
+	local sign = if value < 0 then "-" else ""
+	local digits = string.format("%d", math.abs(math.floor(value)))
+	local grouped = string.reverse((string.gsub(string.reverse(digits), "(%d%d%d)", "%1,")))
+	return sign .. (string.gsub(grouped, "^,", ""))
+end
+
 -- วินาที → "2h 23m" · "5m 03s" · "45s"
 function UiKit.formatDuration(seconds: number): string
 	local total = math.max(0, math.ceil(seconds))

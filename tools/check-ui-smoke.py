@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Smoke test ของ UI ฝั่ง client (UI-1): Hotbar · BagWindow · SidePanels · UiKit
+"""Smoke test ของ UI ฝั่ง client (UI-1 · UI-2): Hotbar · BagWindow · SidePanels · UiKit · SellWindow · MapSigns
 
     python3 tools/check-ui-smoke.py
 
@@ -17,7 +17,7 @@ LUAU = os.environ.get('LUAU') or shutil.which('luau')
 if not LUAU:
     sys.exit('หา luau CLI ไม่เจอ — ติดตั้งแล้วใส่ใน PATH หรือสั่ง LUAU=/path/to/luau python3 ...')
 
-MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels']
+MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns']
 
 MOCK = r'''--!nocheck
 local Config = require("./src/shared/Config")
@@ -112,8 +112,10 @@ local function newInstance(className)
 		__props = { Name = className },
 		__children = {},
 		__attrs = {},
+		__attrSignals = {},
 		__propSignals = {},
 		Activated = newSignal(),
+		Triggered = newSignal(), -- ProximityPrompt
 	}
 	return setmetatable(object, InstanceMeta)
 end
@@ -180,6 +182,9 @@ function Methods.IsA(self, className)
 		return own == "Frame" or own == "TextLabel" or own == "TextButton" or own == "TextBox"
 			or own == "ScrollingFrame" or own == "ViewportFrame"
 	end
+	if className == "BasePart" then
+		return own == "Part"
+	end
 	return false
 end
 function Methods.Destroy(self)
@@ -193,6 +198,15 @@ function Methods.GetPropertyChangedSignal(self, prop)
 end
 function Methods.SetAttribute(self, name, value)
 	rawget(self, "__attrs")[name] = value
+	local signal = rawget(self, "__attrSignals")[name]
+	if signal then
+		signal:Fire()
+	end
+end
+function Methods.GetAttributeChangedSignal(self, name)
+	local signals = rawget(self, "__attrSignals")
+	signals[name] = signals[name] or newSignal()
+	return signals[name]
 end
 function Methods.GetAttribute(self, name)
 	return rawget(self, "__attrs")[name]
@@ -222,10 +236,14 @@ end
 --------------------------------------------------------------------------------
 local camera = newInstance("Camera")
 camera.ViewportSize = Vector2.new(1920, 1080)
+local workspaceMock = newInstance("Workspace")
+workspaceMock.CurrentCamera = camera
+local localPlayer = newInstance("Player")
 local services = {
 	UserInputService = { TouchEnabled = false, KeyboardEnabled = true, InputBegan = newSignal() },
-	Workspace = { CurrentCamera = camera },
+	Workspace = workspaceMock,
 	ReplicatedStorage = newInstance("ReplicatedStorage"),
+	Players = { LocalPlayer = localPlayer },
 }
 local sharedFolder = newInstance("Folder")
 sharedFolder.Name = "Shared"
@@ -324,6 +342,8 @@ local function mother(uid, charId, weight, locked, cpm)
 		weightText = Config.formatWeight(weight),
 		locked = locked,
 		coinsPerMinute = cpm,
+		-- ⚠️ ราคาขายมาจาก server (Config.getMotherSellPrice) — ในเทสต์ตั้ง 30 × cpm ให้คิดยอดรวมง่าย
+		sellPrice = cpm * 30,
 	}
 end
 
@@ -364,7 +384,11 @@ local function makePayload()
 		battleRoster = {},
 		coins = 12345,
 		speedLevel = 2,
+		speedUpgradeCost = 100000,
 		damageLevel = 7,
+		damageUpgradeCost = 5000,
+		penLevel = 3,
+		penUpgradeCost = 10000,
 	}
 end
 
@@ -415,7 +439,6 @@ do
 	BagWindow.create(gui, {
 		moveMother = record("moveMother"),
 		toggleLock = record("toggleLock"),
-		sellMother = record("sellMother"),
 		sendToBattle = record("sendToBattle"),
 		placeEgg = record("placeEgg"),
 		notify = record("notify"),
@@ -470,19 +493,27 @@ do
 	check("  ปุ่มย้ายเข้าคอก (คอกไม่เต็ม)", findDescendant(detail, "Action2").Text, "ย้ายเข้าคอก")
 	findDescendant(detail, "Action2").Activated:Fire()
 	check("  กดย้าย → moveMother(uid, pen)", lastCall().name == "moveMother" and lastCall().args[2] == "pen", true)
-	check("  ปุ่มขาย TEMP มีราคา", string.find(findDescendant(detail, "Action3").Text, "TEMP", 1, true) ~= nil)
-	findDescendant(detail, "Action4").Activated:Fire()
+	-- UI-2: ปุ่มขาย (TEMP) ย้ายไปร้านขายแม่หลังแมพแล้ว → ส่งไปรบขยับขึ้นมาช่อง 3
+	local anySell = false
+	for index = 1, 4 do
+		local button = findDescendant(detail, `Action{index}`)
+		if button.Visible and string.find(button.Text, "ขาย", 1, true) then
+			anySell = true
+		end
+	end
+	check("  ไม่มีปุ่มขายในหน้ารายละเอียดแล้ว (UI-2)", anySell, false)
+	check("  ปุ่ม 3 = ส่งไปรบ (TEMP)", findDescendant(detail, "Action3").Text, "ส่งไปรบ (TEMP)")
+	check("  ปุ่ม 4 ซ่อน", findDescendant(detail, "Action4").Visible, false)
+	findDescendant(detail, "Action3").Activated:Fire()
 	check("  ส่งไปรบ → เปิดกล่องยืนยัน (sendToBattle ได้ตัวแม่)", lastCall().name == "sendToBattle" and lastCall().args[1].uid == "1-123", true)
 
-	-- แม่ในกระเป๋าที่ล็อก → ปุ่มขาย/ส่งรบถูกปิด กดแล้วแค่แจ้งเตือน
+	-- แม่ในกระเป๋าที่ล็อก → ปุ่มส่งรบถูกปิด กดแล้วแค่แจ้งเตือน
 	payload.mothersInBag[23].locked = true
 	BagWindow.setPayload(payload)
-	check("ล็อกแล้ว: ปุ่มขายถูกปิด", findDescendant(detail, "Action3").AutoButtonColor, false)
+	check("ล็อกแล้ว: ปุ่มส่งรบถูกปิด", findDescendant(detail, "Action3").AutoButtonColor, false)
 	local before = #calls
 	findDescendant(detail, "Action3").Activated:Fire()
-	check("  กดขายตอนล็อก → notify ไม่ใช่ sellMother", lastCall().name == "notify" and #calls == before + 1, true)
-	findDescendant(detail, "Action4").Activated:Fire()
-	check("  กดส่งรบตอนล็อก → notify", lastCall().name, "notify")
+	check("  กดส่งรบตอนล็อก → notify ไม่ใช่ sendToBattle", lastCall().name == "notify" and #calls == before + 1, true)
 	payload.mothersInBag[23].locked = false
 
 	-- คอกเต็ม → ปุ่มย้ายเข้าคอกถูกปิด
@@ -504,8 +535,8 @@ do
 	check("ปุ่มย้ายออกจากคอก", findDescendant(detail, "Action2").Text, "ย้ายออกจากคอก → กระเป๋า")
 	findDescendant(detail, "Action2").Activated:Fire()
 	check("  → moveMother(uid, bag)", lastCall().name == "moveMother" and lastCall().args[1] == "1-1" and lastCall().args[2] == "bag", true)
-	check("  ไม่มีปุ่มขาย", findDescendant(detail, "Action3").Visible, false)
-	check("  ไม่มีปุ่มส่งรบ", findDescendant(detail, "Action4").Visible, false)
+	check("  ไม่มีปุ่มส่งรบ", findDescendant(detail, "Action3").Visible, false)
+	check("  ไม่มีปุ่มที่ 4", findDescendant(detail, "Action4").Visible, false)
 end
 
 print("\n━━ BagWindow: แท็บไข่ (สแต็คตามชนิด+น้ำหนัก) ━━")
@@ -619,6 +650,275 @@ do
 	check("formatDuration 8580 → 2h 23m", UiKit.formatDuration(8580), "2h 23m")
 	check("formatDuration 303 → 5m 03s", UiKit.formatDuration(303), "5m 03s")
 	check("formatDuration 45 → 45s", UiKit.formatDuration(45), "45s")
+	check("formatComma 1234567 → 1,234,567", UiKit.formatComma(1234567), "1,234,567")
+	check("formatComma 950 → 950", UiKit.formatComma(950), "950")
+	check("formatComma 100000 → 100,000", UiKit.formatComma(100000), "100,000")
+end
+
+print("\n━━ SellWindow: ร้านขายแม่ (UI-2) ━━")
+do
+	local SellWindow = loaded.SellWindow
+	local shopPayload = makePayload()
+	SellWindow.create(gui, { sellMother = record("sellMother"), notify = record("notify") })
+	check("setPayload ตอนหน้าต่างปิดไม่ error", pcall(SellWindow.setPayload, shopPayload))
+	check("เปิดหน้าต่างไม่ error", pcall(SellWindow.open))
+	check("isOpen", SellWindow.isOpen())
+
+	local sellWindow = findDescendant(gui, "SellWindow")
+	local sellGrid = findDescendant(sellWindow, "Grid")
+	local sellButton = findDescendant(sellWindow, "Sell")
+	local selectAll = findDescendant(sellWindow, "SelectAll")
+	local confirm = findDescendant(sellWindow, "Confirm")
+	local function cards()
+		local list = {}
+		for _, child in sellGrid:GetChildren() do
+			if child.Name == "Card" and child.Visible then
+				table.insert(list, child)
+			end
+		end
+		return list
+	end
+	local function sellCalls(fromIndex)
+		local uids = {}
+		for index = fromIndex + 1, #calls do
+			if calls[index].name == "sellMother" then
+				table.insert(uids, calls[index].args[1])
+			end
+		end
+		return uids
+	end
+
+	-- ขายได้เฉพาะแม่ในกระเป๋า — แม่ในคอก (ซุนหงอคง/ม้า) ไม่ขึ้นเลย
+	local penShown = false
+	for _, card in cards() do
+		if string.find(findDescendant(card, "NameLabel").Text, "ซุนหงอคง", 1, true) then
+			penShown = true
+		end
+	end
+	check("แม่ในคอกไม่ขึ้นในร้าน", penShown, false)
+	check("ไม่สร้างการ์ดครบ 23 ใบพร้อมกัน (virtual grid)", #sellGrid:GetChildren() < 23)
+	-- เรียง: ที่ไม่ล็อกก่อน · ถูกก่อน → ใบแรก = 1-102 (ราคา 60)
+	local list = cards()
+	check("การ์ดแรก = ถูกสุดที่ไม่ล็อก · ราคาใต้การ์ด ฿60", findDescendant(list[1], "PriceLabel").Text, "฿60")
+	check("ยังไม่เลือก → ปุ่มขายถูกปิด", sellButton.AutoButtonColor, false)
+
+	-- ติ๊ก 3 ใบแล้วเอาใบกลางออก → เหลือ 1-102 (60) + 1-104 (120)
+	list[1].Activated:Fire()
+	list[2].Activated:Fire()
+	list[3].Activated:Fire()
+	check("ติ๊ก 3 ใบ → เครื่องหมาย ✓ บนการ์ด", findDescendant(cards()[2], "CheckBadge").Visible, true)
+	cards()[2].Activated:Fire()
+	check("กดซ้ำ = เอาออก", findDescendant(cards()[2], "CheckBadge").Visible, false)
+	local count, total, uids = SellWindow.getSelection()
+	check("เลือก 2 ตัว", count, 2)
+	check("ยอดรวม = 60 + 120", total, 180)
+	check("ปุ่มขายบอกจำนวน + ยอดรวม", sellButton.Text, "ขายที่เลือก (2 ตัว · รวม ฿180)")
+
+	-- แม่ที่ล็อก (1-101) อยู่ท้ายลิสต์ → เลื่อนลงไปหา
+	sellGrid.CanvasPosition = Vector2.new(0, 10000)
+	local lockedCard = nil
+	for _, card in cards() do
+		if findDescendant(card, "LockBadge").Visible then
+			lockedCard = card
+		end
+	end
+	check("แม่ที่ล็อกมี 🔒 + ทาเทา", lockedCard ~= nil and findDescendant(lockedCard, "LockShade").Visible == true, true)
+	local before = #calls
+	lockedCard.Activated:Fire()
+	check("  กดแม่ที่ล็อก → แจ้งเตือน ไม่ถูกติ๊ก", lastCall().name == "notify" and #calls == before + 1, true)
+	check("  จำนวนที่เลือกยังเท่าเดิม", (SellWindow.getSelection()), 2)
+	sellGrid.CanvasPosition = Vector2.zero
+
+	-- ขาย → กล่องยืนยัน → ยกเลิก = ไม่ยิงอะไร
+	before = #calls
+	sellButton.Activated:Fire()
+	check("กดขาย → กล่องยืนยันขึ้น", confirm.Visible, true)
+	local confirmText = findDescendant(confirm, "Text").Text
+	check("  กล่องบอกจำนวน + ยอดรวม", string.find(confirmText, "ขายแม่ 2 ตัว", 1, true) ~= nil
+		and string.find(confirmText, "฿180", 1, true) ~= nil, true)
+	findDescendant(confirm, "ConfirmCancel").Activated:Fire()
+	check("  ยกเลิก → กล่องปิด ไม่ยิง remote", confirm.Visible == false and #sellCalls(before) == 0, true)
+	check("  ยกเลิกแล้วที่ติ๊กไว้ยังอยู่", (SellWindow.getSelection()), 2)
+
+	-- ยืนยัน → ยิง remote ขายด้วย uid ที่เลือกเท่านั้น (ทีละตัว)
+	sellButton.Activated:Fire()
+	findDescendant(confirm, "ConfirmSell").Activated:Fire()
+	local sold = sellCalls(before)
+	check("ยืนยัน → ยิงขาย 2 ครั้ง", #sold, 2)
+	check("  uid ตรงกับที่เลือกเท่านั้น", sold[1] == "1-102" and sold[2] == "1-104", true)
+	check("  ขายแล้วล้างที่เลือก", (SellWindow.getSelection()), 0)
+
+	-- เลือกทั้งหมดที่ไม่ได้ล็อก → 22 ตัว · ตัวที่ล็อกไม่ติด
+	selectAll.Activated:Fire()
+	count, total, uids = SellWindow.getSelection()
+	local hasLocked = false
+	for _, uid in uids do
+		if uid == "1-101" then
+			hasLocked = true
+		end
+	end
+	check("เลือกทั้งหมดที่ไม่ได้ล็อก → 22 ตัว", count, 22)
+	check("  ไม่มีตัวที่ล็อก", hasLocked, false)
+	check("  ยอดรวม = 30 × (2 + … + 23)", total, 8250)
+	check("  ปุ่มขายโชว์ยอดรวมเต็มหลัก", sellButton.Text, "ขายที่เลือก (22 ตัว · รวม ฿8,250)")
+	check("  ปุ่มกลายเป็นยกเลิกทั้งหมด", selectAll.Text, "ยกเลิกที่เลือกทั้งหมด")
+
+	-- sync ใหม่: ตัวที่เลือกถูกขาย/ล็อกจากที่อื่น → หลุดจากที่เลือกเอง
+	table.remove(shopPayload.mothersInBag, 2) -- 1-102
+	shopPayload.mothersInBag[2].locked = true -- 1-103
+	SellWindow.setPayload(shopPayload)
+	count = SellWindow.getSelection()
+	check("sync: ตัวที่หายไป/ถูกล็อกหลุดจากที่เลือก", count, 20)
+	selectAll.Activated:Fire()
+	check("กดอีกครั้ง → ยกเลิกทั้งหมด", (SellWindow.getSelection()), 0)
+
+	-- เลือกไว้แล้วปิดหน้าต่าง → เปิดใหม่เริ่มจากว่าง
+	cards()[1].Activated:Fire()
+	SellWindow.close()
+	check("ปิดหน้าต่าง", SellWindow.isOpen(), false)
+	SellWindow.open()
+	check("เปิดใหม่ → ไม่มีที่ค้างเลือก", (SellWindow.getSelection()), 0)
+	SellWindow.close()
+
+	-- กระเป๋าว่าง → ข้อความแนะนำ · ปุ่มถูกปิด
+	shopPayload.mothersInBag = {}
+	SellWindow.setPayload(shopPayload)
+	SellWindow.open()
+	check("กระเป๋าว่าง → ข้อความแนะนำ", findDescendant(sellWindow, "Empty").Visible, true)
+	check("  ปุ่มเลือกทั้งหมดถูกปิด", selectAll.AutoButtonColor, false)
+	SellWindow.close()
+end
+
+print("\n━━ MapSigns: ข้อความบนป้าย (ค่าของผู้เล่นที่มองอยู่) ━━")
+do
+	local MapSigns = loaded.MapSigns
+	local p = makePayload()
+	local view = MapSigns.describe("damage", p, true)
+	check("ดาเมจ: Lv. 7", view.level, "Lv. 7")
+	check("  ราคาขั้นถัดไป ฿5K · เงินพอ = สีปกติ", view.detail == "฿5K" and view.tone == "price", true)
+	view = MapSigns.describe("speed", p, true)
+	check("ความเร็ว: เงินไม่พอ → ราคาสีแดง", view.detail == "฿100K" and view.tone == "poor", true)
+	view = MapSigns.describe("pen", p, true)
+	check("อัปคอก: Lv. 3 · ฿10K", view.level == "Lv. 3" and view.detail == "฿10K", true)
+	p.damageUpgradeCost = nil
+	p.damageLevel = 16
+	view = MapSigns.describe("damage", p, true)
+	check("ดาเมจชนเพดานด่าน → เต็มแล้ว — พังด่านถัดไป", view.detail, "เต็มแล้ว — พังด่านถัดไปเพื่อปลดล็อก")
+	p.damageLevel = Config.Balance.DamageUpgrade.MAX_LEVEL
+	check("ดาเมจครบทั้งเกม → MAX", MapSigns.describe("damage", p, true).detail, "MAX")
+	p.speedUpgradeCost = nil
+	check("ความเร็วสุดทาง → MAX", MapSigns.describe("speed", p, true).detail, "MAX")
+	p.penUpgradeCost = nil
+	check("คอกสุดทาง → MAX", MapSigns.describe("pen", p, true).detail, "MAX")
+	view = MapSigns.describe("pen", makePayload(), false)
+	check("ป้ายคอกคนอื่น → ไม่โชว์เลข", view.level == "" and view.detail == "กดได้ที่คอกของตัวเอง", true)
+	check("ยังไม่มี sync → กำลังโหลด", MapSigns.describe("speed", nil, true).detail, "กำลังโหลด...")
+end
+
+print("\n━━ MapSigns: ติดป้าย + จุดกด E เฉพาะคอกตัวเอง ━━")
+do
+	local MapSigns = loaded.MapSigns
+	-- แมพจำลองตามชื่อที่ MapBuilder ตั้ง (Config.getMapSignName)
+	local map = newInstance("Folder")
+	map.Name = "Map"
+	map.Parent = workspaceMock
+	local signFolder = newInstance("Folder")
+	signFolder.Name = Config.MAP_SIGN_FOLDER
+	signFolder.Parent = map
+	local boards = {}
+	local function addSign(name)
+		local model = newInstance("Model")
+		model.Name = name
+		model.Parent = signFolder
+		local board = newInstance("Part")
+		board.Name = "Board"
+		board.Parent = model
+		boards[name] = board
+	end
+	addSign(Config.getMapSignName("damage"))
+	for index = 1, Config.World.MAX_PENS do
+		addSign(Config.getMapSignName("speed", index))
+		addSign(Config.getMapSignName("pen", index))
+	end
+	local shopFolder = newInstance("Folder")
+	shopFolder.Name = "Shop"
+	shopFolder.Parent = map
+	local stall = newInstance("Model")
+	stall.Name = `Stall{Config.MapDimensions.MapSign.SellStallIndex}`
+	stall.Parent = shopFolder
+	local counter = newInstance("Part")
+	counter.Name = "Counter"
+	counter.Parent = stall
+
+	localPlayer:SetAttribute(Config.PEN_INDEX_ATTRIBUTE, 2)
+	local playerGui = newInstance("PlayerGui")
+	local shopOpen = false
+	local signActions = {
+		buy = record("buy"),
+		openSellShop = function()
+			shopOpen = true
+		end,
+		closeSellShop = record("closeSellShop"),
+		isSellShopOpen = function()
+			return shopOpen
+		end,
+	}
+	-- ⚠️ task.spawn ของจริงรันทีหลัง — ในเทสต์รันทันที (WaitForChild ปลอม = หาเจอเลย)
+	-- ลูปวัดระยะร้านหยุดที่ task.wait ครั้งแรก (โยน error ให้ pcall จับ) ไม่งั้นวนไม่จบ
+	local realSpawn, realWait = __env.task.spawn, __env.task.wait
+	__env.task.spawn = function(fn, ...)
+		pcall(fn, ...)
+	end
+	__env.task.wait = function()
+		error("หยุดลูปในเทสต์")
+	end
+	local ok, err = pcall(MapSigns.start, playerGui, signActions)
+	__env.task.spawn, __env.task.wait = realSpawn, realWait
+	check(`start ไม่ error {if ok then "" else tostring(err)}`, ok)
+
+	local guis = 0
+	for _, child in playerGui:GetChildren() do
+		if child.__class == "SurfaceGui" then
+			guis += 1
+		end
+	end
+	check("SurfaceGui 1 + 2 × คอก = 13 อัน (อยู่ใน PlayerGui)", guis, 1 + 2 * Config.World.MAX_PENS)
+	local ownGui = findDescendant(playerGui, `Sign_{Config.getMapSignName("speed", 2)}`)
+	check("SurfaceGui ชี้ Adornee ไปที่แผ่นป้าย", ownGui.Adornee == boards[Config.getMapSignName("speed", 2)], true)
+
+	local function promptOn(name)
+		return findDescendant(boards[name], "UpgradePrompt")
+	end
+	check("ป้ายดาเมจมีจุดกด E", promptOn(Config.getMapSignName("damage")) ~= nil)
+	check("ป้ายค่าวิ่งคอกตัวเอง (2) มีจุดกด", promptOn(Config.getMapSignName("speed", 2)) ~= nil)
+	check("ป้ายอัปคอกคอกตัวเอง (2) มีจุดกด", promptOn(Config.getMapSignName("pen", 2)) ~= nil)
+	check("ป้ายคอกคนอื่น (1) ไม่มีจุดกด", promptOn(Config.getMapSignName("speed", 1)) == nil
+		and promptOn(Config.getMapSignName("pen", 1)) == nil, true)
+	local prompt = promptOn(Config.getMapSignName("speed", 2))
+	check("  กดครั้งเดียวซื้อ (ไม่ต้องกดค้าง)", prompt.HoldDuration, 0)
+	check("  ข้อความปุ่ม \"อัปเกรด\"", prompt.ActionText, "อัปเกรด")
+	prompt.Triggered:Fire(localPlayer)
+	check("  กด E → buy(speed)", lastCall().name == "buy" and lastCall().args[1] == "speed", true)
+	promptOn(Config.getMapSignName("damage")).Triggered:Fire(localPlayer)
+	check("  ป้ายดาเมจ → buy(damage)", lastCall().args[1], "damage")
+	promptOn(Config.getMapSignName("pen", 2)).Triggered:Fire(localPlayer)
+	check("  ป้ายอัปคอก → buy(pen)", lastCall().args[1], "pen")
+
+	local p = makePayload()
+	MapSigns.setPayload(p)
+	check("ป้ายตัวเองโชว์เลเวลของตัวเอง", findDescendant(ownGui, "Level").Text, "Lv. 2")
+	local otherGui = findDescendant(playerGui, `Sign_{Config.getMapSignName("speed", 1)}`)
+	check("ป้ายคอกคนอื่นไม่โชว์เลข", findDescendant(otherGui, "Detail").Text, "กดได้ที่คอกของตัวเอง")
+
+	-- ย้ายคอก (จองใหม่) → จุดกดย้ายตาม
+	localPlayer:SetAttribute(Config.PEN_INDEX_ATTRIBUTE, 5)
+	check("ย้ายเป็นคอก 5 → ป้ายคอก 2 ไม่มีจุดกดแล้ว", promptOn(Config.getMapSignName("speed", 2)) == nil, true)
+	check("  ป้ายคอก 5 มีจุดกด", promptOn(Config.getMapSignName("pen", 5)) ~= nil)
+
+	local sellPrompt = findDescendant(counter, "SellShopPrompt")
+	check("แผงร้านขายแม่มีจุดกด E", sellPrompt ~= nil)
+	sellPrompt.Triggered:Fire(localPlayer)
+	check("  กด E → เปิดร้าน", shopOpen, true)
 end
 
 print(string.format("\n=== ผ่าน %d / ตก %d ===", passCount, failCount))

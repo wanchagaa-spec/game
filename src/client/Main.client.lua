@@ -5,11 +5,13 @@
 --   Hotbar     — ช่องถือของล่างจอ (มือถือ 5 · PC 10)
 --   BagWindow  — หน้าต่างกระเป๋า 3 แท็บ (สัตว์เลี้ยง · ไข่ · ไอเทม) + หน้ารายละเอียด
 --   SidePanels — ปุ่มขวา (ไข่ / เท้า) + แผงไข่ที่กำลังฟัก / แม่ในคอก
+--   MapSigns   — UI-2: ป้ายอัปดาเมจ/ค่าวิ่ง/อัปคอกบนแมพ (กด E) + จุดเปิดร้านขายแม่
+--   SellWindow — UI-2: หน้าต่างร้านขายแม่ (ติ๊กหลายตัว + กล่องยืนยันครั้งเดียว)
 --   ที่เหลืออยู่ในไฟล์นี้: ปุ่มกระเป๋าแถบบน · ปุ่มร้านค้า/ดัชนี ("เร็วๆ นี้") · เลเวลมุมล่างซ้าย ·
 --   ข้อความแจ้งผล (toast) · HUD การรบ · แผง TEMP · กล่องยืนยันส่งรบ · แผงจัดคิวปล่อย · popup ผ่านด่าน
 --
 -- ⚠️ แผง TEMP = ของเดิมที่ของใหม่จะมาแทนในรอบหลัง (ห้ามลบก่อน ไม่งั้นผู้เล่นใช้ฟีเจอร์นั้นไม่ได้ระหว่างรอบ)
---   อัปคอก/ดาเมจ/ความเร็ว → ป้ายบนแมพ (UI-2) · อัญเชิญ/กองลูก → แท่นอัญเชิญ (UI-3)
+--   อัญเชิญ/กองลูก → แท่นอัญเชิญ (UI-3) · (อัปคอก/ดาเมจ/ความเร็ว ย้ายไปป้ายบนแมพแล้วใน UI-2)
 --
 -- client ไม่ตัดสินอะไรเองเลย: กดปุ่ม = ส่งคำขอไป server แล้วรอฟังผลกลับมา
 -- ตัวเลขที่เห็นบนจอเป็นค่าที่ server ส่งมา (นับถอยหลังเวลาฟักเองระหว่างรอบ sync เท่านั้น)
@@ -35,6 +37,9 @@ local UiKit = require(script.Parent:WaitForChild("UiKit"))
 local Hotbar = require(script.Parent:WaitForChild("Hotbar"))
 local BagWindow = require(script.Parent:WaitForChild("BagWindow"))
 local SidePanels = require(script.Parent:WaitForChild("SidePanels"))
+-- UI-2
+local MapSigns = require(script.Parent:WaitForChild("MapSigns"))
+local SellWindow = require(script.Parent:WaitForChild("SellWindow"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -52,7 +57,7 @@ local actionResult = Remotes.waitFor(Config.RemoteNames.ACTION_RESULT)
 -- ⚠️ Phase 3B-1: สองตัวนี้สร้างไว้แล้วตั้งแต่ 3A (CombatService) — ต่อ UI จริงตอนนี้
 local setReleaseOrderRequest = Remotes.waitFor(Config.RemoteNames.SET_RELEASE_ORDER_REQUEST)
 local setSummonEnabledRequest = Remotes.waitFor(Config.RemoteNames.SET_SUMMON_ENABLED_REQUEST)
--- ⚠️ ปุ่มติดตัว 2 ปุ่ม (damage/ความเร็ว) — ไม่มีแท่นวาปแล้ว จึงต้องกดซื้อได้จากทุกที่ ไม่ต้องเดินมาร้าน
+-- ⚠️ UI-2: ซื้อดาเมจ/ความเร็ว/อัปคอก ยิงจากป้ายบนแมพ (MapSigns · กด E) — remote เดิม server ตรวจเหมือนเดิม
 local buyDamageUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_DAMAGE_UPGRADE_REQUEST)
 local buySpeedUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_SPEED_UPGRADE_REQUEST)
 -- ⚠️ Phase 3C-2: ส่งแม่ในกระเป๋าลง battleRoster (3C-1) — ยิงได้**หลังกดยืนยันในกล่องเท่านั้น**
@@ -631,7 +636,7 @@ end
 --------------------------------------------------------------------------------
 -- แผง TEMP — ของเดิมที่ของใหม่จะมาแทนในรอบหลัง (docs/ui-overhaul-plan.md §2)
 --------------------------------------------------------------------------------
--- อัปคอก / ดาเมจ / ความเร็ว → ป้ายบนแมพ (UI-2) · อัญเชิญ + กองลูก → แท่นอัญเชิญ (UI-3)
+-- อัญเชิญ + กองลูก → แท่นอัญเชิญ (UI-3) · (อัปคอก/ดาเมจ/ความเร็ว ย้ายไปป้ายบนแมพแล้วใน UI-2 · MapSigns)
 -- ⚠️ ขนาดเป็น pixel ตายตัวภายในแผง (ของชั่วคราว ไม่ได้ทำตามต้นแบบ) — แผงเลื่อนได้
 
 local TEMP_ROW_HEIGHT = 30
@@ -651,7 +656,7 @@ tempPanel.Parent = hud
 local tempTitle = UiKit.label({
 	Position = UDim2.new(0, 10, 0, 6),
 	Size = UDim2.new(1, -54, 0, 26),
-	Text = "🛠 TEMP — ย้ายไปป้าย/แท่นบนแมพใน UI-2 / UI-3",
+	Text = "🛠 TEMP — ย้ายไปแท่นอัญเชิญใน UI-3",
 	TextXAlignment = Enum.TextXAlignment.Left,
 	TextColor3 = TEMP_COLOR,
 	FontFace = UiKit.FONT_HEAVY,
@@ -723,9 +728,6 @@ local function setTempButton(button: TextButton, text: string, enabled: boolean,
 	button.BackgroundColor3 = if enabled then (color or ACCENT) else DISABLED_ACTION_COLOR
 end
 
-local upgradePenButton = makeTempButton(1)
-local buyDamageUpgradeButton = makeTempButton(2)
-local buySpeedUpgradeButton = makeTempButton(3)
 local autoPauseLabel = makeTempText(4, ERROR_COLOR)
 local summonButton = makeTempButton(5)
 local stacksHeader = makeTempText(6, FG)
@@ -733,36 +735,11 @@ local stacksLabel = makeTempText(7, DIM)
 local releaseHint = makeTempText(8, DIM)
 releaseHint.Text = "จัดคิวปล่อยทหาร: เดินไปที่จุดปล่อยทหารต้นเลน แผงจะขึ้นเอง"
 
--- ⚠️ เพดานเป็น nil = เต็มแล้ว (penUpgradeCost / damageUpgradeCost / speedUpgradeCost)
 local function updateTempPanel()
 	if not lastPayload or not tempPanel.Visible then
 		return
 	end
 	local payload = lastPayload
-
-	if payload.penUpgradeCost then
-		setTempButton(
-			upgradePenButton,
-			`อัปเกรดคอก Lv{payload.penLevel} → Lv{payload.penLevel + 1} (฿{formatCommaNumber(payload.penUpgradeCost)})`,
-			true
-		)
-	else
-		setTempButton(upgradePenButton, `คอก Lv{payload.penLevel} (เต็มเพดานแล้ว)`, false)
-	end
-
-	local damageText = `⚔ ดาเมจ ×{string.format("%.2f", payload.damageMultiplier)} ({payload.damageLevel}/{payload.maxDamageLevel})`
-	if payload.damageUpgradeCost then
-		setTempButton(buyDamageUpgradeButton, `{damageText} · ฿{formatCommaNumber(payload.damageUpgradeCost)}`, true)
-	else
-		setTempButton(buyDamageUpgradeButton, `{damageText} · เต็มเพดานด่านนี้`, false)
-	end
-
-	local speedText = `👟 ความเร็ว {math.floor(payload.walkSpeed)} ({payload.speedLevel}/{payload.maxSpeedLevel})`
-	if payload.speedUpgradeCost then
-		setTempButton(buySpeedUpgradeButton, `{speedText} · ฿{formatCommaNumber(payload.speedUpgradeCost)}`, true)
-	else
-		setTempButton(buySpeedUpgradeButton, `{speedText} · เต็มเพดานแล้ว`, false)
-	end
 
 	autoPauseLabel.Text = if payload.combatAutoPaused
 		then "⚠️ ตีไม่เข้า — หยุดปล่อยอัตโนมัติ กดเปิดอัญเชิญใหม่เมื่อพร้อม"
@@ -788,15 +765,6 @@ local function updateTempPanel()
 		else "(ยังไม่มีลูก — ต้องมีแม่ในคอกก่อนถึงจะเริ่มผลิต)"
 end
 
-upgradePenButton.Activated:Connect(function()
-	upgradePenRequest:FireServer()
-end)
-buyDamageUpgradeButton.Activated:Connect(function()
-	buyDamageUpgradeRequest:FireServer()
-end)
-buySpeedUpgradeButton.Activated:Connect(function()
-	buySpeedUpgradeRequest:FireServer()
-end)
 summonButton.Activated:Connect(function()
 	if lastPayload then
 		setSummonEnabledRequest:FireServer(not lastPayload.summonEnabled)
@@ -857,16 +825,18 @@ UiKit.corner(comingSoonClose, UDim.new(0.25, 0))
 comingSoonClose.Parent = comingSoon
 
 --------------------------------------------------------------------------------
--- จัดการหน้าต่างกลางจอ — เปิดได้ทีละอัน (กระเป๋า · ร้านค้า · ดัชนี · TEMP)
+-- จัดการหน้าต่างกลางจอ — เปิดได้ทีละอัน (กระเป๋า · ร้านค้า · ดัชนี · TEMP · ร้านขายแม่)
 --------------------------------------------------------------------------------
 
-type WindowName = "bag" | "shop" | "index" | "temp"
+type WindowName = "bag" | "shop" | "index" | "temp" | "sell"
 
 local comingSoonKind: WindowName? = nil
 
 local function isWindowOpen(name: WindowName): boolean
 	if name == "bag" then
 		return BagWindow.isOpen()
+	elseif name == "sell" then
+		return SellWindow.isOpen()
 	elseif name == "temp" then
 		return tempPanel.Visible
 	end
@@ -875,6 +845,7 @@ end
 
 local function closeAllWindows()
 	BagWindow.close()
+	SellWindow.close()
 	tempPanel.Visible = false
 	comingSoon.Visible = false
 	comingSoonKind = nil
@@ -889,6 +860,8 @@ local function toggleWindow(name: WindowName)
 	end
 	if name == "bag" then
 		BagWindow.open()
+	elseif name == "sell" then
+		SellWindow.open()
 	elseif name == "temp" then
 		tempPanel.Visible = true
 		updateTempPanel()
@@ -1033,9 +1006,6 @@ BagWindow.create(hud, {
 	toggleLock = function(uid: string)
 		toggleMotherLockRequest:FireServer(uid)
 	end,
-	sellMother = function(uid: string)
-		sellMotherRequest:FireServer(uid)
-	end,
 	sendToBattle = function(mother: any)
 		if isBattleRosterFull() then
 			showRosterFull()
@@ -1058,6 +1028,42 @@ SidePanels.create(hud, {
 	equipBest = function()
 		autoFillPenRequest:FireServer()
 	end,
+})
+
+--------------------------------------------------------------------------------
+-- UI-2: ร้านขายแม่ + ป้ายอัปเกรดบนแมพ
+--------------------------------------------------------------------------------
+
+-- ⚠️ ขายทีละ uid ด้วย remote เดิม (server ตรวจกระเป๋า/ล็อก/คิดราคาเองทุกตัว · ผลกลับทาง toast)
+SellWindow.create(hud, {
+	sellMother = function(uid: string)
+		sellMotherRequest:FireServer(uid)
+	end,
+	notify = showToast,
+})
+
+-- ⚠️ ป้ายบนแมพยิง remote ซื้อเดิมทั้ง 3 ตัว — ไม่มี logic ซื้อใหม่ · server ตรวจเงิน/เพดานเหมือนเดิม
+MapSigns.start(playerGui, {
+	buy = function(kind: MapSigns.SignKind)
+		if kind == "damage" then
+			buyDamageUpgradeRequest:FireServer()
+		elseif kind == "speed" then
+			buySpeedUpgradeRequest:FireServer()
+		else
+			upgradePenRequest:FireServer()
+		end
+	end,
+	openSellShop = function()
+		if not SellWindow.isOpen() then
+			toggleWindow("sell")
+		end
+	end,
+	closeSellShop = function()
+		if SellWindow.isOpen() then
+			SellWindow.close()
+		end
+	end,
+	isSellShopOpen = SellWindow.isOpen,
 })
 
 --------------------------------------------------------------------------------
@@ -1404,6 +1410,8 @@ farmStateSync.OnClientEvent:Connect(function(payload)
 	updateTempPanel()
 	BagWindow.setPayload(payload)
 	SidePanels.setPayload(payload)
+	SellWindow.setPayload(payload)
+	MapSigns.setPayload(payload)
 
 	-- ⚠️ Phase 3B-1: กำแพง (WallRenderer) กับโมเดลทหาร (TroopRenderer) อ่านจากของจริงที่ sync
 	-- มานี้เสมอ ไม่ใช่ default อีกต่อไป — อัปเดตทุกครั้งที่ sync มาใหม่ (real-time ตามที่กำลังตีอยู่)

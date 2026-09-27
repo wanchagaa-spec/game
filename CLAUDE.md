@@ -409,6 +409,7 @@ docs/
                           `require(...EggService)` จาก Command Bar ได้โมดูลอีกชุดที่ไม่มีข้อมูลผู้เล่น (เจอจริงตอนทดสอบ 4B)
   phase-3c-report.md   → รายงานสรุป Phase 3C-1 + 3C-2 (ส่งแม่ไปรบ + ตายถาวร) + ผลทดสอบ Studio
   phase-4a-report.md   → รายงานสรุป Phase 4A (รางวัลผ่านด่าน) + ภาพรวมงานรอบเดียวกัน + ผลทดสอบ Studio
+  phase-4b-report.md   → รายงานสรุป Phase 4B (ล็อกแม่ + แม่ตายใน popup ผ่านด่าน + สะพาน debug) + ผลทดสอบ Studio
 default.project.json   → mapping ของ Rojo
 ```
 
@@ -459,6 +460,7 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   · `ToggleMotherLockRequest(uid)` ใหม่ · ล็อกกันขาย (ใหม่) + กันส่งไปรบ (มีตั้งแต่ 3C-1) · ป้าย 🔒 บนการ์ด
   · `StageClearedNotify(stage, eggCount, deathCount)` · ยิงเมื่อมีไข่**หรือ**แม่ตาย (`CombatService.shouldNotifyStageCleared`)
   · ข้อความทุกกรณีอยู่ที่ `Config.formatStageClearedMessage` · รายละเอียด `docs/data-schema.md` §5.6 + §7.12
+  📄 รายงานสรุป (ทำอะไร · ปัญหาที่เจอ · ที่ยังค้าง) อยู่ใน `docs/phase-4b-report.md`
   📄 วิสัยทัศน์อนาคต **"HP รายตัว + turret"** (ลูก/แม่มี HP รายตัวจริง · turret สุ่มยิงมีจังหวะ
   ของตัวเอง · ทหารฝ่ายรับตีกลับได้ · หลอด HP ลอยทุกตัว) เป็น**เฟสแยกทีหลัง Phase 3C** —
   ยังไม่ได้ตั้งเลขเฟส **ไม่บล็อก 3C** ดู `docs/combat-hp-vision.md`

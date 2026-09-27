@@ -424,6 +424,9 @@ src/
                             ราคาจาก sync (`sellPrice`) · virtual grid แบบ BagWindow
     SummonWindow.lua     → UI-3: หน้าต่างแท่นอัญเชิญ · แท็บแม่/ลูก · ติ๊กเรียงลำดับ (เลขบนการ์ด · ลำดับแยกต่อแท็บ) ·
                             ส่งไปรบ (มีแม่ = ยืนยันครั้งเดียว) · หยุดอัญเชิญ · virtual grid · ตรวจด้วย `tools/check-ui-smoke.py`
+                            · ลำดับปล่อยว่าง (ไม่เคยติ๊ก) = เปิดมาติ๊กทุกกองไว้ก่อน เรียงพลังต่อตัวมาก → น้อย
+    IndexWindow.lua      → UI-4: หน้าต่างดัชนี · แท็บซ้าย = คลาส C→SS ("C 2/4") · เคยได้ = รูป+ชื่อ+คลาส · ยังไม่ได้ = เงาดำ + "???"
+                            (`UiKit.setPortrait` silhouette) · แผงเล็ก "ตอนนี้มี N ตัว" · จุดแดงบนปุ่ม 📖 เมื่อได้ตัวใหม่ (client ล้วน)
   shared/   → ReplicatedStorage.Shared (config, constants, type ที่ใช้ร่วมกัน)
     init.lua             → ตัว Shared เองเป็น ModuleScript (เป็นแค่ฝา)
     Config.lua           → ⚠️ โครงหลัก: ตัวละคร/คลาส tier น้ำหนัก ตารางคลาสของไข่
@@ -445,7 +448,7 @@ docs/
   phase-4a-report.md   → รายงานสรุป Phase 4A (รางวัลผ่านด่าน) + ภาพรวมงานรอบเดียวกัน + ผลทดสอบ Studio
   phase-4b-report.md   → รายงานสรุป Phase 4B (ล็อกแม่ + แม่ตายใน popup ผ่านด่าน + สะพาน debug) + ผลทดสอบ Studio
   ui-overhaul-plan.md  → ⚠️ แผนจัดหน้าจอใหม่ 5 รอบ (UI-1…UI-5) + กติกาช่วงเปลี่ยนผ่าน (แผง TEMP) + ตำแหน่งบนจอ
-  ui-test-checklist.md → เช็คลิสต์ทดสอบ Studio รวม UI-1 · UI-2 · UI-3 เรียงตามทางเดินจริงในเกม (ผู้ใช้ทดสอบรวดเดียวตอนจบ)
+  ui-test-checklist.md → เช็คลิสต์ทดสอบ Studio รวม UI-1 · UI-2 · UI-3 · UI-4 เรียงตามทางเดินจริงในเกม (ผู้ใช้ทดสอบรวดเดียวตอนจบ)
 default.project.json   → mapping ของ Rojo
 ```
 
@@ -513,7 +516,10 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
     ติ๊กเรียงลำดับ · **ปล่อยเฉพาะกองที่ติ๊ก** · `SendMothersToBattleBatchRequest` · ลบแผง TEMP / แผงจัดคิวปล่อย / กล่องยืนยันทีละตัว /
     ปุ่มส่งไปรบ (TEMP) · ไม่แตะ schema · sync เพิ่ม `power` ต่อกอง + `waitingStacks` + `sendStageBlockReason`
     📄 **เช็คลิสต์ทดสอบ Studio รวม UI-1/2/3 เรียงตามทางเดิน: `docs/ui-test-checklist.md`** · ⚠️ ผู้ใช้ทดสอบรวดเดียวตอนจบ **ห้าม merge จนกว่าผู้ใช้สั่ง**
-  - UI-4 (ดัชนี · schema v4) · UI-5 (ร้าน Robux) — ยังไม่เริ่ม
+  - **UI-4** ✅ เขียนแล้ว **ยังไม่ได้ทดสอบใน Studio** — หน้าต่างดัชนี (แท็บคลาส · เงาดำ/??? · จุดแดง) · **schema v4 `discovered`**
+    + `PlayerData.createMother` จุดสร้างแม่กลาง · migration v3→v4 · เพิ่มเติม: หน้าต่างอัญเชิญติ๊กทุกกองเป็นค่าเริ่มต้นตอนลำดับว่าง
+    · เช็คลิสต์ต่อท้าย `docs/ui-test-checklist.md` §7 · ⚠️ **ห้าม merge จนกว่าผู้ใช้สั่ง**
+  - UI-5 (ร้าน Robux) — ยังไม่เริ่ม
 - **Phase 4** — ระบบรบด้วยตัวเอง: อาวุธ · ตี · ตาย · เกิดใหม่ (จำกัดในพื้นที่บอส)
 - **Phase 5** — บอส + รีเกิด 5 นาที + ไข่ 5 ฟอง + กติกาแย่งไข่ (กดค้าง 3 วิ) + ร้านอาวุธ
 - **Phase 5.5** — **Hotbar 10 ช่อง** (ช่องถือของ · hotkey 1-9,0 · มือถือ 4-5 ช่อง)
@@ -538,7 +544,7 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 - `default.project.json` (mapping ของ Rojo — พังแล้ว sync ไม่ได้ทั้งโปรเจกต์)
 - **schema ของ DataStore** — ชื่อ key, โครงสร้าง PlayerData, `schemaVersion`
   (ดู `docs/data-schema.md` — แก้แล้วต้องเขียน migration ด้วยเสมอ)
-  · ตอนนี้ **v3** (v1→v2 = `battleRoster` · v2→v3 = `stageClearBonusGranted` · ประวัติใน `docs/data-schema.md` §10.4)
+  · ตอนนี้ **v4** (v1→v2 = `battleRoster` · v2→v3 = `stageClearBonusGranted` · v3→v4 = `discovered` · ประวัติใน `docs/data-schema.md` §10.4)
 - **schema ของ mothers / children** — ฟิลด์ในตัวแม่, การแยก `mothersInPen` /
   `mothersInBag` / `battleRoster` เป็นสามอาเรย์ (แม่ 1 ตัวอยู่ได้ที่เดียว), การเก็บลูกเป็นกองไม่ใช่รายตัว,
   `uid` ที่เป็น **global string** และห้าม reuse, `nextUid` ที่ห้ามลด
@@ -551,6 +557,11 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   index ตรงกับ `stageProgress` · ติดเฉพาะใน `CombatService.claimStageClearBonus` ตอนด่าน**เพิ่งพัง**ใน tick
   ⚠️ **ห้ามย้ายการให้รางวัลไป `recomputeWallProgress`** (ไล่นับด่านที่พังอยู่ใหม่ทุกครั้ง = ผู้เล่นเก่าได้ไข่ย้อนหลัง)
   · false ≠ "ยังไม่พัง" (ผู้เล่นก่อน v3 ได้ false ทั้งหมดโดยตั้งใจ) · ตารางจำนวนไข่ `Balance.Combat.STAGE_CLEAR_BONUS_EGGS`
+- **`discovered` — ดัชนีตัวละครที่เคยได้** (UI-4 · schema v4) `{ [charId] = true }` เพิ่มอย่างเดียว **ขาย/ตายไม่ลบ**
+  ติดที่ **`PlayerData.createMother` จุดเดียว** (แจก uid + บันทึกดัชนี) — ทุกทางที่ให้แม่ใหม่ต้องเรียกตัวนี้
+  (ตอนนี้ 2 ทาง: ฟักไข่ · `debugGrantMother` · ไข่ตำนาน/เทรดในอนาคตก็ต้องผ่าน) · `tools/check-mother-creation.py`
+  ตกถ้ามีใครเรียก `Config.makeUid(` / แก้ `nextUid` นอก `PlayerData.lua` · migration v3→v4 เติมจากแม่ที่มีอยู่ (คอก+กระเป๋า+roster)
+  · charId แปลกค้างได้ ไม่ลบ · `Config.CharacterOrder` = ลำดับในดัชนี (`validate()` บังคับครบทุกตัวละคร)
 - **cap คลังทหาร** (`STACK_CAP` = 500 ตายตัว) — ผูกกับ cap ออฟไลน์ 8 ชม.
   ลดค่าลงเมื่อไหร่ = ลูกที่ผู้เล่นสะสมเกินเพดานหายทันที
 - **โครงของไข่** — `heldEggs` / `hatching` เก็บ **รายฟองพร้อมน้ำหนัก** ไม่ใช่ตัวนับ
@@ -690,8 +701,10 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 **UI-3 (แท่นอัญเชิญ) เขียนเสร็จแล้ว** — **ยังไม่ได้ทดสอบใน Studio** · แท่นเรืองแสงกลางปากเลนแทนแท่นปล่อยเดิม (จุดเดิม) ·
 หน้าต่างแท็บแม่/ลูก ติ๊กเรียงลำดับ · ปล่อยเฉพาะกองที่ติ๊ก · ส่งแม่เป็นชุด · แผง TEMP ลบหมดแล้ว ·
 📄 เช็คลิสต์ Studio รวม UI-1/2/3: `docs/ui-test-checklist.md` · ห้าม merge จนกว่าผู้ใช้สั่ง
+**UI-4 (ดัชนี) เขียนเสร็จแล้ว** — **ยังไม่ได้ทดสอบใน Studio** · schema v4 (`discovered`) + migration · จุดสร้างแม่กลาง `PlayerData.createMother`
+(ผ่านครบ 2 ทาง) · หน้าต่างดัชนีแทนหน้า "เร็วๆ นี้" · ยังไม่มีโมเดลจริง 11 ตัว (มีแค่ลิง) → ใช้กล่องสี/กล่องดำแทน
 
-ชุดเทสต์ `luau tests/run.luau` ผ่านทั้งหมด **1325 เคส** (Config · PlayerData/DataService · Production · Combat ·
+ชุดเทสต์ `luau tests/run.luau` ผ่านทั้งหมด **1356 เคส** (Config · PlayerData/DataService · Production · Combat ·
 Upgrades) + สคริปต์ตรวจใน `tools/` — รันรวมด้วย `python3 tools/check-all.py` · ฝั่ง Config ครอบคลุม (สุ่มน้ำหนัก 5 ล้านครั้ง · สุ่มตัวละคร 300,000 ครั้งต่อไข่ · ไข่รายด่าน 60,000 ครั้งต่อด่าน ·
 stack key · uid · บัฟสถานะ · แหล่งที่มาไข่ · Developer Product · ตารางด่าน · อัตราปล่อย ·
 อัตราผลิตตามน้ำหนัก · cap คลัง · ด่าน 1 ไม่มีกำแพง · turret · ตัวคูณคลาส ·

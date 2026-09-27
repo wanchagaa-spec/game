@@ -39,7 +39,7 @@ local KEY_TO_SLOT: { [Enum.KeyCode]: number } = {
 local container: Frame
 local slots: { TextButton } = {}
 local selectedIndex: number? = nil
--- ความกว้าง (pixel) ที่ต้องเว้นไว้ทั้งสองข้างของแถบ — ไม่ให้ทับเลเวลมุมล่างซ้าย/ยอดเงินมุมล่างขวา
+-- ความกว้าง (pixel) ที่ต้องเว้นไว้ทั้งสองข้างของแถบ — ไม่ให้ทับเลเวลมุมล่างซ้าย/สถิติการรบมุมล่างขวา (PC)
 local getReservedSide: () -> number = function()
 	return 0
 end

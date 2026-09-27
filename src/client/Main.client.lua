@@ -93,23 +93,30 @@ local LEVEL_LABEL_WIDTH = 0.16
 local LEVEL_LABEL_HEIGHT = 0.065
 local SPEED_LEVEL_Y = 0.85
 local DAMAGE_LEVEL_Y = 0.93
--- แถบล่างที่ Hotbar กิน (ขอบล่าง 1.5% + ช่อง 17%) — ยอดเงินยกขึ้นไปอยู่เหนือแถบนี้
+-- แถบล่างที่ Hotbar กิน (ขอบล่าง 1.5% + ช่อง 17%) — แผงจัดคิวปล่อยยกขึ้นไปอยู่เหนือแถบนี้
 local HOTBAR_BAND = 0.015 + 0.17
 local HOTBAR_SIDE_GAP = 0.007
--- ปุ่มกระเป๋าแถบบน: ขนาด = สัดส่วนของความสูงแถบบนของ Roblox (ปุ่ม 44 ในแถบ 58 ≈ 0.76)
-local TOPBAR_BUTTON_FILL = 0.76
-local TOPBAR_FALLBACK_HEIGHT = 44
+-- ปุ่มกระเป๋าแถบบน — เทียบกับปุ่มของ Roblox (ปุ่มแชท ฯลฯ): ปุ่ม 44 ห่างขอบบน 12 ในแถบสูง 58
+-- ⚠️ กึ่งกลางแนวตั้งของปุ่ม Roblox = 34/58 ของแถบ **ไม่ใช่กึ่งกลางแถบ (29/58)** — เดิมใช้กึ่งกลางแถบ
+--   ปุ่มเลยลอยสูงกว่าปุ่มแชทนิดหน่อย (ผลทดสอบ Studio) · เก็บเป็นสัดส่วน แถบสูงไม่เท่ากันก็ยังตรงกัน
+local TOPBAR_BUTTON_CENTER = 34 / 58
+-- ขนาด = ใหญ่กว่าปุ่มของ Roblox (44/58) นิดหน่อย
+local TOPBAR_BUTTON_FILL = 48 / 58
+local TOPBAR_FALLBACK_HEIGHT = 58
 local TOPBAR_GAP = 4
 local TOAST_SECONDS = 4
--- ปุ่มขวา (ไข่/เท้า) — ต้องตรงกับ SidePanels.lua · ใช้กัน HUD การรบไม่ให้ทับคอลัมน์ปุ่ม
-local SIDE_BUTTON_RIGHT_MARGIN = 0.056
-local SIDE_BUTTON_HEIGHT = 0.093
--- ยอดเงิน: 52 เท่าเดิมบนจอสูง · จอเตี้ย (มือถือ) ย่อตามความสูงจอ ไม่งั้นกินจอเกือบครึ่งแนวนอนและทับแผงขวา
+-- ยอดเงิน: 52 เท่าเดิมบนจอสูง · จอเตี้ย (มือถือ) ย่อตามความสูงจอ
 local COIN_TEXT_MAX = 52
 local COIN_TEXT_HEIGHT_RATIO = 0.075
--- HUD การรบ: ความสูงจอที่ถือว่า "เต็มขนาด" · ต่ำกว่านี้ย่อลง (ไม่ต่ำกว่า COMBAT_HUD_MIN_SCALE)
-local COMBAT_HUD_FULL_HEIGHT = 800
-local COMBAT_HUD_MIN_SCALE = 0.55
+-- ระยะห่างจากขอบจอ (ขวา/ล่าง) และใต้แถบบนของ Roblox (สัดส่วนความสูงจอ · 4–10 px)
+local HUD_EDGE_MARGIN = 16
+local HUD_TOP_GAP_RATIO = 0.012
+-- หลอดเลือดการรบกว้าง 45% ของจอ (สั่งมา 40–50%) · ยอดเงินต้องอยู่ขวาของขอบหลอดห่าง COIN_BARS_GAP
+local COMBAT_BAR_WIDTH = 0.45
+local COIN_BARS_GAP = 12
+-- สถิติการรบมุมขวาล่าง (ตัวหนังสือชิดขวา): มือถือกว้าง 30% ของจอ · ห่างขอบบนของปุ่มกระโดด
+local COMBAT_STATS_WIDTH = 0.3
+local JUMP_BUTTON_GAP = 8
 
 -- ⚠️ ปิดกระเป๋ามาตรฐานของ Roblox — ช่องถือของของเกมมาแทน (Hotbar)
 pcall(function()
@@ -121,7 +128,7 @@ local lastPayload: any = nil
 --------------------------------------------------------------------------------
 -- ScreenGui สองชั้น
 --------------------------------------------------------------------------------
--- `gui` (ของเดิม · IgnoreGuiInset = false): HUD การรบ · แผงจัดคิวปล่อย
+-- `gui` (ของเดิม · IgnoreGuiInset = false): ว่างแล้ว — เหลือเป็นฐาน DisplayOrder ของกล่องยืนยัน/popup ผ่านด่าน
 -- `hud` (UI-1 · IgnoreGuiInset = true): ทุกอย่างที่วางตามสัดส่วนของจอเต็มจากภาพต้นแบบ + ปุ่มแถบบน
 -- (TopbarInset เป็นพิกัดของจอเต็ม จึงต้องอยู่ใน ScreenGui ที่ไม่เว้น inset)
 
@@ -153,32 +160,59 @@ local function formatCommaNumber(value: number): string
 end
 
 --------------------------------------------------------------------------------
--- ยอดเงิน — มุมขวาล่างเหมือนเดิม
+-- ตำแหน่งที่อิงแถบบนของ Roblox
 --------------------------------------------------------------------------------
--- ⚠️ UI-1 ยกขึ้นไปอยู่**เหนือแถบ Hotbar** (เดิมชิดขอบล่าง) — บนมือถือจอเตี้ย ตัวเลขขนาด 52 กว้าง ~40%
--- ของจอ ถ้าอยู่แถบเดียวกับ Hotbar จะทับกันหรือบีบช่องให้เหลือนิดเดียว · ย้ายมาอยู่ใน `hud` ให้พิกัดตรงกับ Hotbar
--- ⚠️ เคยวางมุมขวาบนแล้วชน UI ของ Roblox (ป้ายชื่อ + Robux) — อย่าย้ายกลับไปบน
+-- ⚠️ อ่านจาก GuiService.TopbarInset (พิกัดจอเต็ม) เท่านั้น ห้ามกะเลขตายตัว — แถบสูงไม่เท่ากันระหว่าง PC/มือถือ
+-- แถบบนถูกปิด (Height = 0) = ใช้ค่าสำรอง
+
+local function getTopbarHeight(): number
+	local inset = GuiService.TopbarInset
+	return if inset.Height > 0 then inset.Height else TOPBAR_FALLBACK_HEIGHT
+end
+
+local function getTopbarBottom(): number
+	local inset = GuiService.TopbarInset
+	return if inset.Height > 0 then inset.Max.Y else TOPBAR_FALLBACK_HEIGHT
+end
+
+-- ขนาด pixel ที่แปรตามความสูงจอ มีพื้น/เพดาน (มือถือแนวนอน ≈ 389 หน่วย · PC ≈ 900–1,080)
+local function scaledPixels(viewportY: number, ratio: number, minValue: number, maxValue: number): number
+	return math.floor(math.clamp(viewportY * ratio, minValue, maxValue) + 0.5)
+end
+
+--------------------------------------------------------------------------------
+-- ยอดเงิน — มุมขวาบน ใต้แถบปุ่มของ Roblox
+--------------------------------------------------------------------------------
+-- ⚠️ UI-1 (แก้ตามผลทดสอบ Studio): ย้ายจากมุมขวาล่าง (เหนือ Hotbar) มามุมขวาบน · ตำแหน่งตั้งใน layoutHud()
+-- · ขอบบน = **ใต้** TopbarInset (ไม่อยู่ในแถบบน) · สูงไม่เกิน ~7.5% ของจอ → ไม่ถึงปุ่มไข่ (บน 32.8%)
+-- · กว้างได้แค่ถึงขอบขวาของหลอดเลือด (+ช่องว่าง) — เลขยาวย่อตัวอักษรลงเอง (TextScaled) ไม่ล้นไปทับหลอด
+-- ⚠️ ก่อน UI-1 เคยวางมุมขวาบนแล้วชน UI ของ Roblox (ป้ายชื่อผู้เล่น + ยอด Robux) — ถ้ายังชนอยู่
+--   (เช่น รายชื่อผู้เล่นที่เปิดด้วย Tab บน PC) ดู docs/ui-overhaul-plan.md §4
+-- ไม่มีกล่อง/พื้นหลัง มีเงาเส้นขอบ (TextStroke) แทน กันอ่านไม่ออกตอนพื้นหลังเป็นท้องฟ้า/หญ้าสว่าง
 
 local coinLabel = Instance.new("TextLabel")
 coinLabel.Name = "CoinLabel"
-coinLabel.AnchorPoint = Vector2.new(1, 1)
-coinLabel.Position = UDim2.new(1, -16, 1 - HOTBAR_BAND, -6)
-coinLabel.Size = UDim2.new(0, 560, 0, 72)
+coinLabel.AnchorPoint = Vector2.new(1, 0)
 coinLabel.BackgroundTransparency = 1
 coinLabel.TextColor3 = Color3.fromRGB(255, 220, 90)
 coinLabel.TextXAlignment = Enum.TextXAlignment.Right
-coinLabel.TextYAlignment = Enum.TextYAlignment.Bottom
-coinLabel.TextSize = 52
+coinLabel.TextYAlignment = Enum.TextYAlignment.Top
+coinLabel.TextScaled = true
 coinLabel.Font = Enum.Font.SourceSansBold
 coinLabel.TextStrokeTransparency = 0.4
 coinLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 coinLabel.Text = "-"
 coinLabel.Parent = hud
 
+local coinTextLimit = Instance.new("UITextSizeConstraint")
+coinTextLimit.MaxTextSize = COIN_TEXT_MAX
+coinTextLimit.Parent = coinLabel
+
 --------------------------------------------------------------------------------
 -- ข้อความแจ้งผล (toast) — แทนบรรทัดผลลัพธ์ในแผงเทสต์เดิม
 --------------------------------------------------------------------------------
 -- ผลของทุกคำขอ (ActionResult) + ฟักเสร็จ + ข้อความเตือนฝั่ง client · หายเองใน TOAST_SECONDS วินาที
+-- ตำแหน่งตั้งใน layoutHud(): ใต้หลอดเลือดตอนเปิดอัญเชิญ · ใต้แถบบนตอนปิด
 
 local toast = UiKit.label({
 	Name = "Toast",
@@ -218,154 +252,189 @@ local function showToast(text: string, ok: boolean)
 end
 
 --------------------------------------------------------------------------------
--- HUD สถานะการรบ — ⚠️ UI-1: โชว์เฉพาะตอนเปิดอัญเชิญ (เนื้อหาเหมือนเดิมทุกอย่าง)
+-- HUD สถานะการรบ — ⚠️ โชว์เฉพาะตอนเปิดอัญเชิญ (ดู updateCombatHud)
 --------------------------------------------------------------------------------
+-- UI-1 (แก้ตามผลทดสอบ Studio): ไม่มีกล่องพื้นหลังแล้ว แยกเป็นสองชิ้น ตำแหน่งตั้งใน layoutHud()
+--   กึ่งกลางบน ใต้แถบปุ่มของ Roblox: "กำลังตีด่าน N" + หลอดทหารฝ่ายรับ (ฟ้า) + หลอดกำแพง (แดง)
+--   มุมขวาล่าง (มือถือ: เหนือปุ่มกระโดด): ทหารรวมในคลัง + แม่ในสนามรบ X/10 (ตัดรายชื่อแม่ออกแล้ว)
+-- ⚠️ หลอดกำแพงโชว์คู่กับหลอดทหารฝ่ายรับตลอด (เต็ม 100% ถ้ายังไม่โดนตี) ให้เห็นเป้าหมายถัดไปล่วงหน้า
+--   ค่าที่แสดงอ่านจาก stageProgress ของ payload.activeStage เหมือนเดิมทุกประการ
 
--- สไตล์แถบความคืบหน้า (progress bar) — ใช้กับหลอด % ทหารฝ่ายรับ/% กำแพงเหลือใน combatHud ด้านล่าง
-local PROGRESS_BAR_HEIGHT = 20
-local PROGRESS_BG_COLOR = Color3.fromRGB(50, 54, 62)
+local DEFENDER_BAR_COLOR = Color3.fromRGB(70, 170, 255)
+local WALL_BAR_COLOR = Color3.fromRGB(225, 55, 55)
+local COMBAT_BAR_BG_COLOR = Color3.fromRGB(20, 20, 24)
 
---------------------------------------------------------------------------------
--- HUD สถานะการรบ — หลอด HP ทหารฝ่ายรับ/กำแพง + จำนวนทหารรวมในคลัง + แม่ในสนามรบ
--- (เป็นลูกของ `gui` ตรง ๆ ไม่ต้องเปิดแผงไหน — UI-1 ซ่อนตอนปิดอัญเชิญ ดู updateCombatHud)
--- ⚠️ หลอดกำแพงเดิมตั้งใจให้โชว์เฉพาะตอนทหารฝ่ายรับหมดแล้ว (defendersCleared) — เปลี่ยนเป็นโชว์
--- คู่กับหลอดทหารฝ่ายรับตลอดเวลาตั้งแต่เริ่มด่าน (เต็ม 100% ถ้ายังไม่โดนตี) ให้เห็นเป้าหมายถัดไป
--- ล่วงหน้า · ค่าที่แสดงยังอ่านจาก stageProgress ของ payload.activeStage เหมือนเดิมทุกประการ
---------------------------------------------------------------------------------
+local combatBars = UiKit.frame({
+	Name = "CombatBars",
+	AnchorPoint = Vector2.new(0.5, 0),
+	BackgroundTransparency = 1,
+	Visible = false,
+})
+combatBars.Parent = hud
 
-local combatHud = Instance.new("Frame")
-combatHud.Name = "CombatHud"
-combatHud.AnchorPoint = Vector2.new(1, 0)
--- ⚠️ UI-1: ตำแหน่งจริงตั้งใน layoutResponsive() — ขอบขวาชิดซ้ายของคอลัมน์ปุ่มไข่/เท้า (เดิมชิดมุมขวาบน
--- แล้วทับปุ่มทั้งสองตอนเปิดอัญเชิญบนจอมือถือ)
-combatHud.Position = UDim2.new(1, -16, 0, 16)
--- ⚠️ สูงตามเนื้อหา (AutomaticSize) — รายการแม่ในสนามรบ (3C-2) ยาวไม่คงที่ 0–10 ตัว
-combatHud.Size = UDim2.new(0, 260, 0, 0)
-combatHud.AutomaticSize = Enum.AutomaticSize.Y
-combatHud.BackgroundColor3 = BG
-combatHud.BackgroundTransparency = 0.15
-combatHud.BorderSizePixel = 0
--- ⚠️ UI-1: ซ่อนไว้จนกว่า sync แรกจะบอกว่าเปิดอัญเชิญอยู่ (ดู updateCombatHud)
-combatHud.Visible = false
-combatHud.Parent = gui
+local combatStageLabel = UiKit.label({
+	Name = "Stage",
+	FontFace = UiKit.FONT_HEAVY,
+	Text = "-",
+})
+UiKit.textStroke(combatStageLabel, 1.5)
+combatStageLabel.Parent = combatBars
 
-local combatHudScale = Instance.new("UIScale")
-combatHudScale.Parent = combatHud
+-- หลอด = พื้นเข้ม + ส่วนเติม + ข้อความ % ในหลอด · คืน handle ไว้แก้ค่าซ้ำทุก sync (ไม่สร้าง Instance ใหม่)
+local function makeHudBar(name: string, fillColor: Color3): (Frame, Frame, TextLabel)
+	local bar = UiKit.frame({
+		Name = name,
+		BackgroundColor3 = COMBAT_BAR_BG_COLOR,
+		BackgroundTransparency = 0.35,
+	})
+	UiKit.corner(bar, UDim.new(0.35, 0))
+	UiKit.border(bar, UiKit.BLACK, 1.5)
+	bar.Parent = combatBars
 
-local combatHudCorner = Instance.new("UICorner")
-combatHudCorner.CornerRadius = UDim.new(0, 8)
-combatHudCorner.Parent = combatHud
+	local fill = UiKit.frame({
+		Name = "Fill",
+		Size = UDim2.fromScale(0, 1),
+		BackgroundColor3 = fillColor,
+	})
+	UiKit.corner(fill, UDim.new(0.35, 0))
+	fill.Parent = bar
 
-local combatHudPadding = Instance.new("UIPadding")
-combatHudPadding.PaddingTop = UDim.new(0, 8)
-combatHudPadding.PaddingBottom = UDim.new(0, 8)
-combatHudPadding.PaddingLeft = UDim.new(0, 10)
-combatHudPadding.PaddingRight = UDim.new(0, 10)
-combatHudPadding.Parent = combatHud
+	local text = UiKit.label({
+		Name = "Text",
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = 2,
+	})
+	UiKit.textStroke(text, 1.5)
+	local textPadding = Instance.new("UIPadding")
+	textPadding.PaddingTop = UDim.new(0.12, 0)
+	textPadding.PaddingBottom = UDim.new(0.12, 0)
+	textPadding.Parent = text
+	text.Parent = bar
 
-local combatHudLayout = Instance.new("UIListLayout")
-combatHudLayout.Padding = UDim.new(0, 4)
-combatHudLayout.SortOrder = Enum.SortOrder.LayoutOrder
-combatHudLayout.Parent = combatHud
-
-local combatHudStageLabel = Instance.new("TextLabel")
-combatHudStageLabel.Name = "Stage"
-combatHudStageLabel.LayoutOrder = 1
-combatHudStageLabel.Size = UDim2.new(1, 0, 0, 18)
-combatHudStageLabel.BackgroundTransparency = 1
-combatHudStageLabel.TextColor3 = FG
-combatHudStageLabel.TextXAlignment = Enum.TextXAlignment.Left
-combatHudStageLabel.TextSize = 13
-combatHudStageLabel.Font = Enum.Font.SourceSansBold
-combatHudStageLabel.Text = "-"
-combatHudStageLabel.Parent = combatHud
-
--- แถบพื้นหลัง+ส่วนเติม+ข้อความสไตล์เดียวกับที่เคยใช้ในกริด (PROGRESS_BAR_HEIGHT/PROGRESS_BG_COLOR
--- ด้านบน) แต่คืน handle ของ Fill/Text ไว้แก้ค่าซ้ำทุก sync แทนที่จะสร้าง Instance ใหม่ทุกครั้ง
--- (combatHud มีแค่ 2 แถบคงที่ ไม่ใช่รายการยาวไม่คงที่แบบในกริดที่ต้องล้าง/สร้างใหม่ทุกครั้ง)
-local function makeHudBar(order: number, fillColor: Color3): (Frame, TextLabel)
-	local row = Instance.new("Frame")
-	row.Name = "Bar"
-	row.LayoutOrder = order
-	row.Size = UDim2.new(1, 0, 0, PROGRESS_BAR_HEIGHT)
-	row.BackgroundColor3 = PROGRESS_BG_COLOR
-	row.BorderSizePixel = 0
-	row.ClipsDescendants = true
-	row.Parent = combatHud
-
-	local rowCorner = Instance.new("UICorner")
-	rowCorner.CornerRadius = UDim.new(0, 4)
-	rowCorner.Parent = row
-
-	local fill = Instance.new("Frame")
-	fill.Name = "Fill"
-	fill.Size = UDim2.new(0, 0, 1, 0)
-	fill.BackgroundColor3 = fillColor
-	fill.BorderSizePixel = 0
-	fill.Parent = row
-
-	local text = Instance.new("TextLabel")
-	text.Size = UDim2.new(1, 0, 1, 0)
-	text.BackgroundTransparency = 1
-	text.TextColor3 = Color3.fromRGB(255, 255, 255)
-	text.TextStrokeTransparency = 0.4
-	text.TextSize = 12
-	text.Font = Enum.Font.SourceSansBold
-	text.Text = ""
-	text.Parent = row
-
-	return fill, text
+	return bar, fill, text
 end
 
-local defendersHudFill, defendersHudText = makeHudBar(2, ACCENT)
-local wallHudFill, wallHudText = makeHudBar(3, ERROR_COLOR)
-
-local combatHudStockpileLabel = Instance.new("TextLabel")
-combatHudStockpileLabel.Name = "Stockpile"
-combatHudStockpileLabel.LayoutOrder = 4
-combatHudStockpileLabel.Size = UDim2.new(1, 0, 0, 18)
-combatHudStockpileLabel.BackgroundTransparency = 1
-combatHudStockpileLabel.TextColor3 = DIM
-combatHudStockpileLabel.TextXAlignment = Enum.TextXAlignment.Left
-combatHudStockpileLabel.TextSize = 13
-combatHudStockpileLabel.Font = Enum.Font.SourceSans
-combatHudStockpileLabel.Text = "-"
-combatHudStockpileLabel.Parent = combatHud
-
--- ⚠️ Phase 3C-2: แม่ใน battleRoster — อ่านจาก sync ล้วน ๆ (ไม่นับเอง) · ด่านที่กำลังตีพัง = ตายทั้งหมด
-local combatHudRosterLabel = Instance.new("TextLabel")
-combatHudRosterLabel.Name = "Roster"
-combatHudRosterLabel.LayoutOrder = 5
-combatHudRosterLabel.Size = UDim2.new(1, 0, 0, 18)
-combatHudRosterLabel.BackgroundTransparency = 1
-combatHudRosterLabel.TextColor3 = DIM
-combatHudRosterLabel.TextXAlignment = Enum.TextXAlignment.Left
-combatHudRosterLabel.TextSize = 13
-combatHudRosterLabel.Font = Enum.Font.SourceSans
-combatHudRosterLabel.Text = "-"
-combatHudRosterLabel.Parent = combatHud
-
--- รายการย่อ "คลาส น้ำหนัก" ของแม่แต่ละตัวใน roster — ซ่อนตอน roster ว่าง
-local combatHudRosterListLabel = Instance.new("TextLabel")
-combatHudRosterListLabel.Name = "RosterList"
-combatHudRosterListLabel.LayoutOrder = 6
-combatHudRosterListLabel.Size = UDim2.new(1, 0, 0, 0)
-combatHudRosterListLabel.AutomaticSize = Enum.AutomaticSize.Y
-combatHudRosterListLabel.BackgroundTransparency = 1
-combatHudRosterListLabel.TextColor3 = DIM
-combatHudRosterListLabel.TextXAlignment = Enum.TextXAlignment.Left
-combatHudRosterListLabel.TextWrapped = true
-combatHudRosterListLabel.TextSize = 12
-combatHudRosterListLabel.Font = Enum.Font.SourceSans
-combatHudRosterListLabel.Text = ""
-combatHudRosterListLabel.Visible = false
-combatHudRosterListLabel.Parent = combatHud
+local defendersBar, defendersHudFill, defendersHudText = makeHudBar("DefendersBar", DEFENDER_BAR_COLOR)
+local wallBar, wallHudFill, wallHudText = makeHudBar("WallBar", WALL_BAR_COLOR)
 
 local function setHudBar(fill: Frame, text: TextLabel, label: string, ratio: number)
 	local clamped = math.clamp(ratio, 0, 1)
 	fill.Size = UDim2.new(clamped, 0, 1, 0)
 	text.Text = `{label}: {math.floor(clamped * 100)}%`
 end
+
+local combatStats = UiKit.frame({
+	Name = "CombatStats",
+	AnchorPoint = Vector2.new(1, 1),
+	BackgroundTransparency = 1,
+	Visible = false,
+})
+combatStats.Parent = hud
+
+local function makeStatLabel(name: string): TextLabel
+	local label = UiKit.label({
+		Name = name,
+		FontFace = UiKit.FONT_HEAVY,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		Text = "-",
+	})
+	UiKit.textStroke(label, 1.5)
+	label.Parent = combatStats
+	return label
+end
+
+local combatStockpileLabel = makeStatLabel("Stockpile")
+-- ⚠️ Phase 3C-2: แม่ใน battleRoster — อ่านจาก sync ล้วน ๆ (ไม่นับเอง) · ด่านที่กำลังตีพัง = ตายทั้งหมด
+local combatRosterLabel = makeStatLabel("Roster")
+
+-- ⚠️ ปุ่มกระโดดของ Roblox บนมือถืออยู่มุมขวาล่าง — สถิติการรบต้องยกขึ้นไปอยู่เหนือปุ่ม
+-- อ่านตำแหน่งจริงจาก TouchGui (ขนาด/ตำแหน่งปุ่มเปลี่ยนตามขนาดจอ) · คืน "ระยะจากขอบล่างจอถึงขอบบนของปุ่ม"
+-- · nil = ไม่มีปุ่มกระโดด (PC) · วัดเทียบกับ ScreenGui ของปุ่มเอง ขอบล่างจอเป็นจุดเดียวกันทุก ScreenGui
+--   จึงไม่ต้องสนว่า TouchGui เว้น inset แถบบนหรือไม่
+local function getJumpButtonClearance(): number?
+	local touchGui = playerGui:FindFirstChild("TouchGui")
+	if not touchGui or not touchGui:IsA("ScreenGui") or not touchGui.Enabled then
+		return nil
+	end
+	local controlFrame = touchGui:FindFirstChild("TouchControlFrame")
+	if not controlFrame or not controlFrame:IsA("GuiObject") or not controlFrame.Visible then
+		return nil
+	end
+	local jumpButton = controlFrame:FindFirstChild("JumpButton")
+	if not jumpButton or not jumpButton:IsA("GuiObject") or not jumpButton.Visible then
+		return nil
+	end
+	local topInGui = jumpButton.AbsolutePosition.Y - touchGui.AbsolutePosition.Y
+	return touchGui.AbsoluteSize.Y - topInGui
+end
+
+-- ⚠️ จัดตำแหน่ง ยอดเงิน · หลอดเลือด · สถิติการรบ · toast ตามขนาดจอ + แถบบนของ Roblox
+-- เรียกตอนเริ่ม · ขนาดจอเปลี่ยน · TopbarInset เปลี่ยน · ทุก sync (ปุ่มกระโดดโผล่/ขยับได้ระหว่างเกม)
+local function layoutHud()
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
+	local viewport = camera.ViewportSize
+	if viewport.X <= 0 or viewport.Y <= 0 then
+		return
+	end
+
+	local topGap = scaledPixels(viewport.Y, HUD_TOP_GAP_RATIO, 4, 10)
+	local top = getTopbarBottom() + topGap
+
+	-- หลอดเลือด: กึ่งกลางบน เรียงบนลงล่าง ชื่อด่าน → ทหารฝ่ายรับ → กำแพง
+	local stageHeight = scaledPixels(viewport.Y, 0.032, 12, 24)
+	local barHeight = scaledPixels(viewport.Y, 0.036, 14, 28)
+	local rowGap = scaledPixels(viewport.Y, 0.005, 2, 6)
+	local barsHeight = stageHeight + 2 * (rowGap + barHeight)
+	combatBars.Position = UDim2.new(0.5, 0, 0, top)
+	combatBars.Size = UDim2.new(COMBAT_BAR_WIDTH, 0, 0, barsHeight)
+	combatStageLabel.Size = UDim2.new(1, 0, 0, stageHeight)
+	defendersBar.Position = UDim2.fromOffset(0, stageHeight + rowGap)
+	defendersBar.Size = UDim2.new(1, 0, 0, barHeight)
+	wallBar.Position = UDim2.fromOffset(0, stageHeight + 2 * rowGap + barHeight)
+	wallBar.Size = UDim2.new(1, 0, 0, barHeight)
+
+	-- ยอดเงิน: มุมขวาบน · 52 บนจอสูง จอเตี้ย (มือถือ) ย่อตามความสูงจอ · กว้างได้ถึงขอบขวาของหลอดเท่านั้น
+	local coinHeight = math.floor(math.min(COIN_TEXT_MAX, viewport.Y * COIN_TEXT_HEIGHT_RATIO))
+	local barsRight = viewport.X * (0.5 + COMBAT_BAR_WIDTH / 2)
+	coinTextLimit.MaxTextSize = coinHeight
+	coinLabel.Size = UDim2.fromOffset(
+		math.max(0, viewport.X - HUD_EDGE_MARGIN - barsRight - COIN_BARS_GAP),
+		math.floor(coinHeight * 1.25)
+	)
+	coinLabel.Position = UDim2.new(1, -HUD_EDGE_MARGIN, 0, top)
+
+	-- toast: ใต้หลอดเลือดตอนเปิดอัญเชิญ · ใต้แถบบนตอนปิด
+	local toastTop = if combatBars.Visible then top + barsHeight + topGap else top
+	toast.Position = UDim2.new(0.5, 0, 0, toastTop)
+
+	-- สถิติการรบ: มุมขวาล่าง
+	-- · มือถือ: ยกขึ้นเหนือปุ่มกระโดด (พ้นแถบ Hotbar แล้ว) → กว้างได้ COMBAT_STATS_WIDTH
+	-- · PC: อยู่แถบเดียวกับ Hotbar → กว้างได้เท่าที่ Hotbar เว้นไว้ฝั่งขวา (สมมาตรกับบล็อกเลเวลฝั่งซ้าย)
+	--   ข้อความยาวกว่านั้นย่อตัวอักษรลงเอง (TextScaled) ไม่ล้นไปทับช่องขวาสุดของ Hotbar
+	local lineHeight = scaledPixels(viewport.Y, 0.034, 13, 24)
+	local jumpClearance = getJumpButtonClearance()
+	local statsWidth = if jumpClearance
+		then viewport.X * COMBAT_STATS_WIDTH
+		else viewport.X * (LEVEL_LABEL_X + LEVEL_LABEL_WIDTH) - HUD_EDGE_MARGIN
+	local bottomOffset = if jumpClearance then jumpClearance + JUMP_BUTTON_GAP else HUD_EDGE_MARGIN
+	combatStats.Size = UDim2.fromOffset(math.max(0, statsWidth), lineHeight * 2)
+	combatStats.Position = UDim2.new(1, -HUD_EDGE_MARGIN, 1, -bottomOffset)
+	combatStockpileLabel.Size = UDim2.new(1, 0, 0, lineHeight)
+	combatRosterLabel.Position = UDim2.fromOffset(0, lineHeight)
+	combatRosterLabel.Size = UDim2.new(1, 0, 0, lineHeight)
+end
+
+layoutHud()
+do
+	local camera = Workspace.CurrentCamera
+	if camera then
+		camera:GetPropertyChangedSignal("ViewportSize"):Connect(layoutHud)
+	end
+end
+GuiService:GetPropertyChangedSignal("TopbarInset"):Connect(layoutHud)
 
 --------------------------------------------------------------------------------
 -- กล่องยืนยัน "ส่งแม่ไปรบ?" (Phase 3C-2) — ปุ่มส่งไปรบ (TEMP ในหน้ารายละเอียดแม่) แค่เปิดกล่องนี้
@@ -521,18 +590,18 @@ local function updateCombatHud()
 		return
 	end
 
-	-- ⚠️ UI-1: โชว์เฉพาะตอนเปิดอัญเชิญ — ปิดอัญเชิญ (รวมถึง auto-pause) = ซ่อนทั้งกล่อง
-	combatHud.Visible = lastPayload.summonEnabled == true
+	-- ⚠️ UI-1: โชว์เฉพาะตอนเปิดอัญเชิญ — ปิดอัญเชิญ (รวมถึง auto-pause) = ซ่อนทั้งหลอดและสถิติ
+	local visible = lastPayload.summonEnabled == true
+	combatBars.Visible = visible
+	combatStats.Visible = visible
 
 	local activeStage = lastPayload.activeStage
 	if not activeStage then
-		combatHudStageLabel.Text = "ผ่านครบทุกด่านแล้ว!"
-		combatHudStageLabel.TextColor3 = SUCCESS_COLOR
+		combatStageLabel.Text = "ผ่านครบทุกด่านแล้ว!"
 		setHudBar(defendersHudFill, defendersHudText, "ทหารฝ่ายรับ", 0)
 		setHudBar(wallHudFill, wallHudText, "กำแพง", 0)
 	else
-		combatHudStageLabel.Text = `กำลังตีด่าน {activeStage}`
-		combatHudStageLabel.TextColor3 = FG
+		combatStageLabel.Text = `กำลังตีด่าน {activeStage}`
 
 		local info = lastPayload.stageProgress[activeStage]
 		local defendersRatio = 1
@@ -550,19 +619,13 @@ local function updateCombatHud()
 	for _, stack in lastPayload.children do
 		totalStock += stack.count
 	end
-	combatHudStockpileLabel.Text = `ทหารรวมในคลัง: {formatCommaNumber(totalStock)} ตัว`
+	combatStockpileLabel.Text = `ทหารรวมในคลัง: {formatCommaNumber(totalStock)} ตัว`
 
 	local roster = lastPayload.battleRoster or {}
-	combatHudRosterLabel.Text = `แม่ในสนามรบ: {#roster}/{MAX_BATTLE_MOTHERS}`
-	combatHudRosterLabel.TextColor3 = if #roster > 0 then FG else DIM
-	local entries: { string } = {}
-	for _, mother in roster do
-		local character = Config.getCharacter(mother.charId)
-		local class = if character then character.class else "?"
-		table.insert(entries, `{class} {Config.formatWeight(mother.weight)} kg`)
-	end
-	combatHudRosterListLabel.Text = table.concat(entries, " · ")
-	combatHudRosterListLabel.Visible = #entries > 0
+	combatRosterLabel.Text = `แม่ในสนามรบ: {#roster}/{MAX_BATTLE_MOTHERS}`
+
+	-- ตำแหน่ง toast ขึ้นกับว่าหลอดโชว์ไหม · ปุ่มกระโดดบนมือถือโผล่/ขยับได้ระหว่างเกม → จัดใหม่ทุก sync
+	layoutHud()
 end
 
 --------------------------------------------------------------------------------
@@ -928,7 +991,7 @@ UiKit.corner(bagTopButton, UDim.new(0.5, 0))
 local bagTopIcon = UiKit.label({
 	AnchorPoint = Vector2.new(0.5, 0.5),
 	Position = UDim2.fromScale(0.5, 0.5),
-	Size = UDim2.fromScale(0.6, 0.6),
+	Size = UDim2.fromScale(0.62, 0.62),
 	Text = "🎒",
 })
 bagTopIcon.Parent = bagTopButton
@@ -936,10 +999,12 @@ bagTopButton.Parent = hud
 
 local function layoutTopbarButton()
 	local inset = GuiService.TopbarInset
-	local height = if inset.Height > 0 then inset.Height else TOPBAR_FALLBACK_HEIGHT
+	local height = getTopbarHeight()
 	local size = math.floor(height * TOPBAR_BUTTON_FILL + 0.5)
+	-- กึ่งกลางแนวตั้งตรงกับปุ่มของ Roblox (ไม่ใช่กึ่งกลางแถบ) — ดู TOPBAR_BUTTON_CENTER
+	local centerY = inset.Min.Y + height * TOPBAR_BUTTON_CENTER
 	bagTopButton.Size = UDim2.fromOffset(size, size)
-	bagTopButton.Position = UDim2.fromOffset(inset.Min.X + TOPBAR_GAP, inset.Min.Y + (height - size) / 2)
+	bagTopButton.Position = UDim2.fromOffset(inset.Min.X + TOPBAR_GAP, math.floor(centerY - size / 2 + 0.5))
 end
 
 layoutTopbarButton()
@@ -949,39 +1014,11 @@ bagTopButton.Activated:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- ปรับตามขนาดจอ (ของเดิมที่เป็น pixel ตายตัว)
---------------------------------------------------------------------------------
--- ⚠️ หน่วย GUI บนมือถือเล็กกว่าที่คิดมาก (จอ 2000×921 ≈ 844×389 หน่วย) ของ pixel ตายตัวเดิมเลยใหญ่เกินจอ
-
-local function layoutResponsive()
-	local camera = Workspace.CurrentCamera
-	if not camera then
-		return
-	end
-	local viewport = camera.ViewportSize
-	if viewport.X <= 0 or viewport.Y <= 0 then
-		return
-	end
-	coinLabel.TextSize = math.floor(math.min(COIN_TEXT_MAX, viewport.Y * COIN_TEXT_HEIGHT_RATIO))
-	combatHudScale.Scale = math.clamp(viewport.Y / COMBAT_HUD_FULL_HEIGHT, COMBAT_HUD_MIN_SCALE, 1)
-	-- ปุ่มขวาเป็นจัตุรัสจากความสูงจอ → ความกว้างจริงเทียบความกว้างจอ = สูง × (H ÷ W)
-	local buttonWidth = SIDE_BUTTON_HEIGHT * viewport.Y / viewport.X
-	combatHud.Position = UDim2.new(1 - SIDE_BUTTON_RIGHT_MARGIN - buttonWidth - HOTBAR_SIDE_GAP, 0, 0, 16)
-end
-
-layoutResponsive()
-do
-	local camera = Workspace.CurrentCamera
-	if camera then
-		camera:GetPropertyChangedSignal("ViewportSize"):Connect(layoutResponsive)
-	end
-end
-
---------------------------------------------------------------------------------
 -- Hotbar · กระเป๋า · แผงขวา
 --------------------------------------------------------------------------------
 
 -- ⚠️ ความกว้างที่ Hotbar ต้องเว้นไว้ทั้งสองข้าง = ขอบขวาของบล็อกเลเวลมุมล่างซ้าย + ช่องว่าง
+-- (ฝั่งขวาเป็นที่ของสถิติการรบบน PC — layoutHud() ใช้ความกว้างเดียวกันนี้)
 -- (คิดจากสัดส่วนล้วน ๆ ไม่อ่าน AbsoluteSize — ใช้ได้ตั้งแต่ก่อน layout รอบแรก)
 Hotbar.create(hud, function(): number
 	local camera = Workspace.CurrentCamera

@@ -1500,4 +1500,56 @@ return function(t, Config)
 		function() classMultTable.SS = nil end,
 		function() classMultTable.SS = savedSS end), true)
 	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
+
+	print("── ป้ายบนแมพ (UI-2) ──")
+	local signDim = Config.MapDimensions
+	local signHalf = signDim.MapSign.BoardSize.X / 2
+	-- ⚠️ ซ้าย/ขวา = ยืนบนทางเดินกลางหันหน้าเข้าประตู → มือซ้ายชี้ −outward (แกน X) · มือขวาชี้ +outward
+	for penIndex = 1, Config.World.MAX_PENS do
+		local center = Config.getPenPlotCenter(penIndex)
+		local gateZ, outward = Config.getPenGateLine(penIndex)
+		local row = if center.Z > 0 then "แถวบน" else "แถวล่าง"
+		check(`คอก {penIndex}: ประตูหันเข้าทางเดินกลาง`, math.abs(gateZ) < math.abs(center.Z), true)
+		local speed, speedFacing = Config.getPenUpgradeSignSpot(penIndex, "speed")
+		local pen, penFacing = Config.getPenUpgradeSignSpot(penIndex, "pen")
+		check(`คอก {penIndex} ({row}): ค่าวิ่งอยู่ซ้ายมือ`, (speed.X - center.X) * outward < 0, true)
+		check(`คอก {penIndex} ({row}): อัปคอกอยู่ขวามือ`, (pen.X - center.X) * outward > 0, true)
+		check(`คอก {penIndex}: หน้าป้ายหันเข้าทางเดินกลาง`, speedFacing.Z == outward and penFacing.Z == outward, true)
+		check(`คอก {penIndex}: ป้ายอยู่นอกคอก ฝั่งทางเดิน`, (speed.Z - gateZ) * outward > 0, true)
+		local nameSign = Config.getPenNameSignSpot(penIndex)
+		check(`คอก {penIndex}: ป้ายชื่ออยู่ฝั่ง +X ของประตู`, nameSign.X > center.X, true)
+		local sameSide = if speed.X > center.X then speed else pen
+		check(`คอก {penIndex}: ป้ายฝั่งป้ายชื่อปักถัดออกไป ไม่ทับป้ายชื่อ`,
+			sameSide.X - signHalf >= nameSign.X + signDim.Pen.SignSize.X / 2, true)
+	end
+	-- ภาพตามที่ตกลง: คอกแถวบน [ค่าวิ่ง][คอก N] ประตู [อัปคอก] · แถวล่าง [ค่าวิ่ง] ประตู [คอก N][อัปคอก]
+	local top, bottom = Config.getPenPlotCenter(2), Config.getPenPlotCenter(5)
+	check("แถวบน: ค่าวิ่งอยู่ฝั่ง +X (เลยป้ายชื่อ)", (Config.getPenUpgradeSignSpot(2, "speed")).X > top.X, true)
+	check("แถวล่าง: ค่าวิ่งอยู่ฝั่ง −X", (Config.getPenUpgradeSignSpot(5, "speed")).X < bottom.X, true)
+
+	local damage, damageFacing = Config.getDamageSignSpot()
+	check("ป้ายดาเมจอยู่ก่อนถึงต้นเลน (ในลาน)", damage.X < Config.getLaneStartX(), true)
+	check("ป้ายดาเมจไม่ขวางปากเลน", damage.Z - signHalf >= signDim.Lane.Width / 2, true)
+	check("ป้ายดาเมจไม่ล้ำเข้าแนวคอก", damage.Z + signHalf <= signDim.Pen.RowGap / 2, true)
+	check("ป้ายดาเมจหันไปทางลาน (−X)", damageFacing.X, -1)
+	local sellSpot = Config.getSellShopSpot()
+	local sellStall = Config.getShopStallCenter(signDim.MapSign.SellStallIndex)
+	check("ร้านขายแม่ = แผงร้านที่ตั้งไว้", sellSpot.X == sellStall.X and sellSpot.Z == sellStall.Z, true)
+	check("ชื่อป้ายไม่ซ้ำกัน", Config.getMapSignName("speed", 1) ~= Config.getMapSignName("pen", 1)
+		and Config.getMapSignName("speed", 1) ~= Config.getMapSignName("speed", 2), true)
+
+	-- ยามต้องจับได้: ป้ายกว้างจนล้ำนอกแนวคอก / ป้ายดาเมจล้ำเข้าเลน / แผงร้านที่ไม่มีอยู่จริง
+	local savedBoard = signDim.MapSign.BoardSize
+	check("ป้ายกว้างเกินแนวคอก → ยามจับได้", balanceGuardCatches(
+		function() signDim.MapSign.BoardSize = { X = 30, Y = savedBoard.Y, Z = savedBoard.Z } end,
+		function() signDim.MapSign.BoardSize = savedBoard end), true)
+	local savedInset = signDim.MapSign.DamageInsetX
+	check("ป้ายดาเมจเลยต้นเลน → ยามจับได้", balanceGuardCatches(
+		function() signDim.MapSign.DamageInsetX = -10 end,
+		function() signDim.MapSign.DamageInsetX = savedInset end), true)
+	local savedStall = signDim.MapSign.SellStallIndex
+	check("ร้านขายแม่ชี้แผงที่ไม่มี → ยามจับได้", balanceGuardCatches(
+		function() signDim.MapSign.SellStallIndex = signDim.Shop.StallCount + 1 end,
+		function() signDim.MapSign.SellStallIndex = savedStall end), true)
+	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
 end

@@ -704,6 +704,9 @@ function PenService.assign(player: Player): Pen?
 			pen.ownerUserId = player.UserId
 			penByUserId[player.UserId] = pen
 			pen.plot.label.Text = `คอก {pen.index} · {player.DisplayName}`
+			-- ⚠️ UI-2: client ต้องรู้ว่าคอกไหนเป็นของตัวเอง — ติดจุดกด E เฉพาะป้ายค่าวิ่ง/อัปคอกของคอกนี้
+			-- (แค่ซ่อนปุ่มให้ไม่งง · remote ซื้อไม่ได้อ่านค่านี้ ซื้อได้เหมือนเดิมทุกประการ)
+			player:SetAttribute(Config.PEN_INDEX_ATTRIBUTE, pen.index)
 			return pen
 		end
 	end
@@ -720,6 +723,7 @@ function PenService.release(player: Player)
 	PenService.clearVisuals(pen)
 	pen.ownerUserId = nil
 	penByUserId[player.UserId] = nil
+	player:SetAttribute(Config.PEN_INDEX_ATTRIBUTE, nil)
 	lastMothersByUserId[player.UserId] = nil
 end
 

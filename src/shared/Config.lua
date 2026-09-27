@@ -424,12 +424,30 @@ Config.MapDimensions = {
 	},
 
 	-- ══ ร้านค้า ══ แผงเล็ก ๆ วางที่ขอบลาน **ไม่ใช่อาคารใหญ่**
-	-- ตัวแผงเป็นแค่ฉาก ของจริงคือ UI · อัปเกรดมีปุ่มติดตัว ไม่ต้องเดินมา
+	-- ตัวแผงเป็นแค่ฉาก ของจริงคือ UI · แผง MapSign.SellStallIndex = ร้านขายแม่ (UI-2 · กด E)
 	Shop = {
 		StallSize = vec2(12, 12),
 		StallCount = 2,
 		StallHeight = 8, -- ความสูงหลังคาแผง (แค่ฉาก)
 		Gap = 20, -- ระยะจากขอบซ้ายของลานคอก ถึงแนวแผง
+	},
+
+	-- ══ ป้ายบนแมพ (UI-2) ══ แผ่นไม้บนเสา เดินเข้าใกล้แล้วกด E (ProximityPrompt)
+	-- ป้ายอัปดาเมจ 1 จุด (ปากเลนฝั่งลาน) · ป้ายอัปค่าวิ่ง + อัปคอก ข้างประตู**ทุกคอก** · ร้านขายแม่ = แผงร้าน
+	-- ⚠️ ตัวป้าย (เสา + แผ่นไม้) server สร้าง ทุกคนเห็นเหมือนกัน · **ข้อความ (เลเวล/ราคา) client วาดเอง**
+	--   เพราะแต่ละคนเห็นค่าของตัวเอง — ห้ามเขียนค่าของใครลงป้ายที่คนอื่นเห็นด้วย
+	-- ตำแหน่งจริงคำนวณที่ Config.getPenUpgradeSignSpot / getDamageSignSpot / getSellShopSpot
+	MapSign = {
+		BoardSize = vec3(9, 5, 0.4), -- กว้าง · สูง · หนา (ใหญ่กว่าป้ายชื่อคอก — มี 3 บรรทัด)
+		PostHeight = 3, -- เสาใต้ขอบล่างแผ่น · ขอบบนแผ่น = 3 + 5 = 8 เท่าป้ายชื่อคอก
+		NameSignGap = 3, -- ป้ายที่ปักฝั่งเดียวกับป้ายชื่อคอก เว้นห่างจากป้ายชื่อเท่านี้
+		DamageInsetX = 6, -- ป้ายดาเมจถอยจากต้นเลนเข้ามาในลาน (ไม่ขวางปากเลน)
+		PromptDistance = 10, -- ระยะกด E ของป้ายอัปเกรด
+		-- แผงร้านที่เป็นร้านขายแม่ — แผง 1 (เดิมป้าย "ขายของ · ซื้อไข่" · ตัดสินใน UI-2)
+		-- ⚠️ ป้ายเดิมมีคำว่า "ซื้อไข่" ซึ่งขัดกฎ (เงินในเกมซื้อไข่ไม่ได้) จึงเปลี่ยนเป็น "ร้านขายแม่"
+		SellStallIndex = 1,
+		SellPromptDistance = 14, -- วัดจากกึ่งกลางแผง (แผงกว้าง 12) จึงต้องไกลกว่าป้าย
+		SellCloseDistance = 20, -- เดินออกห่างจากกึ่งกลางแผงเกินนี้ หน้าต่างขายปิดเอง
 	},
 
 	-- ══ ขอบแมพ ══ แท่นลอย ตกได้ → กั้นด้วยกำแพงใส
@@ -2718,6 +2736,80 @@ function Config.getSpawnPoint(): Vector3
 	return vec3(0, 0, 0)
 end
 
+-- ══ ประตูคอก ══ Z ของแนวรั้วที่เว้นช่องประตู + ทิศ "ออกไปทางทางเดินกลาง" ตามแกน Z
+-- (−1 = คอกแถวบน ทางเดินอยู่ฝั่ง −Z · +1 = คอกแถวล่าง ทางเดินอยู่ฝั่ง +Z)
+-- ⚠️ MapBuilder วางรั้วประตู/ป้ายชื่อ และป้าย UI-2 จากค่าชุดนี้ — ห้ามคำนวณแยกเอง
+function Config.getPenGateLine(index: number): (number, number)
+	local center = Config.getPenPlotCenter(index)
+	local halfZ = Config.MapDimensions.Pen.Size.Y / 2
+	if center.Z > 0 then
+		return center.Z - halfZ, -1
+	end
+	return center.Z + halfZ, 1
+end
+
+-- ป้ายชื่อ "คอก N" — ข้างประตูฝั่ง +X (ไม่ใช่กลางประตู กันเดินชน) · คืนจุดบนพื้นใต้เสา
+function Config.getPenNameSignSpot(index: number): Vector3
+	local pen = Config.MapDimensions.Pen
+	local center = Config.getPenPlotCenter(index)
+	local gateZ, outward = Config.getPenGateLine(index)
+	local x = center.X + pen.GateWidth / 2 + pen.SignGateClearance + pen.SignSize.X / 2
+	return vec3(x, 0, gateZ + outward * pen.SignSize.Z * 2)
+end
+
+export type PenSignKind = "speed" | "pen"
+-- ป้ายสองชนิดที่ปักข้างประตูทุกคอก (MapBuilder สร้าง · client ติดข้อความ/จุดกด)
+function Config.getPenSignKinds(): { PenSignKind }
+	return { "speed", "pen" }
+end
+
+-- ป้ายอัปเกรดข้างประตูคอก (UI-2) · คืน (จุดบนพื้นใต้เสา, ทิศที่หน้าป้ายหันไป)
+-- ⚠️ ซ้าย/ขวา = **ยืนบนทางเดินกลางหันหน้าเข้าประตู** (ตัดสินใน UI-2): ค่าวิ่ง = ซ้ายมือ · อัปคอก = ขวามือ
+--   คอกแถวบนกับแถวล่างหันหน้าคนละทาง → ป้ายสองแถวจึงอยู่คนละฝั่ง X กัน (ทุกคนเห็นค่าวิ่งอยู่ซ้ายมือ)
+--   ฝั่ง +X มีป้ายชื่อคอกอยู่แล้ว → ป้ายฝั่งนั้นปักถัดออกไปจากป้ายชื่อ (ไม่ย้ายป้ายชื่อ)
+-- หน้าป้ายหันเข้าทางเดินกลางเสมอ
+function Config.getPenUpgradeSignSpot(index: number, kind: PenSignKind): (Vector3, Vector3)
+	local map = Config.MapDimensions
+	local center = Config.getPenPlotCenter(index)
+	local _, outward = Config.getPenGateLine(index)
+	-- หันหน้าเข้าประตู = มองไปทาง −outward (แกน Z) → มือขวาชี้ไปทาง X = outward
+	local side = if kind == "pen" then outward else -outward
+	local half = map.MapSign.BoardSize.X / 2
+	local nearEdge = map.Pen.GateWidth / 2 + map.Pen.SignGateClearance
+	local offset = if side > 0
+		then nearEdge + map.Pen.SignSize.X + map.MapSign.NameSignGap + half
+		else -(nearEdge + half)
+	local nameSign = Config.getPenNameSignSpot(index)
+	return vec3(center.X + offset, 0, nameSign.Z), vec3(0, 0, outward)
+end
+
+-- ป้ายอัปดาเมจ — **จุดเดียวใช้ร่วมกัน ที่ปากทางเข้าเลนรบ ฝั่งลาน** (ตัดสินใน UI-2)
+-- กำแพงกั้นด่านเป็นของแต่ละคน (วาดฝั่ง client · อยู่คนละด่านกัน) → จุดร่วมต้องอยู่ช่วงที่ทุกคนเดินผ่าน
+-- ยืนบนหญ้าก่อนถึงต้นเลน ระหว่างแนวกำแพงเลนด้านเหนือกับรั้วคอกแถวบน · หน้าป้ายหันไปทางลาน (−X)
+-- · คืน (จุดบนพื้นใต้เสา, ทิศที่หน้าป้ายหันไป)
+function Config.getDamageSignSpot(): (Vector3, Vector3)
+	local map = Config.MapDimensions
+	local z = (map.Lane.Width / 2 + map.Pen.RowGap / 2) / 2
+	return vec3(Config.getLaneStartX() - map.MapSign.DamageInsetX, 0, z), vec3(-1, 0, 0)
+end
+
+-- ร้านขายแม่ = กึ่งกลางแผงร้าน SellStallIndex (ใช้วางจุดกด E และวัดระยะปิดหน้าต่าง)
+function Config.getSellShopSpot(): Vector3
+	return Config.getShopStallCenter(Config.MapDimensions.MapSign.SellStallIndex)
+end
+
+-- ชื่อโมเดลป้ายใน Workspace.Map.MapSigns — MapBuilder ตั้ง · client หาด้วยชื่อเดียวกัน
+Config.MAP_SIGN_FOLDER = "MapSigns"
+-- Attribute บนตัว Player = เลขคอกที่จองได้ (PenService ตั้งตอนจอง · ล้างตอนคืน) · client ใช้แยกป้ายคอกตัวเอง
+Config.PEN_INDEX_ATTRIBUTE = "PenIndex"
+function Config.getMapSignName(kind: "damage" | PenSignKind, penIndex: number?): string
+	if kind == "damage" then
+		return "DamageUpgradeSign"
+	end
+	local prefix = if kind == "speed" then "SpeedUpgradeSign" else "PenUpgradeSign"
+	return `{prefix}{penIndex or 0}`
+end
+
 function Config.getPenCapacity(level: number): number
 	local clamped = math.clamp(math.floor(level), 1, Config.Balance.Pen.MAX_LEVEL)
 	return Config.Balance.Pen.BASE_CAPACITY + (clamped - 1) * Config.Balance.Pen.CAPACITY_PER_LEVEL
@@ -3529,6 +3621,57 @@ function Config.validate()
 			`Config: แผงร้าน {stallIndex} อยู่นอกกำแพงใสตามแกน Z`
 		)
 	end
+
+	-- ══ ป้ายบนแมพ (UI-2) ══ ต้องไม่ขวางประตู · ไม่ทับป้ายชื่อ · ไม่ล้ำไปแปลงข้าง ๆ · อยู่ในกำแพงใส
+	local sign = dim.MapSign
+	assert(
+		sign.SellStallIndex >= 1 and sign.SellStallIndex <= dim.Shop.StallCount and sign.SellStallIndex % 1 == 0,
+		`Config: MapSign.SellStallIndex = {sign.SellStallIndex} ไม่มีแผงร้านนี้ (มี {dim.Shop.StallCount} แผง)`
+	)
+	assert(
+		sign.SellCloseDistance > sign.SellPromptDistance,
+		"Config: MapSign.SellCloseDistance ต้องไกลกว่า SellPromptDistance ไม่งั้นกดเปิดร้านแล้วหน้าต่างปิดเองทันที"
+	)
+	local signHalf = sign.BoardSize.X / 2
+	for penIndex = 1, Config.World.MAX_PENS do
+		local center = Config.getPenPlotCenter(penIndex)
+		local nameSign = Config.getPenNameSignSpot(penIndex)
+		local spots: { Vector3 } = {}
+		-- ⚠️ ต้องประกาศชนิดของ kind เอง — ไม่งั้น Luau ขยาย "speed" | "pen" เป็น string แล้วส่งเข้าฟังก์ชันไม่ได้
+		local kinds: { PenSignKind } = Config.getPenSignKinds()
+		for kindIndex = 1, #kinds do
+			local kind: PenSignKind = kinds[kindIndex]
+			local spot = Config.getPenUpgradeSignSpot(penIndex, kind)
+			table.insert(spots, spot)
+			local fromGate = math.abs(spot.X - center.X) - signHalf
+			assert(
+				fromGate >= dim.Pen.GateWidth / 2 + dim.Pen.SignGateClearance - 1e-6,
+				`Config: ป้าย {kind} ของคอก {penIndex} ขวางประตู (ห่างขอบประตู {fromGate - dim.Pen.GateWidth / 2})`
+			)
+			assert(
+				math.abs(spot.X - nameSign.X) >= signHalf + dim.Pen.SignSize.X / 2 - 1e-6,
+				`Config: ป้าย {kind} ของคอก {penIndex} ทับป้ายชื่อคอก`
+			)
+			assert(
+				math.abs(spot.X - center.X) + signHalf <= dim.Pen.Size.X / 2,
+				`Config: ป้าย {kind} ของคอก {penIndex} ล้ำออกนอกแนวคอก (ไปทับช่องว่างระหว่างคอก)`
+			)
+		end
+		assert(spots[1].X ~= spots[2].X, `Config: ป้ายค่าวิ่งกับป้ายอัปคอกของคอก {penIndex} อยู่ที่เดียวกัน`)
+	end
+	local damageSpot = Config.getDamageSignSpot()
+	assert(
+		damageSpot.Z - signHalf >= dim.Lane.Width / 2,
+		"Config: ป้ายดาเมจล้ำเข้าไปในปากเลนรบ (ขวางทางเข้าเลน)"
+	)
+	assert(
+		damageSpot.Z + signHalf <= dim.Pen.RowGap / 2,
+		"Config: ป้ายดาเมจล้ำเข้าไปในแนวคอกแถวบน"
+	)
+	assert(
+		damageSpot.X < Config.getLaneStartX() and damageSpot.X <= eastWallInnerX,
+		"Config: ป้ายดาเมจต้องอยู่ในลาน ก่อนถึงต้นเลน (ในกำแพงใส)"
+	)
 
 	-- ══ แม่เดินไปมา ══
 	assert(dim.Wander.Speed > 0, "Config: WANDER_SPEED ต้องมากกว่า 0")

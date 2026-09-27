@@ -187,6 +187,8 @@ local function describeMother(mother: Mother, wallProgress: number)
 		-- ⚠️ คิดที่ server เพราะรวมบัฟสถานะ (statuses ไม่ได้ส่งให้ client) · แม่ในกระเป๋าไม่ได้ผลิตจริง
 		-- ค่านี้คือ "ถ้าเข้าคอกจะได้เท่าไหร่"
 		coinsPerMinute = Config.getCoinsPerMinute(mother.weight, wallProgress, mother.statuses),
+		-- UI-2: ราคาขายที่ร้านขายแม่ — สูตรเดียวกับที่ sellMother จ่ายจริง (client ห้ามคิดราคาเอง)
+		sellPrice = Config.getMotherSellPrice(mother.weight, wallProgress, mother.statuses),
 	}
 end
 

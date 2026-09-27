@@ -18,6 +18,7 @@
 -- ══ สิ่งที่ไฟล์นี้สร้าง (server · ทุกคนเห็นเหมือนกัน) ══
 --   ลานหญ้า + คอก 6 แปลงพร้อมรั้วไม้เตี้ย · แผงร้านค้า · เลนรบพร้อมกำแพงสองข้าง
 --   ห้องบอส 1 ห้องต่อด่าน พร้อมจุดวางไข่ · กำแพงใสกันตกขอบแมพ
+--   ป้ายอัปเกรดบนแมพ (UI-2) — **ตัวป้ายเปล่า ๆ** ข้อความ + จุดกด E ติดฝั่ง client (src/client/MapSigns.lua)
 --
 -- ══ สิ่งที่ไฟล์นี้ **ไม่** สร้าง ══
 --   กำแพงกั้นด่าน · ทหารฝ่ายรับ · กองทัพผู้เล่น → **วาดฝั่ง client**
@@ -205,14 +206,14 @@ local function fenceRun(
 end
 
 -- รั้วครบสี่ด้านของแปลง · ด้านที่หันเข้าทางเดินกลางเว้นช่องประตูไว้ตรงกลาง
--- ⚠️ คืนค่า Z ของแนวประตู ให้ผู้เรียกเอาไปวางป้ายข้างประตู
-local function buildFence(plot: Model, center: Vector3, sizeX: number, sizeZ: number): number
+local function buildFence(plot: Model, index: number, center: Vector3, sizeX: number, sizeZ: number)
 	local halfX, halfZ = sizeX / 2, sizeZ / 2
 	local left, right = center.X - halfX, center.X + halfX
 	local back, front = center.Z - halfZ, center.Z + halfZ
 
 	-- ประตูหันเข้าทางเดินกลาง: แถวบน (Z > 0) หันลง · แถวล่าง (Z < 0) หันขึ้น
-	local gateZ = if center.Z > 0 then back else front
+	-- ⚠️ แนวประตูมาจาก Config.getPenGateLine — ป้ายชื่อ/ป้ายอัปเกรด (UI-2) อ่านค่าเดียวกัน
+	local gateZ = Config.getPenGateLine(index)
 	local farZ = if center.Z > 0 then front else back
 
 	-- ด้านตรงข้ามประตู + สองด้านข้าง = รั้วเต็มไม่มีช่อง
@@ -224,19 +225,14 @@ local function buildFence(plot: Model, center: Vector3, sizeX: number, sizeZ: nu
 	local gateHalf = MAP.Pen.GateWidth / 2
 	fenceRun(plot, "FenceGateA", left, center.X - gateHalf, gateZ, true)
 	fenceRun(plot, "FenceGateB", center.X + gateHalf, right, gateZ, true)
-
-	return gateZ
 end
 
 -- ป้ายชื่อคอก — **ปักข้างประตู ไม่ใช่กลางประตู** (กันเดินชน)
 -- ปักบนหญ้าด้านนอกคอก ใกล้ประตู · ยกสูงให้อ่านได้จากมุมกล้องผู้เล่นทั่วไป
-local function buildPenSign(plot: Model, center: Vector3, gateZ: number, index: number): TextLabel
-	-- ออกไปทางทางเดินกลาง (ตรงข้ามกับกึ่งกลางคอก)
-	local outward = if center.Z > 0 then -1 else 1
-	local signZ = gateZ + outward * MAP.Pen.SignSize.Z * 2
-
-	-- ขยับไปข้างประตู ไม่ขวางทางเข้า
-	local signX = center.X + MAP.Pen.GateWidth / 2 + MAP.Pen.SignGateClearance + MAP.Pen.SignSize.X / 2
+-- ⚠️ ตำแหน่งมาจาก Config.getPenNameSignSpot — ป้ายอัปเกรดข้างประตู (UI-2) เว้นระยะจากจุดนี้
+local function buildPenSign(plot: Model, index: number): TextLabel
+	local spot = Config.getPenNameSignSpot(index)
+	local signX, signZ = spot.X, spot.Z
 
 	local postHeight = MAP.Pen.SignPostHeight
 	local post = fencePart(
@@ -316,8 +312,8 @@ function MapBuilder.buildPlaza(parent: Folder)
 		base.CanCollide = false
 		model.PrimaryPart = base
 
-		local gateZ = buildFence(model, center, sizeX, sizeZ)
-		local label = buildPenSign(model, center, gateZ, index)
+		buildFence(model, index, center, sizeX, sizeZ)
+		local label = buildPenSign(model, index)
 
 		penPlots[index] = { index = index, model = model, base = base, center = center, label = label }
 	end
@@ -357,15 +353,72 @@ function MapBuilder.buildShop(parent: Folder)
 		)
 		roof.CanCollide = false
 
-		makeLabel(if index == 1 then "ขายของ · ซื้อไข่" else "ซื้ออาวุธ", 220, counter, h * 0.4 + 3)
+		-- ⚠️ UI-2: แผง SellStallIndex = ร้านขายแม่ (เดิม "ขายของ · ซื้อไข่" — เงินในเกมซื้อไข่ไม่ได้ จึงเปลี่ยนป้าย)
+		-- client ติดจุดกด E ที่ Counter ของแผงนี้ (src/client/MapSigns.lua) → Persistent ให้หาเจอเสมอ
+		local isSellShop = index == MAP.MapSign.SellStallIndex
+		if isSellShop then
+			model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
+		end
+		makeLabel(if isSellShop then "ร้านขายแม่" else "ซื้ออาวุธ", 220, counter, h * 0.4 + 3)
 	end
 
 	-- ⚠️ **ไม่มีแท่นวาปแล้ว** (เอาออกรอบซื้อความเร็ว)
 	-- ผู้เล่นเดินไปเองทุกที่ · ปัญหาระยะทางแก้ด้วย Config.Balance.SpeedUpgrade แทน
 	-- และไม่มีแท่นวาปไปรังบอสด้วย — วาปไปรังได้เมื่อไหร่ การแย่งไข่ก็หมดความหมาย
 	--
-	-- อัปเกรดทั้งสองอย่าง (damage 72 ขั้น · ความเร็ว 5 ขั้น) มี**ปุ่มติดตัว เปิดได้ทุกที่**
-	-- แผงร้านในแมพเหลือไว้สำหรับ ขายของ · ซื้อไข่ · ซื้ออาวุธ เท่านั้น
+	-- ⚠️ UI-2: อัปเกรด (ดาเมจ · ความเร็ว · คอก) ย้ายจากปุ่มติดตัวไปเป็น**ป้ายบนแมพ กด E** (buildMapSigns)
+	-- แผงร้านเหลือ ร้านขายแม่ (แผง SellStallIndex) · ซื้ออาวุธ (Phase 5)
+end
+
+--------------------------------------------------------------------------------
+-- ป้ายอัปเกรดบนแมพ (UI-2) — แผ่นไม้บนเสา สไตล์เดียวกับป้ายชื่อคอก
+--------------------------------------------------------------------------------
+-- ⚠️ server สร้าง**แค่ตัวป้าย** (ทุกคนเห็นเหมือนกัน) · ข้อความเลเวล/ราคา + จุดกด E ติดฝั่ง client
+-- เพราะแต่ละคนเห็นค่าของตัวเอง และกดได้เฉพาะป้ายของคอกตัวเอง (src/client/MapSigns.lua)
+-- ตำแหน่งทั้งหมดมาจาก Config (getDamageSignSpot · getPenUpgradeSignSpot) — client ใช้ชื่อโมเดลชุดเดียวกัน
+
+local function buildMapSign(parent: Instance, name: string, ground: Vector3, facing: Vector3)
+	local model = Instance.new("Model")
+	model.Name = name
+	-- ⚠️ Persistent: client ติด SurfaceGui + ProximityPrompt ไว้กับแผ่นป้าย ถ้าเปิด StreamingEnabled
+	-- แล้วป้ายถูก stream ออก ของที่ client ติดไว้จะหายตามไปด้วย
+	model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
+	model.Parent = parent
+
+	local sign = MAP.MapSign
+	local postThickness = MAP.Pen.FenceThickness * 1.5
+	local post = fencePart(model, "Post", Vector3.new(postThickness, sign.PostHeight, postThickness), ground)
+	post.Material = Enum.Material.Wood
+
+	-- แผ่นป้ายหันหน้าตาม facing: หันตามแกน Z → กว้างตามแกน X · หันตามแกน X → กว้างตามแกน Z
+	local size = if math.abs(facing.X) > 0.5
+		then Vector3.new(sign.BoardSize.Z, sign.BoardSize.Y, sign.BoardSize.X)
+		else sign.BoardSize
+	local board = makePart("Board", size, Vector3.new(ground.X, sign.PostHeight, ground.Z), COLORS.sign, model)
+	board.Material = Enum.Material.WoodPlanks
+	board.CanCollide = false
+	board.CastShadow = false
+	model.PrimaryPart = board
+end
+
+function MapBuilder.buildMapSigns(parent: Folder)
+	local folder = Instance.new("Folder")
+	folder.Name = Config.MAP_SIGN_FOLDER
+	folder.Parent = parent
+
+	local damageSpot, damageFacing = Config.getDamageSignSpot()
+	buildMapSign(folder, Config.getMapSignName("damage"), damageSpot, damageFacing)
+
+	-- ป้ายค่าวิ่ง + อัปคอก **ทุกคอก** (คอกของคนอื่น client ไม่ติดจุดกด E ให้)
+	for index = 1, Config.World.MAX_PENS do
+		-- ⚠️ ต้องประกาศชนิดของ kind เอง — ไม่งั้น Luau ขยาย "speed" | "pen" เป็น string แล้วส่งเข้าฟังก์ชันไม่ได้
+		local kinds: { Config.PenSignKind } = Config.getPenSignKinds()
+		for kindIndex = 1, #kinds do
+			local kind: Config.PenSignKind = kinds[kindIndex]
+			local spot, facing = Config.getPenUpgradeSignSpot(index, kind)
+			buildMapSign(folder, Config.getMapSignName(kind, index), spot, facing)
+		end
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -722,6 +775,7 @@ function MapBuilder.build()
 	MapBuilder.buildBattleLane(folder)
 	MapBuilder.buildBossRooms(folder)
 	MapBuilder.buildBoundary(folder)
+	MapBuilder.buildMapSigns(folder)
 
 	MapBuilder.buildSpawns(folder)
 

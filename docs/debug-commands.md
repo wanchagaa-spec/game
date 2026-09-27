@@ -218,6 +218,34 @@ EggService.debugWipeSavedData(player, player.Name)  -- ต้องส่งช�
 
 ---
 
+## คำสั่งบอส + วงจรกลางวัน/กลางคืน (Phase 5A) — อยู่ที่ `BossService`
+
+เรียกผ่าน**สะพานเดียวกัน** (`ServerStorage.EggServiceDebug`) — สะพานหาชื่อใน `EggService` ก่อน ไม่เจอค่อยหาใน `BossService`
+ทุกคำสั่งคืน**ข้อความสรุปสถานะ** (phase · เหลือกี่วิ · HP บอส · ผู้ทำดาเมจ · ล็อกกี่คน) ให้ดูใน Output ทันที
+⚠️ ไม่มีอะไรเซฟลง DataStore — สถานะบอสเป็นของเซิร์ฟ (memory) · คำสั่งพวกนี้วิ่งทางเดียวกับลูปจริง (วาป · กำแพงกั้น · แจ้งเตือน)
+
+| คำสั่ง | ทำอะไร |
+|---|---|
+| `debugBossNight()` | ข้ามไป**ต้นกลางคืน**ทันที: วาปทุกคนมาหน้าป้อม · กำแพงกั้นขึ้น · บอสเกิด (ตัวเก่ายังไม่ตาย = ฟื้น HP เต็ม) · นับ 59 → 0 ใหม่ |
+| `debugBossDay()` | ข้ามไป**ต้นกลางวัน**ทันที: กำแพงกั้นหาย เข้าไปตีบอสได้ (ไม่มีบอส = ใช้ `debugBossNight` ก่อน) |
+| `debugDamageBoss(player, amount)` | ทำดาเมจ `amount` ในนามผู้เล่นคนนั้น — นับเข้าบันทึกผู้ทำดาเมจเหมือนตีจริง · กติกาเดิม: กลางวัน + บอสยังอยู่ |
+| `debugKillBoss(player)` | ฆ่าบอสในนามผู้เล่นคนนั้น (ดาเมจเท่า HP ที่เหลือ) → "กำจัดบอสแล้ว!" · ปลดล็อกอัญเชิญทุกคน |
+| `debugBossStatus()` | ดูสถานะอย่างเดียว ไม่เปลี่ยนอะไร |
+
+```lua
+game.ServerStorage.EggServiceDebug:Invoke("debugBossNight")
+game.ServerStorage.EggServiceDebug:Invoke("debugBossDay")
+game.ServerStorage.EggServiceDebug:Invoke("debugDamageBoss", game.Players:GetPlayers()[1], 300)
+game.ServerStorage.EggServiceDebug:Invoke("debugKillBoss", game.Players:GetPlayers()[1])
+print(game.ServerStorage.EggServiceDebug:Invoke("debugBossStatus"))
+```
+
+- อยากเห็นข้อความคืนมา → ห่อด้วย `print(...)` (Output เห็นบรรทัด `[BossService] ...` อยู่แล้วทุกครั้งที่ phase เปลี่ยน/บอสตาย)
+- ทดสอบล็อกอัญเชิญเร็ว ๆ: `debugBossNight` → `debugBossDay` (บอสอยู่) → `debugSetStageProgress(player, 2, 0, 1)`
+  (ด่าน 2 เหลือ HP 1) → เปิดอัญเชิญ → ทหารพังกำแพงด่าน 2 → ติดล็อก · ขั้นตอนเต็มใน `docs/phase5-test-checklist.md`
+
+---
+
 ## ตัวอย่าง flow ทดสอบครบทุก tier
 
 ⚠️ เขียนแบบ `require` ให้อ่านง่าย — ใน Command Bar ต้องแปลงเป็น `game.ServerStorage.EggServiceDebug:Invoke(...)` ทีละบรรทัด (ดูหัวเอกสาร)

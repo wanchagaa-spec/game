@@ -335,7 +335,23 @@ Core loop:
   `assertTurretIsSurvivable()` บังคับ: ครบ 9 ด่าน · ด่าน 1 = 0 · ≤ 35% · ไล่ขึ้นไม่ถอยหลัง
 
 ### บอสและการแย่งไข่
-- บอสรีเกิดทุก **5 นาที** ตอนเกิดมี **ไข่ 5 ฟอง** วางในรัง
+⚠️ **Phase 5A เปลี่ยนดีไซน์แล้ว (ผู้ใช้ยืนยัน)**: **บอสตัวเดียวใช้ร่วมกันทั้งเซิร์ฟ** อยู่ห้องบอสด่าน 1 · วงจร **กลางวัน 9 นาที + กลางคืน 1 นาที**
+(`Config.Balance.BossCycle` · `src/server/BossService.lua` · ผัง `docs/map-layout.md` §4.3)
+- ⚠️ **ทำไมห้องบอสด่าน 1 ไม่ใช่ "หลังกำแพงด่าน"**: กำแพงด่านวาดแยกต่อคนฝั่ง client **และชนได้จริง** → ผู้เล่นด่าน 1 ไปได้แค่ก่อน X 320 ·
+  ช่วงด่าน 1 (ไม่มีกำแพง) คือที่เดียวที่ทุกคนเดินถึง · `validate()` บังคับ `BossArena.Stage` ต้องเป็นด่านที่ไม่มีกำแพง
+- **กลางคืน**: วาปทุกคนมาหน้าป้อม · กำแพงกั้น (server ชิ้นเดียว · ชนเฉพาะผู้เล่น — ทหารเป็นภาพไม่ชน) · ตัวเลข 59 → 0 (client `BossHud`) ·
+  บอสเกิด — ตัวเก่ายังไม่ตาย = **ฟื้น HP เต็ม** · **กลางวัน**: กำแพงกั้นหาย เข้าไปตีได้ · ตายแล้วไม่เกิดจนคืนถัดไป · เซิร์ฟเปิดใหม่ = ต้นกลางวัน **ไม่เซฟ**
+- **ตีบอส = อาวุธขั้นต่ำ** (ระบบ personal combat ของ Phase 4 **ยังไม่มีในโค้ด** — ผู้ใช้เลือกทำขั้นต่ำในรอบนี้): Tool ที่ server ใส่ Backpack ·
+  ถือ/เก็บ**อัตโนมัติ**ในเขตบอส (Backpack ของ Roblox ปิดอยู่) · `Tool.Activated` ถึง server ตรง **ไม่มี RemoteEvent** · server ตรวจ กลางวัน/บอสอยู่/
+  คูลดาวน์/ระยะ · ดาเมจ `Config.getWeaponDamage(weaponLevel)` · ยังไม่มี PvP/ผู้เล่นตาย · บอสตีกลับ**ปิดใน config** · HP บอส 1,000 **ชั่วคราว**
+- บันทึก**ใครทำดาเมจบอสตัวนี้เท่าไร** (`damageBy` ใน BossService) ให้ 5B แบ่งเงิน · บอสตาย = toast "กำจัดบอสแล้ว!" ทุกคน · **ยังไม่แจกรางวัล**
+- ⚠️ **ล็อกอัญเชิญ**: พังกำแพงด่าน (ที่มีกำแพงจริง) ขณะบอสยังอยู่ → ทหารหยุด (`summonEnabled = false`) · เปิดอัญเชิญ/ส่งแม่ถูกปฏิเสธ
+  จนกว่าบอสตาย (ปลดทุกคนพร้อมกัน · กด "ส่งไปรบ" ใหม่เอง) · ไม่ตายข้ามคืน = ยังล็อก · ตัดสิน**หลัง tick** (ผ่านด่าน/รางวัล 4A/แม่ตาย ไม่ถูกแตะ) ·
+  เก็บใน memory ของเซิร์ฟ (**ไม่แตะ schema**) · รวมกับ auto-pause ไม่แทนที่ · `docs/data-schema.md` §7.6.1
+- ⚠️ `Config.Balance.Boss` ชุดเดิม (รีเกิด 5 นาที · ไข่ 5 ฟอง · HP ×10 ต่อด่าน) **ยังไม่ลบ** — `validate()` ผูกกับอาวุธ · 5B ตัดสิน
+- ⏳ **5B**: ไข่ **6 ฟอง**หลังบอส (ตำแหน่งกันไว้แล้ว `Config.getBossCycleEggSpot`) · แย่งไข่ · แบ่งเงิน · แจ้งเตือนไข่หนัก · **5C** ร้านอาวุธ
+
+กติกาเดิมของการแย่งไข่ (ยังใช้กับ 5B):
 - ทุกคนช่วยกันตีบอสได้ **การตีบอสเป็นแค่กิมมิค กลไกจริงคือการแย่งไข่**
 - หยิบไข่ต้อง **กดค้าง 3 วินาที** ถูกตีระหว่างนั้น = เริ่มนับใหม่
 - ⚠️ **server เป็นคนตัดสินเจ้าของไข่เท่านั้น** ห้าม client ตัดสินเด็ดขาด
@@ -403,6 +419,10 @@ src/
                             wallHpRemaining ต่อด่าน + จ่ายเงินตามสัดส่วน HP ทหารฝ่ายรับที่ลด +
                             auto-pause · ไม่มี offline catch-up (รับ elapsedSeconds ตรง ๆ)
                             · Phase 3C-1: ส่งแม่ลง `battleRoster` + แม่ตาย/ล้าง roster ตอนด่านพัง
+                            · Phase 5A: ล็อกอัญเชิญเพราะบอส (`shouldBossLock` หลัง tick · gate จาก BossService)
+    BossService.lua      → Phase 5A: วงจรกลางวัน/กลางคืน + บอสตัวเดียวของเซิร์ฟ + ตีบอส (Tool) + บันทึกผู้ทำดาเมจ +
+                            `lockedUsers` · ฟังก์ชันสถานะรับ `now` เอง (เทสต์นอก Studio: `tests/boss.spec.luau`) ·
+                            **ไม่เซฟ DataStore** · คำสั่ง `debugBoss*` ผ่านสะพาน EggServiceDebug
   client/   → StarterPlayerScripts (UI ทั้งหมด + ของที่เห็นเฉพาะตัวเอง)
     Main.client.lua      → StarterPlayerScripts.Main (entry point)
     WallRenderer.lua     → ⚠️ วาดกำแพงตาม `stageProgress` จริงจาก sync (ไม่ใช่ wallProgress)
@@ -435,6 +455,8 @@ src/
                             ทะลุเพดานดาเมจ/ความเร็ว ("Lv. Robux N") · เร่งฟักไข่ทั้งหมด · ราคาดึงจาก
                             `MarketplaceService:GetProductInfo()` สด (แคชต่อ productId) · ไม่ FireServer เอง —
                             ยิง `MarketplaceService:PromptProductPurchase` ตรงผ่าน action ที่ `Main.client.lua` ส่งเข้ามา
+    BossHud.lua          → Phase 5A: ตัวเลข 59 → 0 บนกำแพงกั้นบอส (SurfaceGui ใน PlayerGui) · อ่าน Attribute ของ
+                            `ReplicatedStorage.BossState` + `workspace:GetServerTimeNow()` · ตรวจด้วย `tools/check-ui-smoke.py`
   shared/   → ReplicatedStorage.Shared (config, constants, type ที่ใช้ร่วมกัน)
     init.lua             → ตัว Shared เองเป็น ModuleScript (เป็นแค่ฝา)
     Config.lua           → ⚠️ โครงหลัก: ตัวละคร/คลาส tier น้ำหนัก ตารางคลาสของไข่
@@ -457,6 +479,7 @@ docs/
   phase-4b-report.md   → รายงานสรุป Phase 4B (ล็อกแม่ + แม่ตายใน popup ผ่านด่าน + สะพาน debug) + ผลทดสอบ Studio
   ui-overhaul-plan.md  → ⚠️ แผนจัดหน้าจอใหม่ 5 รอบ (UI-1…UI-5) + กติกาช่วงเปลี่ยนผ่าน (แผง TEMP) + ตำแหน่งบนจอ
   ui-test-checklist.md → เช็คลิสต์ทดสอบ Studio รวม UI-1 · UI-2 · UI-3 · UI-4 เรียงตามทางเดินจริงในเกม (ผู้ใช้ทดสอบรวดเดียวตอนจบ)
+  phase5-test-checklist.md → เช็คลิสต์ทดสอบ Studio ของ Phase 5 (5A วงจรบอส/ล็อกอัญเชิญ · ใช้คำสั่ง debug ข้ามเวลา · 5B/5C ต่อท้าย)
 default.project.json   → mapping ของ Rojo
 ```
 
@@ -539,7 +562,14 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
     ขยายแผงไข่/แม่ในคอก · ไม่แตะ logic การรบ/ระยะที่ใช้คำนวณ/schema เลย — เช็คลิสต์ต่อท้าย `docs/ui-test-checklist.md` §9
     · การตัดสินใจเต็ม `docs/ui-overhaul-plan.md` §9 · ⚠️ **ห้าม merge จนกว่าผู้ใช้สั่ง**
 - **Phase 4** — ระบบรบด้วยตัวเอง: อาวุธ · ตี · ตาย · เกิดใหม่ (จำกัดในพื้นที่บอส)
-- **Phase 5** — บอส + รีเกิด 5 นาที + ไข่ 5 ฟอง + กติกาแย่งไข่ (กดค้าง 3 วิ) + ร้านอาวุธ
+  ⚠️ **ยังไม่ได้ทำเต็มรูปแบบ** — Phase 5A ทำแค่ขั้นต่ำที่ต้องใช้ตีบอส (อาวุธ Tool ถือ/เก็บอัตโนมัติ · server ตรวจการโดน)
+  ยังไม่มี PvP · ผู้เล่นตาย/เกิดใหม่ในพื้นที่บอส · ต่อยอดจาก `BossService.tryAttack` ได้
+- **Phase 5** — บอส + ไข่ + กติกาแย่งไข่ (กดค้าง 3 วิ) + ร้านอาวุธ (ดีไซน์ใหม่: บอสตัวเดียวของเซิร์ฟ · วงจรกลางวัน/กลางคืน)
+  - **5A** ✅ เขียนแล้ว **ยังไม่ได้ทดสอบใน Studio** — วงจรกลางวัน 9 / กลางคืน 1 นาที · บอสตัวเดียวที่ห้องบอสด่าน 1 ·
+    กลางคืนวาปมาหน้าป้อม + กำแพงกั้น + ตัวเลข 59 → 0 · ตีบอสด้วยอาวุธขั้นต่ำ · บันทึกผู้ทำดาเมจ · ล็อกอัญเชิญเมื่อพังกำแพง
+    ขณะบอสยังอยู่ · ไม่แตะ schema · คำสั่ง debug ข้ามเวลา · 📄 เช็คลิสต์ `docs/phase5-test-checklist.md` · ⚠️ **ห้าม merge จนกว่าผู้ใช้สั่ง**
+  - **5B** — ไข่ 6 ฟองหลังบอส · แย่งไข่ · แบ่งเงินบอส · แจ้งเตือนไข่หนัก (ยังไม่เริ่ม)
+  - **5C** — ร้านอาวุธ (ยังไม่เริ่ม)
 - **Phase 5.5** — **Hotbar 10 ช่อง** (ช่องถือของ · hotkey 1-9,0 · มือถือ 4-5 ช่อง)
   📄 ดีไซน์อยู่ใน `docs/hotbar-design.md` · **ยังไม่ได้เขียนโค้ด ยังไม่มี schema**
   ⚠️ **แต่ละช่องเป็น shortcut ชี้ไปที่ของในกระเป๋าจริง ไม่ใช่ inventory ใหม่**
@@ -605,10 +635,10 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   ห้ามเปลี่ยนชื่อ ห้าม reuse (เลิกใช้ให้ตั้ง `enabled = false` แทนการลบ)
 - **config กลางใน `src/shared`** — ตัวละคร/คลาส, tier น้ำหนัก, ตารางคลาสของไข่,
   `CHILD_RATIO`, อัตราผลิต, สูตร damage/เงิน, ราคาทุกอย่าง, เพดานคลัง
-- **`Config.Balance` — ลูกบิดสมดุลทั้งหมดอยู่ใต้ชื่อเดียว** 19 กลุ่ม:
+- **`Config.Balance` — ลูกบิดสมดุลทั้งหมดอยู่ใต้ชื่อเดียว** 20 กลุ่ม:
   `Weight` · `StageWeightTiers` · `Production` · `Damage` · `NewPlayer` · `Economy` ·
   `Pen` · `Bag` · `Hatchery` · `Stages` · `Stage` · `Boss` · `DamageUpgrade` ·
-  `SpeedUpgrade` · `Combat` · `BalanceCheck` · `Weapon` · `VisualScale` · `RobuxBoost`
+  `SpeedUpgrade` · `Combat` · `BalanceCheck` · `Weapon` · `VisualScale` · `RobuxBoost` · `BossCycle` (Phase 5A)
   **ชื่อคีย์ข้างในคงเดิมทั้งหมด** ย้ายแค่ที่อยู่
   ⚠️ `validate()` บังคับสองทาง: ต้องมีครบทุกกลุ่มใน `Config.Balance`
   **และต้องไม่มีชื่อเดียวกันที่ `Config` ชั้นบนสุด** — เติมกลับเข้าไปเมื่อไหร่ เซิร์ฟไม่บูต
@@ -685,6 +715,14 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   · **`SetReleaseOrderRequest` ความหมายแคบลงใน UI-3** = กองที่ติ๊กให้ปล่อย (signature เดิม · §7.2.1))
   · ⚠️ **UI-5 ไม่เพิ่ม RemoteEvent ใหม่เลยสักตัว** — การซื้อ Robux ทั้งหมดยิง
   `MarketplaceService:PromptProductPurchase` ตรงจาก client (ไม่ผ่าน server จนกว่าจะถึง `ProcessReceipt`)
+  · **Phase 5A: `BossEventNotify(kind)`** server → client — `FireAllClients("night" | "day" | "killed")` +
+  `FireClient(player, "locked")` เฉพาะคนที่เพิ่งติดล็อก · ข้อความที่ `Config.formatBossEventMessage` ·
+  **ตีบอสไม่มี RemoteEvent** (`Tool.Activated` ของอาวุธที่ server สร้าง) · สถานะบอสต่อเนื่อง (phase/เวลาจบ/HP) อยู่ใน
+  **Attribute ของ `ReplicatedStorage.BossState`** (`Phase` · `PhaseEndsAt` = เวลา server · `BossAlive` · `BossHp` · `BossMaxHp` · `Cycle`)
+  · FarmStateSync เพิ่ม `summonBlockReason` + `bossLocked` (ไม่แตะ schema)
+- **ล็อกอัญเชิญเพราะบอส (Phase 5A)** — ตัดสินที่ `CombatService.start` **หลัง tick** เท่านั้น (`shouldBossLock` · ด่านที่มีกำแพงจริง ·
+  บอสยังอยู่) · ห้ามย้ายเข้าไปใน `tick` (จะไปกระทบผ่านด่าน/รางวัล 4A/แม่ตาย) · ปลดได้ทางเดียว = บอสตาย · เก็บใน memory
+  (`BossService.lockedUsers`) — ย้ายไปเซฟ DataStore เมื่อไหร่ = ต้องแก้ schema + migration
 - โครงโฟลเดอร์ `src/server|client|shared` และการแตก/รวมไฟล์
 - อะไรก็ตามที่ทำให้ข้อมูลผู้เล่นเดิมอ่านไม่ออก
 
@@ -754,8 +792,13 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 ตกแต่งผิวกำแพงหินขอบแมพด้วย Part แยก (แถบคราบชื้น + มอส — ไม่ใช้ asset ภาพ) · ขยายแผงไข่/แม่ในคอกจาก 17%×31.5%
 เป็น 21%×40% · ไม่แตะ logic การรบ/ระยะที่ใช้คำนวณ/schema เลย · การตัดสินใจเต็ม + เช็คลิสต์: `docs/ui-overhaul-plan.md` §9
 + `docs/ui-test-checklist.md` §9 · ⚠️ **ห้าม merge จนกว่าผู้ใช้สั่ง**
+**Phase 5A (วงจรกลางวัน/กลางคืน + บอสกลาง + ตีบอส + ล็อกอัญเชิญ) เขียนเสร็จแล้ว** — **ยังไม่ได้ทดสอบใน Studio** ·
+`BossService.lua` (ใหม่) · `BossHud.lua` (ใหม่) · `Config.Balance.BossCycle` + `MapDimensions.BossArena` + `BossEventNotify` ·
+บอสอยู่ห้องบอสด่าน 1 (ช่วงเดียวที่ทุกคนเดินถึง — ผู้ใช้เลือกหลังตรวจพบว่ากำแพงด่านชนได้จริงแยกต่อคน) ·
+ระบบ personal combat ของ Phase 4 ไม่มีในโค้ด → ทำอาวุธขั้นต่ำ (ผู้ใช้เลือก) · ล็อกอัญเชิญเก็บใน memory · ไม่แตะ schema (ยัง v5) ·
+ค่าชั่วคราว: HP บอส 1,000 · คูลดาวน์ตี 0.5 วิ · ระยะตี 14 · บอสตีกลับปิด · 📄 `docs/phase5-test-checklist.md` · ⚠️ **ห้าม merge จนกว่าผู้ใช้สั่ง**
 
-ชุดเทสต์ `luau tests/run.luau` ผ่านทั้งหมด **1399 เคส** (Config · PlayerData/DataService · Production · Combat ·
+ชุดเทสต์ `luau tests/run.luau` ผ่านทั้งหมด **1534 เคส** (Config · PlayerData/DataService · Production · Combat · Phase 5A บอส ·
 Upgrades) + สคริปต์ตรวจใน `tools/` — รันรวมด้วย `python3 tools/check-all.py` · ฝั่ง Config ครอบคลุม (สุ่มน้ำหนัก 5 ล้านครั้ง · สุ่มตัวละคร 300,000 ครั้งต่อไข่ · ไข่รายด่าน 60,000 ครั้งต่อด่าน ·
 stack key · uid · บัฟสถานะ · แหล่งที่มาไข่ · Developer Product · ร้านค้า Robux (UI-5) · ProcessReceipt idempotency
 (`debugSimulateReceipt`) · ตารางด่าน · อัตราปล่อย ·
@@ -861,6 +904,9 @@ stack key · uid · บัฟสถานะ · แหล่งที่มา�
   และจาก `debugSetStageProgress` · ⚠️ ฟังก์ชันนี้ไล่นับสถานะใหม่ทุกครั้ง **ห้ามใส่รางวัลผ่านด่านไว้ในนี้**
 
 ค้างอยู่ตอนนี้:
+- **Phase 5A ยังไม่ได้ทดสอบใน Studio** (`docs/phase5-test-checklist.md`) — จุดที่เทสต์นอก Studio ยืนยันไม่ได้และต้องดูก่อน:
+  `Tool.Activated` ของอาวุธที่ server สร้างถึง server จริง (ตีบอสแล้ว HP ลด) · ถือ/เก็บอาวุธอัตโนมัติด้วย `Humanoid:EquipTool` ฝั่ง server ·
+  วาปกลางคืนไม่ติดพื้น/ไม่ซ้อนกัน · ตัวเลขบนกำแพงกั้นอ่านออกและหันถูกด้าน
 - **เช็คลิสต์ Studio ที่ยังไม่ได้ไล่ครบ** → `docs/map-layout.md` §11 และ `docs/phase-1.5-rework.md` §8
 - **Phase 3A+3B-1+3B-2 ยังไม่ได้ไล่เช็คลิสต์ใน Studio ครบ** — กำแพงหายตามด่านที่พัง/HUD/ปุ่มอัญเชิญ
   ใช้งานจริงใน Studio แล้วระหว่างทดสอบ 3C/4A แต่ยังไม่ได้เช็คโมเดลทหารสองฝั่ง (เขียว/แดง) วิ่ง/ยืนถูกตำแหน่ง ·

@@ -66,7 +66,8 @@
 
 ```lua
 PlayerData = {
-    schemaVersion = 4,                     -- number  v2 = battleRoster (3C-1) · v3 = stageClearBonusGranted (4A) · v4 = discovered (UI-4) · ดู §10.4
+    schemaVersion = 5,                     -- number  v2 = battleRoster (3C-1) · v3 = stageClearBonusGranted (4A) · v4 = discovered (UI-4)
+                                           --         v5 = robuxDamageBonus/robuxSpeedBonus/processedPurchaseIds (UI-5) · ดู §10.4
 
     currency = {
         coins = 500,                       -- number  ได้จากแม่ในคอก ใช้ซื้อทุกอย่าง
@@ -213,6 +214,19 @@ PlayerData = {
     -- charId ที่ไม่มีใน Config แล้ว (ตัวละครถูกลบ) ค้างได้ ไม่พัง ดัชนีข้ามเอง · ยังไม่แยกตามสถานะ gold/silver
     discovered = { monkey = true, wukong = true },
 
+    -- ══ ร้านค้า Robux (UI-5 · schema v5) ══ ดู §3.5 + §8.7
+    -- โบนัสทะลุเพดานแทร็กเงินในเกม — เก็บเป็น "จำนวนขั้น" ไม่ใช่ตัวคูณ (คูณสดผ่าน Config เสมอ)
+    -- แยกจาก damageLevel/speedLevel (แทร็กเงินในเกม) โดยสิ้นเชิง เดินหน้าอย่างเดียว ไม่มีเพดาน
+    robuxDamageBonus = 0,                  -- number  ขั้น "พลังทะลุเพดาน" ที่ซื้อสะสมด้วย Robux
+    robuxSpeedBonus  = 0,                  -- number  ขั้น "ความเร็วทะลุเพดาน" ที่ซื้อสะสมด้วย Robux
+                                           --         ผลจริง clamp ที่ Config.getRobuxSpeedHardCap()
+                                           --         เสมอ (ผูกกับความหนากำแพงที่สร้างไว้จริง)
+
+    -- ⚠️ กัน MarketplaceService.ProcessReceipt ให้ของซ้ำตอน Roblox retry ใบเสร็จเดิม
+    -- FIFO ยาวไม่เกิน Config.DataStore.PROCESSED_PURCHASE_LOG_CAP (200) — เก่าสุดถูกตัดทิ้งก่อน
+    -- ⚠️ ไม่ใช่ audit log ถาวร (ของนั้นคือ Config.PurchaseLog ที่แช่แข็งไว้ไม่ได้ใช้ — ดู §8.7)
+    processedPurchaseIds = { "550e8400-e29b-41d4-a716-446655440000" },
+
     -- ══ แม่ที่ส่งลงสนามรบ (Phase 3C-1) ══ ที่อยู่ที่ 3 ของแม่ — แม่ 1 ตัวอยู่ได้ที่เดียวเสมอ
     -- ส่งจาก **กระเป๋าเท่านั้น** (ย้ายออกจาก mothersInBag มาไว้ที่นี่ ช่องกระเป๋าว่างทันทีตอนส่ง)
     -- โครงเหมือน mothersInBag ทุกฟิลด์ · จำนวน ≤ Config.Balance.Combat.MAX_BATTLE_MOTHERS (10)
@@ -353,6 +367,30 @@ B เทรดแม่ uid 5 ให้ A  →  A มีแม่ uid 5 สอ�
 
 อนาคต: ถ้าเปิดระบบสถานะ (gold/silver) อาจแยกช่องดัชนีตามสถานะ — ตอนนี้ยังไม่แยก (ตัวละครเดียวกัน = ช่องเดียว)
 `debugResetAll` ล้าง `discovered` ด้วย (ทดสอบ "ได้ตัวใหม่ครั้งแรก" ซ้ำได้)
+
+### 3.5 ร้านค้า Robux (UI-5) — `robuxDamageBonus` / `robuxSpeedBonus` / `processedPurchaseIds`
+
+**แยกจากแทร็กเงินในเกม (`damageLevel`/`speedLevel`) โดยสิ้นเชิง** — คนละฟิลด์ คนละสูตร คนละเพดาน
+รวมกันเฉพาะตอนคำนวณค่าจริงที่ใช้เล่น (`Config.computeBattlePower(...)` รับ `robuxDamageSteps` เป็นพารามิเตอร์เสริมตัวที่ 5 ·
+`Config.getEffectiveWalkSpeed(speedLevel, robuxSpeedSteps)`) — สูตรเดิมของแทร็กเงินในเกม (`getArmyDamageMultiplier` / `getWalkSpeed`)
+**ไม่ถูกแก้เลยสักตัวอักษร** แค่มีตัวคูณ/โบนัสอิสระอีกตัวคูณ/บวกต่อท้าย
+
+- **`robuxDamageBonus`** — จำนวนขั้นที่ซื้อสะสม · ตัวคูณจริง = `Config.getRobuxDamageMultiplier(steps)` = `DAMAGE_MULTIPLIER_PER_STEP ^ steps`
+  **ไม่มีเพดาน** (ต่างจาก `damageLevel` ที่ clamp ที่ `MAX_LEVEL`) เพราะ damage ไม่มีค่าคงที่ทางฟิสิกส์ผูกอยู่แบบความเร็ว
+- **`robuxSpeedBonus`** — จำนวนขั้นที่ซื้อสะสม · ความเร็วจริงที่ใช้ = `Config.getEffectiveWalkSpeed(speedLevel, steps)`
+  = `min(getRobuxSpeedHardCap(), getWalkSpeed(speedLevel) + steps × SPEED_PER_STEP)`
+  ⚠️ **`getRobuxSpeedHardCap()` คำนวณย้อนกลับจากความหนากำแพงที่สร้างไว้จริง** (`min(StageWall.Thickness, Lane.WallThickness, Boundary.Thickness) ÷ THICKNESS_SAFETY × PHYSICS_FPS`)
+  แทนที่จะแตะ `MapDimensions`/ความหนากำแพงซึ่งเป็นโครงหลักที่ล็อกไว้แล้ว (§11) — วิธีนี้รับประกันว่าความเร็วรวมจริง
+  (ปกติ + Robux) จะไม่มีทางเกินที่กำแพงที่มีอยู่จริงรับไหว ไม่ว่าจะซื้อกี่ขั้นก็ตาม (ส่วนเกินหลังชน hard cap เสียเปล่า —
+  client ปิดปุ่มซื้อเองตอนถึงเพดานเพื่อกันผู้เล่นเสีย Robux ฟรี แต่ server ก็ clamp ผลจริงไว้อยู่ดีไม่ว่า client จะเช็คไหม)
+  `validate()` บังคับว่า `getRobuxSpeedHardCap()` ต้องมากกว่าเพดานแทร็กปกติ (128) และไม่เกิน `SPEED_CEILING` (200)
+- **`processedPurchaseIds`** — อาเรย์ `PurchaseId` (string) ที่เคยให้ของไปแล้ว กัน `ProcessReceipt` ให้ของซ้ำตอน Roblox
+  retry ใบเสร็จเดิม (`PlayerData.hasProcessedPurchase` / `PlayerData.markPurchaseProcessed`) เก็บแบบ **FIFO ไม่เกิน
+  `Config.DataStore.PROCESSED_PURCHASE_LOG_CAP`** (200) — เก่าสุดถูกตัดทิ้งก่อน (กันข้อมูลบวมไม่มีที่สิ้นสุด)
+  รายละเอียดวิธีทำ `ProcessReceipt` ให้ปลอดภัยเต็ม ๆ อยู่ใน §8.7
+
+ทั้งสามฟิลด์เพิ่มอย่างเดียว (เดินหน้าไม่มีเพดานตัวเลข) เหมือน `nextUid`/`nextEggId` แต่**ไม่ใช่ตัวนับ id** —
+`robuxDamageBonus`/`robuxSpeedBonus` เป็นค่าที่ใช้คำนวณจริง ไม่ใช่ตัวเดินหน้าเปล่า ๆ
 
 ### 3.3 `heldEggs` — โครงใหม่ที่ต้องเปลี่ยนก่อนขึ้นเพดานเป็น 10,000
 
@@ -1505,7 +1543,7 @@ turretDps(N) = TURRET_TOLL[N] × Config.getReferenceDps(N)
 
 ---
 
-### 8.7 แหล่งที่มาของไข่ — สองทาง แยกกันเด็ดขาด
+### 8.7 แหล่งที่มาของไข่ — สองทาง แยกกันเด็ดขาด + ร้านค้า Robux (UI-5)
 
 **เงินในเกมซื้อไข่ไม่ได้เลย** ใช้ได้แค่ อาวุธ · อัปเกรดอาวุธ · อัปเกรดคอก
 `EggType` จึงไม่มีฟิลด์ `price` โดยตั้งใจ (`validate()` บังคับว่าทุกไข่ต้องมี `source` เป็น `"boss"` หรือ `"robux"`)
@@ -1519,47 +1557,110 @@ turretDps(N) = TURRET_TOLL[N] × Config.getReferenceDps(N)
 
 ราคาจริงตั้งใน **Creator Dashboard** ถ้าเก็บไว้ใน Config ด้วยจะมีสองแหล่งความจริง วันที่ปรับราคาแล้วลืมแก้ Config ผู้เล่นจะเห็นราคาผิดในร้าน แล้วโวยตอนกดซื้อ
 
-Config เก็บแค่ `productId` · ชื่อ · คำอธิบาย · ให้ไข่อะไรกี่ฟอง
+Config เก็บแค่ `productId` (placeholder — ดูหมายเหตุด้านล่าง) · ชื่อ · คำอธิบาย · ให้ไข่อะไรกี่ฟอง (หรือกี่ขั้น/การกระทำอะไร — ดู UI-5)
 ฝั่ง client ดึงราคามาโชว์ด้วย `MarketplaceService:GetProductInfo(productId, Enum.InfoType.Product)`
+
+#### UI-5: สินค้า Robux ทั้ง 4 ตัว — placeholder productId รวมอยู่ที่เดียว
+
+⚠️⚠️ **ทุก `productId` ในตารางนี้เป็นเลขปลอมชั่วคราว** (ราคาจริง = 1 Robux ที่ตั้งไว้ในโค้ดก็เป็นราคาจำลอง —
+ราคาจริงตั้งที่เว็บ Roblox) **ต้องสร้าง Developer Product จริงบนเว็บ Roblox แล้วแทนที่เลขเหล่านี้ก่อน publish**
+(comment `-- TODO: แทนที่ด้วย Product ID จริงจากเว็บ Roblox` กำกับไว้ที่ต้นทางทุกตัวใน `Config.lua`)
+
+| ตาราง | key | ชื่อ | placeholder `productId` | ให้อะไร |
+|---|---|---|---:|---|
+| `Config.DeveloperProducts` | `legendary_egg` | ไข่ตำนาน | `1000001` | +1 ไข่ `egg_legendary` เข้ากระเป๋า (ผ่าน `EggService.grantEgg` — flow เดิมทุกประการ ต้องวางลงสวนฟักเองเหมือนไข่ปกติ) |
+| `Config.RobuxProducts` | `robux_damage_step` | พลังทะลุเพดาน | `1000002` | `+1` ขั้น `robuxDamageBonus` (ไม่มีเพดาน) |
+| `Config.RobuxProducts` | `robux_speed_step` | ความเร็วทะลุเพดาน | `1000003` | `+1` ขั้น `robuxSpeedBonus` (ผลจริง clamp ที่ `getRobuxSpeedHardCap()`) |
+| `Config.RobuxProducts` | `robux_hatch_rush` | เร่งฟักไข่ทั้งหมด | `1000004` | ไข่ที่กำลังฟักอยู่**ทุกฟอง**ครบเวลาทันที (ดูหัวข้อ "ทำไมเลือกเร่งทั้งหมด" ด้านล่าง) |
+
+`validate()` เช็ค `productId` ไม่ให้ชนกัน **ข้ามทั้งสองตาราง** (Roblox ส่ง `productId` มาตัวเดียวใน `ProcessReceipt`
+ไม่บอกว่ามาจากตารางไหน ถ้าเลขชนกันจะให้ของผิดชนิด) และบังคับว่าเปิดขาย (`enabled = true`) แล้วต้องมี `productId > 0`
+
+ทั้ง 3 สินค้าใน `Config.RobuxProducts` เป็น **Developer Product ที่ซื้อซ้ำได้ตัวเดียว** (ไม่ใช่คนละ id ต่อขั้น) —
+เลือกแบบนี้เพราะ `ProcessReceipt` ไม่ได้รับพารามิเตอร์ที่ผู้เล่นเลือกไว้ตอนกด (เช่น "จะเร่งฟองไหน") มาด้วยเลย
+สิ่งที่ตัดสินว่าซื้อ 1 ครั้งได้อะไรคือฟิลด์ `amount` ของสินค้าเอง ไม่ใช่ตัวธุรกรรม — ออกแบบให้ปลอดภัยจากการที่
+Roblox อาจเรียก `ProcessReceipt` ซ้ำบนเซิร์ฟเวอร์อื่นหลังผู้เล่นออกเกมไปแล้ว (ไม่มี "เจตนาที่ค้างอยู่บนเซิร์ฟเวอร์เดิม"
+ให้เสียหายจากการย้ายเซิร์ฟเวอร์)
+
+#### ทำไมเร่งฟักไข่เลือก "เร่งทั้งหมด" ไม่ใช่ "เร่งฟองที่เลือก"
+
+เหตุผลเดียวกับข้อบนนี้เลย: `ProcessReceipt` ไม่รู้ว่าผู้เล่นเลือกฟองไหนตอนกดซื้อ (Roblox ไม่ส่งพารามิเตอร์กำหนดเองผ่าน
+`PromptProductPurchase` มาด้วย) จะทำ "เร่งฟองที่เลือก" ต้องเก็บ "เจตนา" ไว้ในหน่วยความจำฝั่งเซิร์ฟเวอร์ระหว่างรอ
+ผลซื้อกลับมา ซึ่งพังทันทีถ้าผู้เล่นออกเกม/ย้ายเซิร์ฟเวอร์ระหว่างรอ (เจตนาอยู่คนละเซิร์ฟเวอร์กับที่ `ProcessReceipt`
+มาถึง) "เร่งทั้งหมด" ไม่ต้องพึ่งเจตนาใด ๆ เลย ปลอดภัยกับการ retry ข้ามเซิร์ฟเวอร์โดยธรรมชาติ — ตรงกับ UI ที่มีอยู่แล้ว
+พอดี (ปุ่มหัวแผง "เติบโตทั้งหมด" ใน `SidePanels.lua` ที่ UI-1 เตรียมไว้เป็น placeholder ที่กดไม่ได้ ตอนนี้ทำงานจริง)
+ถ้าไม่มีไข่กำลังฟักอยู่เลยตอนที่ของถูกให้จริง ๆ (เช่น ไข่ฟักเสร็จไปพอดีระหว่างรอผลซื้อ) `EggService.rushAllHatching`
+ยังคืนสำเร็จเสมอ (ไม่ error ไม่ block) เพียงแค่ "เร่ง 0 ฟอง" — Robux ถูกใช้ไปแล้วเสียเปล่าในเคสขอบนี้ ยอมรับได้
+เพราะ client ปิดปุ่มซื้อเองเมื่อไม่มีไข่กำลังฟัก (`hatchingCount == 0`) ลดโอกาสเกิดเคสนี้ลงมากแล้ว
 
 #### ProcessReceipt — จุดที่พลาดแล้วเสียเงินจริง
 
 Roblox เรียก `ProcessReceipt` **ซ้ำได้เรื่อย ๆ** จนกว่าจะได้ `PurchaseGranted` ถ้าเซิร์ฟเวอร์ล่มกลางทาง หรือคืน `NotProcessedYet` มันจะเรียกใหม่ในเซิร์ฟเวอร์อื่น อาจเป็นชั่วโมงถัดมา
 
+**ตัวเดียวรับทั้ง 4 สินค้า** (`EggService.processReceipt` — ต่อสายที่ `Main.server.lua` ก่อนปล่อยให้ใครเข้าเล่น
+เหมือน `DataService.bindToClose()`) ตามที่ implement จริงใน `src/server/EggService.lua`:
+
 ```
-ProcessReceipt(receiptInfo):
+EggService.processReceipt(receiptInfo):
 
-1. หา product จาก receiptInfo.ProductId
-   ไม่เจอ → คืน NotProcessedYet (อย่าคืน PurchaseGranted เด็ดขาด
-            ไม่งั้นผู้เล่นจ่ายเงินแล้วไม่ได้ของ และเรียกคืนไม่ได้)
-
-2. เช็คว่าเคยให้ของไปแล้วหรือยัง
-   key = Config.PurchaseLog.RECEIPT_PREFIX .. receiptInfo.PurchaseId
-   เคยให้แล้ว → คืน PurchaseGranted ทันที (idempotent)
-
-3. หาผู้เล่นจาก receiptInfo.PlayerId
+1. หาผู้เล่นจาก receiptInfo.PlayerId ด้วย Players:GetPlayerByUserId()
    ไม่อยู่ในเซิร์ฟเวอร์นี้ → คืน NotProcessedYet
-   (Roblox จะเรียกใหม่ตอนผู้เล่นเข้ามา ไม่ใช่ความผิดพลาด)
+   (ผู้เล่นออกไปแล้วระหว่างซื้อ — Roblox จะเรียกใหม่เองตอนเข้าเซิร์ฟเวอร์ถัดไป ไม่ใช่ความผิดพลาด)
 
-4. ให้ของ + บันทึก receipt ลง DataStore ใน UpdateAsync เดียวกัน
-   ⚠️ ต้องสำเร็จทั้งคู่หรือไม่สำเร็จเลย
+2. หา data จาก DataService.getCached(player.UserId)
+   ยังไม่มี (ข้อมูลยังโหลดไม่เสร็จ) → คืน NotProcessedYet
 
-5. เซฟสำเร็จ → คืน PurchaseGranted
-   เซฟไม่สำเร็จ → คืน NotProcessedYet (อย่ากลืน error)
+3. เช็คว่าเคยให้ของไปแล้วหรือยัง — PlayerData.hasProcessedPurchase(data, tostring(receiptInfo.PurchaseId))
+   เคยแล้ว → คืน PurchaseGranted ทันที (idempotent — ไม่ให้ของซ้ำ)
+
+4. หา product จาก receiptInfo.ProductId (เช็คทั้ง Config.findProductByRobloxId
+   และ Config.findRobuxProductByRobloxId — สองตาราง)
+   ไม่เจอ (enabled=false / ตั้งผิด) → คืน NotProcessedYet (ไม่ใช่ PurchaseGranted — เผื่อเป็นแค่ปิดชั่วคราว)
+
+5. ให้ของตามชนิด:
+   - legendary_egg  → EggService.grantEgg(player, "egg_legendary")
+   - damage_bonus   → PlayerData.addRobuxDamageSteps(data, amount)
+   - speed_bonus    → PlayerData.addRobuxSpeedSteps(data, amount) + EggService.applyWalkSpeed(player) ทันที
+   - hatch_rush     → EggService.rushAllHatching(player) (เร่งทุกฟองที่กำลังฟัก — ดูเหตุผลด้านบน)
+   ให้ไม่สำเร็จ (เช่น grantEgg คืน false เพราะกระเป๋าไข่เต็มเป๊ะ 10,000 ฟองพอดี) → คืน NotProcessedYet
+
+6. PlayerData.markPurchaseProcessed(data, purchaseId) — บันทึกว่าให้ของแล้ว (แต่ยังไม่เซฟจริง)
+
+7. DataService.saveAsync(player.UserId, false) — เซฟจริงทันที ไม่รอ autosave
+   ⚠️ ห้ามคืน PurchaseGranted ก่อนขั้นนี้สำเร็จ
+   เซฟไม่สำเร็จ → คืน NotProcessedYet (ของที่ให้ไปแล้วในหน่วยความจำยังอยู่ — รอบถัดมาข้อ 3 จะเจอว่ายังไม่ได้
+   บันทึก purchaseId ก็จะให้ซ้ำ **แต่ถูกต้อง** เพราะการเซฟรอบนี้ไม่สำเร็จจริง ๆ ของที่ให้ไปในหน่วยความจำอาจหายไป
+   พร้อมเซิร์ฟเวอร์ถ้าดับตอนนี้พอดี — คืน NotProcessedYet คือทางเดียวที่ปลอดภัย)
+
+8. เซฟสำเร็จ → คืน PurchaseGranted
 ```
 
-**กฎเหล็ก 4 ข้อ:**
+**เคสไข่ตำนานที่คอก+กระเป๋าเต็มพร้อมกันตอนซื้อ**: `EggService.grantEgg` เติมไข่เข้า **กระเป๋าไข่** (`heldEggs`
+คนละอันกับกระเป๋าแม่/คอก) ซึ่งจุได้ 10,000 ฟอง แทบไม่มีทางเต็มจริง ถ้าเต็มพอดีจริง ๆ `grantEgg` คืน `false` แล้ว
+ข้อ 5 ข้างบนคืน `NotProcessedYet` — ของไม่หาย รอ retry เมื่อกระเป๋ามีที่ว่าง (ไม่ใช่ "ข้อ D" ของสวนฟัก ซึ่งเป็นคนละ
+กลไกและคนละเพดาน — ไข่ตำนานที่ได้มายังต้องวางลงสวนฟักเองเหมือนไข่ปกติทุกประการ ถ้าสวนฟักเต็มก็แค่รอที่ว่าง
+เหมือนไข่ทุกฟอง ไม่เกี่ยวกับ ProcessReceipt แล้วตอนนั้น)
+
+#### กฎเหล็ก 4 ข้อ
 
 | กฎ | พลาดแล้วเป็นไง |
 |---|---|
 | **ห้ามคืน `PurchaseGranted` ก่อนเซฟสำเร็จ** | ผู้เล่นเสียเงินแล้วของหาย ไม่มีทางกู้ |
 | **ต้อง idempotent ด้วย `PurchaseId`** | Roblox retry แล้วผู้เล่นได้ของสองรอบจากการจ่ายครั้งเดียว |
 | **`NotProcessedYet` คือคำตอบที่ปลอดภัยเสมอ** | คืน `PurchaseGranted` ตอนไม่แน่ใจ = เสียของฟรี · Roblox จะลองใหม่ให้เอง |
-| **เก็บ log ทุกธุรกรรม** | มีคนทักว่าไม่ได้ของแล้วตรวจไม่ได้ |
+| **เก็บว่าให้ของไปแล้วหรือยัง** | ไม่งั้นตัดสินใจข้อ 3 (idempotent) ไม่ได้เลย |
 
-log เก็บใน DataStore แยก (`Config.PurchaseLog.STORE_NAME`) ไม่ปนกับ `PlayerData` เพราะเป็นข้อมูลคนละอายุ (ธุรกรรมเก็บถาวรเพื่อตรวจสอบ ส่วน PlayerData เขียนทับตลอด)
+⚠️ **UI-5 (ตัดสินแล้ว): เลือกเก็บที่ `processedPurchaseIds` ใน `PlayerData` แทนการเปิด DataStore แยก**
+(`Config.PurchaseLog` ที่เคยออกแบบไว้ก่อนหน้านี้ **แช่แข็งไว้เฉย ๆ ไม่ได้ใช้จริง** — เก็บ `STORE_NAME`/`RECEIPT_PREFIX`
+ไว้เผื่อวันหนึ่งอยากทำ audit-trail แยกอายุจริง ๆ) เหตุผลที่เลือกทางนี้:
 
-> **ยังไม่ตัดสิน:** ไข่ตำนานควรให้แม่ tier ไหน — ดู [§13](#13-ค่าที่ผมตั้งเองรอยืนยัน) มีสองทางเลือก
+- **อะตอมมิกไปกับการเซฟ `PlayerData` ก้อนเดียวกันโดยอัตโนมัติ** — ให้ของ (แก้ field) + บันทึกว่าให้แล้ว
+  (`markPurchaseProcessed`) อยู่ใน `UpdateAsync` เดียวกันเสมอ ไม่มีทางสำเร็จแค่อย่างใดอย่างหนึ่ง (ต่างจาก DataStore
+  สองตัวที่ต้องเขียนแยกกัน 2 ครั้งแล้วเสี่ยงสำเร็จแค่ตัวเดียว)
+- ไม่ต้องเปิด/ดูแล DataStore ตัวที่สอง (ไม่มี session lock, retry, autosave ของตัวเอง)
+- ไม่ใช่ audit-trail ถาวรที่มองย้อนหลังได้ทุกธุรกรรม (แค่ FIFO 200 รายการล่าสุดต่อผู้เล่น) แต่พอสำหรับหน้าที่จริงคือ
+  "กันให้ของซ้ำตอน retry" ซึ่งไม่ต้องมองย้อนหลังไกลขนาดนั้น — ถ้าวันหนึ่งอยากได้ audit-trail จริงจัง (ตรวจสอบข้อพิพาท
+  การจ่ายเงิน) ค่อยเปิด `Config.PurchaseLog` ที่แช่แข็งไว้แล้วมาใช้เพิ่มทีหลัง ไม่ใช่แทนที่กลไกกันซ้ำนี้
 
 ---
 
@@ -1682,6 +1783,11 @@ damage/วินาที = min(อัตราผลิต, อัตราป�
 | **เต็มพิกัดทุกช่อง** (คอก 14 + กระเป๋า 100 + กองลูก 2,000 + ไข่ฟัก 50 + **ไข่ถือ 10,000**) | 707,844 B | **16.9%** |
 
 UI-4 (schema v4): `discovered` เต็มทุกตัวละคร (12 ตัว) = **172 B** · เคสเต็มพิกัดวัดล่าสุด (`PlayerData.buildWorstCase` · รวม `discovered`) = **260,740 B** (6.2% ของลิมิตจริง · ตัวเลขในตารางข้างบนเป็นของรอบก่อนที่เพดานกระเป๋าไข่ยังเป็น 10,000)
+
+UI-5 (schema v5): เพิ่ม `robuxDamageBonus`/`robuxSpeedBonus` (ตัวเลขล้วน กินที่คงที่ไม่ว่าค่าจะมากแค่ไหน) +
+`processedPurchaseIds` เต็ม cap (`Config.DataStore.PROCESSED_PURCHASE_LOG_CAP` = 200 รายการ ยาวเท่า GUID จริง
+36 ตัวอักษร) → เคสเต็มพิกัดขยับเป็น **268,616 B (6.4% ของลิมิตจริง)** เพิ่มขึ้น ~7.9 KB จากรอบก่อน — ยังห่างจากเพดาน
+3 MB มาก `PlayerData.validate()` ยืนยันผ่านตอนบูตแล้ว
 
 ⚠️ **กระเป๋าไข่กลายเป็นส่วนที่กินที่มากที่สุด** — 10,000 ฟอง × ~55 B = ~550 KB
 คิดเป็น 78% ของเคสเต็มพิกัด ถ้าวันหนึ่งจะดันเพดานไข่ขึ้นอีก ต้องดูตัวเลขนี้ก่อนตัวอื่น
@@ -1834,6 +1940,7 @@ migration แต่ละตัวต้อง **idempotent** และ **ห้
 | v1 → v2 | 3C-1 | เพิ่ม `battleRoster = {}` (ไม่แตะฟิลด์อื่น · ข้อมูลที่มีอยู่แล้วไม่ทับ) |
 | v2 → v3 | 4A | เพิ่ม `stageClearBonusGranted` = false 9 ช่อง · **ไม่ย้อนให้รางวัลด่านที่พังไปแล้ว** (§7.12) · มีอยู่แล้วไม่ทับ |
 | v3 → v4 | UI-4 | เพิ่ม `discovered = {}` แล้ว**เติมจากแม่ที่มีอยู่ตอนนี้ทุกที่** (คอก + กระเป๋า + `battleRoster`) · แม่ที่ขาย/ตายไปก่อนอัปเดตไม่นับ (**ผู้ใช้ยอมรับแล้ว** — เกมยังไม่เปิดให้เล่น) · เพิ่มอย่างเดียว รันซ้ำได้ผลเดิม · ไม่อ่าน Config (charId แปลกเก็บไว้เฉย ๆ) · แม่ข้อมูลเพี้ยน (ไม่มี `charId`) ข้าม |
+| v4 → v5 | UI-5 | เพิ่ม `robuxDamageBonus = 0` · `robuxSpeedBonus = 0` · `processedPurchaseIds = {}` — ผู้เล่นเก่าไม่เคยซื้อ Robux boost มาก่อนจึงเริ่มที่ 0/ว่างเสมอ ไม่มีอะไรให้เติมย้อนหลัง · เพิ่มอย่างเดียว รันซ้ำได้ผลเดิม (idempotent) |
 
 ---
 
@@ -1967,6 +2074,11 @@ migration แต่ละตัวต้อง **idempotent** และ **ห้
 | **ด่าน 9 = 54 ชม. ยอมรับได้** | ต้องการให้ใช้เวลานาน เพื่อกันไม่ให้ไปถึงจุดตันเร็วเกินไป — ไม่ต้องดันให้เร็วขึ้น |
 | **เงินบอสแบ่งเท่ากันทุกคนที่ร่วมตี** | ไม่แบ่งตามสัดส่วน damage เพราะการตีบอสใช้เวลาไม่นานและเป็นแค่กิมมิค กลไกจริงคือการแย่งไข่ |
 | **`turretDps` คำนวณจากสูตร ไม่เก็บเป็นตัวเลขอีกแล้ว** | เก็บแค่ `TURRET_TOLL` (10% → 20%) · แก้อะไรที่กระทบ damage แล้ว turret ขยับตามเอง — จบปัญหาที่ต้องคำนวณมือ 5 รอบ ([§8.6.1](#861-turret--คำนวณจากสูตร-ไม่เก็บเป็นตัวเลข)) |
+| **UI-5: หน้าต่างร้านค้า Robux เป็นก้อนเดียวเลื่อนยาว ไม่ใช่แท็บ** | มีแค่ 4 การ์ดทั้งหมด (ไข่ตำนาน · ทะลุเพดานดาเมจ · ทะลุเพดานความเร็ว · เร่งฟักไข่) หน้าตาต่างกันทุกใบ — แท็บเกินความจำเป็นสำหรับรายการสั้นขนาดนี้ (`RobuxShopWindow.lua`) |
+| **UI-5: สินค้า Robux ที่ไม่ใช่ไข่ใช้ Developer Product เดียวซื้อซ้ำได้** | ไม่ใช่คนละ id ต่อขั้น — `ProcessReceipt` ไม่รู้ว่าผู้เล่นเลือกอะไรตอนกดซื้อ ตัดสินจาก `amount` ของสินค้าเองปลอดภัยกว่า ([§8.7](#87-แหล่งที่มาของไข่--สองทาง-แยกกันเด็ดขาด--ร้านค้า-robux-ui-5)) |
+| **UI-5: เร่งฟักไข่เลือก "เร่งทั้งหมด" ไม่ใช่ "เร่งฟองที่เลือก"** | เหตุผลเดียวกับข้อบน — ปลอดภัยกับการ retry ข้ามเซิร์ฟเวอร์ของ `ProcessReceipt` โดยธรรมชาติ ไม่ต้องเก็บ "เจตนา" ไว้ในหน่วยความจำ |
+| **UI-5: โบนัส Robux เก็บ idempotency ที่ `processedPurchaseIds` ใน `PlayerData` ไม่เปิด DataStore แยก** | อะตอมมิกไปกับการเซฟ `PlayerData` ก้อนเดียวกันโดยอัตโนมัติ · `Config.PurchaseLog` เดิมแช่แข็งไว้เผื่ออนาคต ([§8.7](#87-แหล่งที่มาของไข่--สองทาง-แยกกันเด็ดขาด--ร้านค้า-robux-ui-5)) |
+| **UI-5: ความเร็วทะลุเพดานยังไง โดยไม่แตะความหนากำแพงที่ล็อกไว้แล้ว** | `Config.getRobuxSpeedHardCap()` คำนวณย้อนกลับจากความหนาที่สร้างจริง แทนที่จะขยายความหนาให้รับความเร็วที่สูงขึ้น ([§3.5](#35-ร้านค้า-robux-ui-5--robuxdamagebonus--robuxspeedbonus--processedpurchaseids)) |
 
 ### ยังไม่ได้ตัดสิน — เคลียร์ตอนถึงเฟสนั้นได้
 

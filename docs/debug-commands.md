@@ -144,6 +144,34 @@ EggService.debugSetCurrency(player, 1000000000)  -- พอสำหรับอ�
 - ค่าติดลบถูก clamp เป็น 0
 - print ค่าก่อน/หลังเสมอ
 
+### `EggService.debugSimulateReceipt(player, productKey, purchaseId)`
+
+⚠️ **UI-5** — จำลอง `MarketplaceService.ProcessReceipt` โดยไม่ต้องมี Robux จริง ไม่ต้อง publish จริง
+เรียก `EggService.processReceipt` **ตัวเดียวกับที่ผูกไว้กับ `MarketplaceService.ProcessReceipt` จริง**
+(ไม่ใช่โค้ดทดสอบแยกชุด) จึงทดสอบ idempotency ได้ตรง ๆ ผ่าน command bar
+
+```lua
+-- ซื้อไข่ตำนานครั้งแรก
+EggService.debugSimulateReceipt(player, "legendary_egg", "test-purchase-1")
+-- "PurchaseGranted"
+
+-- เรียกซ้ำด้วย purchaseId เดิม (จำลอง Roblox retry ใบเสร็จเดิม) → ต้องได้ Granted เหมือนกัน
+-- แต่ **ไม่ได้ไข่เพิ่มอีกฟอง** (เช็คด้วย debugSnapshot ก่อน/หลัง)
+EggService.debugSimulateReceipt(player, "legendary_egg", "test-purchase-1")
+-- "PurchaseGranted" (ของเดิม ไม่ให้ซ้ำ)
+
+-- purchaseId ใหม่ → ให้ของอีกครั้งได้ตามปกติ
+EggService.debugSimulateReceipt(player, "legendary_egg", "test-purchase-2")
+
+-- productKey อื่น: "robux_damage_step" · "robux_speed_step" · "robux_hatch_rush"
+EggService.debugSimulateReceipt(player, "robux_damage_step", "test-purchase-3")
+```
+
+- `productKey` คือ key ใน `Config.DeveloperProducts` หรือ `Config.RobuxProducts` (ไม่ใช่ตัวเลข `productId`)
+- คืน string ธรรมดา `"PurchaseGranted"` หรือ `"NotProcessedYet"` (ไม่ใช่ Enum ตรง ๆ — Main.server.lua เป็นคนแปลงเป็น Enum จริงตอนคืนให้ MarketplaceService)
+- ถ้าให้ของสำเร็จ ฟังก์ชันนี้ **เซฟจริงลง DataStore ทันที** (เหมือน `ProcessReceipt` จริงทุกประการ — ดู
+  `docs/data-schema.md` §8.7) ไม่ใช่แค่แก้ในหน่วยความจำ
+
 ### `EggService.debugSnapshot(player)`
 
 พิมพ์ข้อมูลสำคัญทั้งหมดของผู้เล่นแบบอ่านง่าย **read-only ไม่แก้อะไรเลย**

@@ -417,6 +417,8 @@ src/
     BagWindow.lua        → UI-1: หน้าต่างกระเป๋า 3 แท็บ + หน้ารายละเอียด · **virtual grid** (สร้างการ์ดเท่าที่เห็น
                             ใช้ซ้ำตอนเลื่อน — ห้ามสร้าง ViewportFrame ทุกใบ) · ตรวจด้วย `tools/check-ui-smoke.py`
     SidePanels.lua       → UI-1: ปุ่มขวา (ไข่/เท้า) + แผงไข่ที่กำลังฟัก / แม่ในคอก (แถวใช้ซ้ำตาม key)
+                            · UI-5: ปุ่มหัวแผงไข่ "เติบโตทั้งหมด" ทำงานจริงแล้ว (พรอมต์ซื้อ Robux เร่งฟักทุกฟอง —
+                            ปิดเองตอนไม่มีไข่กำลังฟัก) · ปุ่ม ▶ รายฟองที่เคยวางแผนไว้ตัดออกแล้ว (เลือก "เร่งทั้งหมด")
     MapSigns.lua         → UI-2: ข้อความบนป้ายอัปเกรด (SurfaceGui ใน PlayerGui) + จุดกด E (ProximityPrompt ฝั่ง client)
                             เฉพาะคอกตัวเอง (Attribute `PenIndex` บน Player ที่ PenService ตั้ง) + จุดเปิดร้านขายแม่
                             + UI-3: จุดกด E ค้างที่แท่นอัญเชิญ · เดินออกห่างแล้วปิดหน้าต่าง (ร้าน/แท่นใช้ตัวเฝ้าระยะเดียวกัน)
@@ -427,6 +429,10 @@ src/
                             · ลำดับปล่อยว่าง (ไม่เคยติ๊ก) = เปิดมาติ๊กทุกกองไว้ก่อน เรียงพลังต่อตัวมาก → น้อย
     IndexWindow.lua      → UI-4: หน้าต่างดัชนี · แท็บซ้าย = คลาส C→SS ("C 2/4") · เคยได้ = รูป+ชื่อ+คลาส · ยังไม่ได้ = เงาดำ + "???"
                             (`UiKit.setPortrait` silhouette) · แผงเล็ก "ตอนนี้มี N ตัว" · จุดแดงบนปุ่ม 📖 เมื่อได้ตัวใหม่ (client ล้วน)
+    RobuxShopWindow.lua  → UI-5: ร้านค้า Robux (ก้อนเดียวเลื่อนยาว ไม่ใช่แท็บ — มีแค่ 4 การ์ด) · ไข่ตำนาน ·
+                            ทะลุเพดานดาเมจ/ความเร็ว ("Lv. Robux N") · เร่งฟักไข่ทั้งหมด · ราคาดึงจาก
+                            `MarketplaceService:GetProductInfo()` สด (แคชต่อ productId) · ไม่ FireServer เอง —
+                            ยิง `MarketplaceService:PromptProductPurchase` ตรงผ่าน action ที่ `Main.client.lua` ส่งเข้ามา
   shared/   → ReplicatedStorage.Shared (config, constants, type ที่ใช้ร่วมกัน)
     init.lua             → ตัว Shared เองเป็น ModuleScript (เป็นแค่ฝา)
     Config.lua           → ⚠️ โครงหลัก: ตัวละคร/คลาส tier น้ำหนัก ตารางคลาสของไข่
@@ -519,7 +525,12 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   - **UI-4** ✅ เขียนแล้ว **ยังไม่ได้ทดสอบใน Studio** — หน้าต่างดัชนี (แท็บคลาส · เงาดำ/??? · จุดแดง) · **schema v4 `discovered`**
     + `PlayerData.createMother` จุดสร้างแม่กลาง · migration v3→v4 · เพิ่มเติม: หน้าต่างอัญเชิญติ๊กทุกกองเป็นค่าเริ่มต้นตอนลำดับว่าง
     · เช็คลิสต์ต่อท้าย `docs/ui-test-checklist.md` §7 · ⚠️ **ห้าม merge จนกว่าผู้ใช้สั่ง**
-  - UI-5 (ร้าน Robux) — ยังไม่เริ่ม
+  - **UI-5** ✅ เขียนแล้ว **ยังไม่ได้ทดสอบใน Studio** — ร้านค้า Robux (ก้อนเดียวเลื่อนยาว 4 การ์ด): ไข่ตำนาน ·
+    ทะลุเพดานดาเมจ/ความเร็ว (`robuxDamageBonus`/`robuxSpeedBonus` แยกจากแทร็กเงินในเกม · ความเร็ว clamp ที่
+    `getRobuxSpeedHardCap()`) · เร่งฟักไข่ทั้งหมด (ปุ่ม "เติบโตทั้งหมด" ใน `SidePanels` ทำงานจริงแล้ว) · **schema v5**
+    (`robuxDamageBonus`/`robuxSpeedBonus`/`processedPurchaseIds`) + migration v4→v5 · `EggService.processReceipt`
+    (idempotent · ทดสอบผ่าน `debugSimulateReceipt`) · placeholder productId 4 ตัวรอแทนที่ของจริงก่อน publish ·
+    **แผน 5 รอบปิดครบแล้ว** — เช็คลิสต์ต่อท้าย `docs/ui-test-checklist.md` §8 · ⚠️ **ห้าม merge จนกว่าผู้ใช้สั่ง**
 - **Phase 4** — ระบบรบด้วยตัวเอง: อาวุธ · ตี · ตาย · เกิดใหม่ (จำกัดในพื้นที่บอส)
 - **Phase 5** — บอส + รีเกิด 5 นาที + ไข่ 5 ฟอง + กติกาแย่งไข่ (กดค้าง 3 วิ) + ร้านอาวุธ
 - **Phase 5.5** — **Hotbar 10 ช่อง** (ช่องถือของ · hotkey 1-9,0 · มือถือ 4-5 ช่อง)
@@ -544,7 +555,8 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 - `default.project.json` (mapping ของ Rojo — พังแล้ว sync ไม่ได้ทั้งโปรเจกต์)
 - **schema ของ DataStore** — ชื่อ key, โครงสร้าง PlayerData, `schemaVersion`
   (ดู `docs/data-schema.md` — แก้แล้วต้องเขียน migration ด้วยเสมอ)
-  · ตอนนี้ **v4** (v1→v2 = `battleRoster` · v2→v3 = `stageClearBonusGranted` · v3→v4 = `discovered` · ประวัติใน `docs/data-schema.md` §10.4)
+  · ตอนนี้ **v5** (v1→v2 = `battleRoster` · v2→v3 = `stageClearBonusGranted` · v3→v4 = `discovered` ·
+  v4→v5 = `robuxDamageBonus`/`robuxSpeedBonus`/`processedPurchaseIds` (UI-5) · ประวัติใน `docs/data-schema.md` §10.4)
 - **schema ของ mothers / children** — ฟิลด์ในตัวแม่, การแยก `mothersInPen` /
   `mothersInBag` / `battleRoster` เป็นสามอาเรย์ (แม่ 1 ตัวอยู่ได้ที่เดียว), การเก็บลูกเป็นกองไม่ใช่รายตัว,
   `uid` ที่เป็น **global string** และห้าม reuse, `nextUid` ที่ห้ามลด
@@ -586,10 +598,10 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   ห้ามเปลี่ยนชื่อ ห้าม reuse (เลิกใช้ให้ตั้ง `enabled = false` แทนการลบ)
 - **config กลางใน `src/shared`** — ตัวละคร/คลาส, tier น้ำหนัก, ตารางคลาสของไข่,
   `CHILD_RATIO`, อัตราผลิต, สูตร damage/เงิน, ราคาทุกอย่าง, เพดานคลัง
-- **`Config.Balance` — ลูกบิดสมดุลทั้งหมดอยู่ใต้ชื่อเดียว** 18 กลุ่ม:
+- **`Config.Balance` — ลูกบิดสมดุลทั้งหมดอยู่ใต้ชื่อเดียว** 19 กลุ่ม:
   `Weight` · `StageWeightTiers` · `Production` · `Damage` · `NewPlayer` · `Economy` ·
   `Pen` · `Bag` · `Hatchery` · `Stages` · `Stage` · `Boss` · `DamageUpgrade` ·
-  `SpeedUpgrade` · `Combat` · `BalanceCheck` · `Weapon` · `VisualScale`
+  `SpeedUpgrade` · `Combat` · `BalanceCheck` · `Weapon` · `VisualScale` · `RobuxBoost`
   **ชื่อคีย์ข้างในคงเดิมทั้งหมด** ย้ายแค่ที่อยู่
   ⚠️ `validate()` บังคับสองทาง: ต้องมีครบทุกกลุ่มใน `Config.Balance`
   **และต้องไม่มีชื่อเดียวกันที่ `Config` ชั้นบนสุด** — เติมกลับเข้าไปเมื่อไหร่ เซิร์ฟไม่บูต
@@ -623,6 +635,23 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   และ `sessionLock` ไม่ถูกปลดด้วย (เข้าเกมใหม่ไม่ได้ 5 นาที) — เคยเกิดจริง ดู `docs/data-schema.md` §9.4
 - **`productId` ของ Developer Product และการจัดการ `ProcessReceipt`** — พลาดแล้ว
   ผู้เล่นจ่ายเงินจริงแล้วไม่ได้ของ หรือได้ของซ้ำจากการจ่ายครั้งเดียว
+  · **UI-5**: `Config.RobuxProducts` (`robux_damage_step` · `robux_speed_step` · `robux_hatch_rush`)
+  เพิ่มเข้ามาข้าง `Config.DeveloperProducts` เดิม (คนละ shape — ให้ "ขั้น/การกระทำ" ไม่ใช่ไข่)
+  · `validate()` เช็ค `productId` ไม่ชนกัน**ข้ามสองตาราง** เพราะ `ProcessReceipt` รับ `productId`
+  มาเป็นเลขเดียว ไม่บอกว่ามาจากตารางไหน · placeholder ทั้ง 4 ตัว (`1000001..1000004`) ต้องแทนที่
+  ด้วยเลขจริงจาก Creator Dashboard ก่อน publish (คอมเมนต์ `-- TODO:` กำกับไว้ที่ต้นทางทุกตัว)
+  · `EggService.processReceipt` เป็นจุดเดียวที่ผูกกับ `MarketplaceService.ProcessReceipt`
+  (คืน string ธรรมดา ไม่ใช่ `Enum` ตรง ๆ — `Main.server.lua` แปลงเป็น `Enum.ProductPurchaseDecision`
+  ตอนคืนให้ Roblox จริง กัน `EggService.lua` ต้องรู้จัก global `Enum`) · idempotency เก็บที่
+  `data.processedPurchaseIds` (FIFO ตาม `Config.DataStore.PROCESSED_PURCHASE_LOG_CAP`) **ไม่ใช่**
+  `Config.PurchaseLog` ที่แช่แข็งไว้ · ทดสอบ idempotency นอก Studio ได้ผ่าน
+  `EggService.debugSimulateReceipt(player, productKey, purchaseId)` (`docs/debug-commands.md`)
+- **`robuxDamageBonus` / `robuxSpeedBonus` / `processedPurchaseIds`** (UI-5 · schema v5) — โบนัส
+  Robux ที่ทะลุเพดานแทร็กเงินในเกม (`damageLevel`/`speedLevel`) โดยสิ้นเชิง **คนละฟิลด์ คนละสูตร**
+  รวมกันแค่ตอนคำนวณค่าจริง (`Config.computeBattlePower(..., robuxDamageSteps)` /
+  `Config.getEffectiveWalkSpeed(...)`) · ความเร็วยัง clamp ที่ `Config.getRobuxSpeedHardCap()` เสมอ
+  (คำนวณย้อนกลับจากความหนากำแพงที่สร้างไว้จริง — **ไม่ต้องแตะ `MapDimensions`**) ดู
+  `docs/data-schema.md` §3.5 + §8.7
 - **`Config.Balance.SpeedUpgrade`** — ราคา/จำนวนขั้น/`CURVE_EXPONENT`/`MAX_MULTIPLIER`/`SPEED_CEILING`
   · `speedLevel` ฝังอยู่ในข้อมูลที่เซฟไปแล้ว · **ห้ามขยายเป็น 10 ขั้น** (เหตุผลข้างบน)
   · แก้ความเร็วเมื่อไหร่ **ต้องคำนวณความหนากำแพงใหม่ทั้งชุด** (`getMinWallThickness`)
@@ -647,6 +676,8 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   ไม่ใช่ array/มีสมาชิกไม่ใช่ string/ไม่มีด่านให้ส่ง = ปฏิเสธทั้งชุด · ตัวที่ส่งไม่ได้/ซ้ำข้ามไป · roster ไม่เกิน 10 ·
   sync + ข้อความสรุปครั้งเดียว · `SendMotherToBattleRequest` ทีละตัวยังอยู่ · ดู `docs/data-schema.md` §7.11.1
   · **`SetReleaseOrderRequest` ความหมายแคบลงใน UI-3** = กองที่ติ๊กให้ปล่อย (signature เดิม · §7.2.1))
+  · ⚠️ **UI-5 ไม่เพิ่ม RemoteEvent ใหม่เลยสักตัว** — การซื้อ Robux ทั้งหมดยิง
+  `MarketplaceService:PromptProductPurchase` ตรงจาก client (ไม่ผ่าน server จนกว่าจะถึง `ProcessReceipt`)
 - โครงโฟลเดอร์ `src/server|client|shared` และการแตก/รวมไฟล์
 - อะไรก็ตามที่ทำให้ข้อมูลผู้เล่นเดิมอ่านไม่ออก
 
@@ -703,10 +734,17 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 📄 เช็คลิสต์ Studio รวม UI-1/2/3: `docs/ui-test-checklist.md` · ห้าม merge จนกว่าผู้ใช้สั่ง
 **UI-4 (ดัชนี) เขียนเสร็จแล้ว** — **ยังไม่ได้ทดสอบใน Studio** · schema v4 (`discovered`) + migration · จุดสร้างแม่กลาง `PlayerData.createMother`
 (ผ่านครบ 2 ทาง) · หน้าต่างดัชนีแทนหน้า "เร็วๆ นี้" · ยังไม่มีโมเดลจริง 11 ตัว (มีแค่ลิง) → ใช้กล่องสี/กล่องดำแทน
+**UI-5 (ร้านค้า Robux) เขียนเสร็จแล้ว** — **ยังไม่ได้ทดสอบใน Studio** · schema v5
+(`robuxDamageBonus`/`robuxSpeedBonus`/`processedPurchaseIds`) + migration v4→v5 · `Config.RobuxProducts` ใหม่
+(damage/speed/hatch-rush) ข้าง `Config.DeveloperProducts` เดิม (ไข่ตำนานเปิดขายแล้ว) · `EggService.processReceipt`
+ผูกกับ `MarketplaceService.ProcessReceipt` ใน `Main.server.lua` · **placeholder productId ทั้ง 4 ตัวยังเป็นเลขปลอม**
+(`1000001..1000004`) **ต้องแทนที่ด้วยเลขจริงจาก Creator Dashboard ก่อน publish** · **แผนจัดหน้าจอใหม่ 5 รอบ (UI-1→UI-5)
+ปิดครบแล้ว** ที่เหลือคือทดสอบรวดเดียวใน Studio ตาม `docs/ui-test-checklist.md` (§1–8) แล้วค่อย merge
 
-ชุดเทสต์ `luau tests/run.luau` ผ่านทั้งหมด **1356 เคส** (Config · PlayerData/DataService · Production · Combat ·
+ชุดเทสต์ `luau tests/run.luau` ผ่านทั้งหมด **1399 เคส** (Config · PlayerData/DataService · Production · Combat ·
 Upgrades) + สคริปต์ตรวจใน `tools/` — รันรวมด้วย `python3 tools/check-all.py` · ฝั่ง Config ครอบคลุม (สุ่มน้ำหนัก 5 ล้านครั้ง · สุ่มตัวละคร 300,000 ครั้งต่อไข่ · ไข่รายด่าน 60,000 ครั้งต่อด่าน ·
-stack key · uid · บัฟสถานะ · แหล่งที่มาไข่ · Developer Product · ตารางด่าน · อัตราปล่อย ·
+stack key · uid · บัฟสถานะ · แหล่งที่มาไข่ · Developer Product · ร้านค้า Robux (UI-5) · ProcessReceipt idempotency
+(`debugSimulateReceipt`) · ตารางด่าน · อัตราปล่อย ·
 อัตราผลิตตามน้ำหนัก · cap คลัง · ด่าน 1 ไม่มีกำแพง · turret · ตัวคูณคลาส ·
 เงินจากการฆ่า · ยามเวลาฟาร์ม · upgrade damage · ราคาที่ดูดส่วนเกิน · แบ่งเงินบอส · สูตรทุกตัว ·
 ผังแมพ · `MapDimensions` กับ alias · จุดเกิดอยู่บนพื้น · ยามเวลาวิ่งถึงรังบอสด่าน 1 ≤ 15 วิ ·
@@ -778,7 +816,7 @@ stack key · uid · บัฟสถานะ · แหล่งที่มา�
 - ✅ **`Boundary.Margin` = แถบหญ้านอกกำแพง** พื้นโตตาม ไม่ใช่หดกำแพงเข้ามา
 - ✅ **ยุบ `Config.Map` alias ทิ้ง** เหลือชื่อเดียวคือ `Config.MapDimensions`
 - ✅ **กระโดดใช้โหมด JumpHeight (7.2)** ไม่ใช่ JumpPower — Config ตรงกับที่ Roblox ใช้จริงแล้ว
-- ✅ **ลูกบิดสมดุลทั้งหมดอยู่ใน `Config.Balance`** 18 กลุ่ม · `validate()` กันไม่ให้หลุดออกไปชั้นบน
+- ✅ **ลูกบิดสมดุลทั้งหมดอยู่ใน `Config.Balance`** 19 กลุ่ม · `validate()` กันไม่ให้หลุดออกไปชั้นบน
 - ✅ **DataStore ใช้ `UpdateAsync` ทุก path ห้าม `SetAsync`** · session lock 5 นาที ·
   โหลดไม่ได้ = **เตะออก ไม่มีโหมด guest** (เล่นต่อ = autosave เขียนข้อมูลเปล่าทับของจริง)
 - ✅ **Studio ใช้ DataStore คนละตัว** เลือกด้วย `RunService:IsStudio()` ไม่ใช่ธงที่ต้องสลับมือ

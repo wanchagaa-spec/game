@@ -11,7 +11,9 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
+local ServerStorage = game:GetService("ServerStorage")
 local StarterPlayer = game:GetService("StarterPlayer")
 
 local Config = require(ReplicatedStorage.Shared.Config)
@@ -148,6 +150,28 @@ ProductionService.start(EggService.sync)
 -- PlayerData fields ธรรมดา ไม่มีระบบเซฟแยก)
 -- ⚠️ Phase 4A: inject ตัวแจกไข่รางวัลผ่านด่านเข้าไป (กัน circular require แบบเดียวกับ ProductionService)
 CombatService.start(EggService.grantStageClearBonus)
+
+-- ⚠️ DEBUG (Studio เท่านั้น): สะพานให้ Command Bar เรียก `EggService.debug*` ของเกมที่รันอยู่จริง
+-- `require(game.ServerScriptService.EggService)` จาก Command Bar ได้โมดูล**อีกชุดหนึ่ง** (แคช require
+-- แยกจากสคริปต์ของเกม) → DataService ชุดนั้นไม่มีข้อมูลผู้เล่นเลย → "ยังไม่มีข้อมูลผู้เล่น" (เจอจริงตอนทดสอบ 4B)
+-- BindableFunction เป็น Instance จริงในเซิร์ฟ · OnInvoke รันในสคริปต์นี้ = EggService ตัวที่เกมใช้อยู่
+-- เรียกได้เฉพาะฟังก์ชันชื่อขึ้นต้นด้วย "debug" · เซิร์ฟที่ publish ไม่มี (IsStudio = false) ·
+-- อยู่ใน ServerStorage client มองไม่เห็น และ Bindable ข้าม network ไม่ได้อยู่แล้ว · วิธีใช้: docs/debug-commands.md
+if RunService:IsStudio() then
+	local debugBridge = Instance.new("BindableFunction")
+	debugBridge.Name = "EggServiceDebug"
+	debugBridge.OnInvoke = function(name: unknown, ...: any): ...any
+		if type(name) ~= "string" or string.sub(name, 1, 5) ~= "debug" then
+			error(`EggServiceDebug: เรียกได้เฉพาะ EggService.debug* — ได้ {tostring(name)}`)
+		end
+		local fn = (EggService :: any)[name]
+		if type(fn) ~= "function" then
+			error(`EggServiceDebug: ไม่มีฟังก์ชัน EggService.{name}`)
+		end
+		return fn(...)
+	end
+	debugBridge.Parent = ServerStorage
+end
 
 -- ⚠️ ต่อ BindToClose **ก่อน** ปล่อยให้ใครเข้ามาเล่น
 -- ถ้าต่อทีหลัง มีช่วงที่เซิร์ฟเวอร์ปิดแล้วไม่มีใครเซฟให้เลย

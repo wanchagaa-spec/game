@@ -927,7 +927,10 @@ function EggService.buySpeedUpgrade(player: Player): (boolean, string?)
 end
 
 --------------------------------------------------------------------------------
--- DEBUG เท่านั้น — ไม่มี UI เรียกผ่าน command bar ฝั่ง server:
+-- DEBUG เท่านั้น — ไม่มี UI เรียกผ่าน command bar ฝั่ง server
+-- ⚠️ require จาก Command Bar ได้โมดูลอีกชุดที่ไม่มีข้อมูลผู้เล่น → เรียกผ่านสะพานใน Main.server.lua แทน:
+--     game.ServerStorage.EggServiceDebug:Invoke("debugResetAll", game.Players:GetPlayers()[1])
+-- รายชื่อด้านล่างเขียนแบบเรียกตรงเพื่อให้อ่านง่าย (docs/debug-commands.md)
 --     local EggService = require(game.ServerScriptService.EggService)
 --     EggService.debugFillHatchery(game.Players.<ชื่อ>)
 --     EggService.debugClearBag(game.Players.<ชื่อ>)

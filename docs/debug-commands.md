@@ -5,12 +5,24 @@
 ต้องรันจาก Server Script (Studio → Command Bar ทำงานเป็น server context ได้ถ้าเลือก
 "Server" ในเมนู dropdown ของ command bar)
 
-ทุกคำสั่งเริ่มด้วยการ require ตัวโมดูลก่อนเสมอ:
+### ⚠️ วิธีเรียกจาก Command Bar — ใช้สะพาน `ServerStorage.EggServiceDebug` ไม่ใช่ `require`
+
+`require(game.ServerScriptService.EggService)` จาก Command Bar ได้โมดูล**อีกชุดหนึ่ง**ที่แยกแคชจากสคริปต์ของเกม
+→ DataService ชุดนั้นไม่มีข้อมูลผู้เล่น → ทุกคำสั่งตอบ `ยังไม่มีข้อมูลผู้เล่น` (เจอจริงตอนทดสอบ Phase 4B)
+จึงมี BindableFunction `ServerStorage.EggServiceDebug` (สร้างใน `Main.server.lua` **เฉพาะใน Studio**)
+เรียก `EggService.debug*` ของตัวที่เกมใช้อยู่จริง — แปลงคำสั่งในเอกสารนี้แบบนี้:
 
 ```lua
-local EggService = require(game.ServerScriptService.EggService)
-local player = game.Players.<ชื่อผู้เล่น>  -- หรือ game.Players:GetPlayers()[1]
+-- ในเอกสาร:            EggService.debugSetStageProgress(player, 2, 0, 1)
+-- พิมพ์ใน Command Bar:
+game.ServerStorage.EggServiceDebug:Invoke("debugSetStageProgress", game.Players:GetPlayers()[1], 2, 0, 1)
 ```
+
+- ชื่อฟังก์ชันเป็น string ตัวแรก ที่เหลือส่งต่อตามลำดับเดิม · ค่าที่ฟังก์ชันคืนมา `Invoke` คืนให้ด้วย
+- เรียกได้เฉพาะชื่อที่ขึ้นต้นด้วย `debug` · Command Bar ต้องอยู่ฝั่ง **Server** (Test → Current: Server)
+- ตัวแปร `local` ไม่ค้างข้ามการกด Enter แต่ละครั้ง ให้เขียนแต่ละคำสั่งให้จบในบรรทัดเดียว
+
+ตัวอย่างข้างล่างยังเขียนแบบเดิม (`EggService.debugX(player, ...)`) เพื่อให้อ่านง่าย — ตอนใช้จริงแปลงตามข้างบน
 
 ทุกคำสั่งที่ **แก้ข้อมูล** เซฟลง DataStore ทันทีผ่าน `DataService.saveAsync` (ไม่รอ autosave 60 วิ)
 ยกเว้น `debugSnapshot` ที่เป็น read-only ล้วน ๆ ไม่มีอะไรให้เซฟ
@@ -180,6 +192,8 @@ EggService.debugWipeSavedData(player, player.Name)  -- ต้องส่งช�
 
 ## ตัวอย่าง flow ทดสอบครบทุก tier
 
+⚠️ เขียนแบบ `require` ให้อ่านง่าย — ใน Command Bar ต้องแปลงเป็น `game.ServerStorage.EggServiceDebug:Invoke(...)` ทีละบรรทัด (ดูหัวเอกสาร)
+
 ```lua
 local EggService = require(game.ServerScriptService.EggService)
 local player = game.Players:GetPlayers()[1]
@@ -209,6 +223,8 @@ EggService.debugGrantMother(player, 1000000, "wukong", "pen")
 ```
 
 ## ตัวอย่าง flow ทดสอบ "ผู้เล่นใหม่" ซ้ำ ๆ (onboarding, ไข่เริ่มต้น)
+
+⚠️ เขียนแบบ `require` ให้อ่านง่าย — ใน Command Bar ต้องแปลงเป็น `game.ServerStorage.EggServiceDebug:Invoke(...)` ทีละบรรทัด (ดูหัวเอกสาร)
 
 ```lua
 local EggService = require(game.ServerScriptService.EggService)

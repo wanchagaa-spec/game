@@ -8,7 +8,8 @@
 --   MapSigns   — UI-2: ป้ายอัปดาเมจ/ค่าวิ่ง/อัปคอกบนแมพ (กด E) + จุดเปิดร้านขายแม่
 --   SellWindow — UI-2: หน้าต่างร้านขายแม่ (ติ๊กหลายตัว + กล่องยืนยันครั้งเดียว)
 --   SummonWindow — UI-3: หน้าต่างแท่นอัญเชิญ (แท็บแม่/ลูก · ติ๊กเรียงลำดับ · ส่งไปรบ/หยุดอัญเชิญ)
---   ที่เหลืออยู่ในไฟล์นี้: ปุ่มกระเป๋าแถบบน · ปุ่มร้านค้า/ดัชนี ("เร็วๆ นี้") · เลเวลมุมล่างซ้าย ·
+--   IndexWindow — UI-4: หน้าต่างดัชนี (แท็บคลาส · เคยได้ = รูป / ยังไม่ได้ = เงา · จุดแดงบนปุ่มเมื่อได้ตัวใหม่)
+--   ที่เหลืออยู่ในไฟล์นี้: ปุ่มกระเป๋าแถบบน · ปุ่มร้านค้า ("เร็วๆ นี้") · ปุ่มดัชนี · เลเวลมุมล่างซ้าย ·
 --   ข้อความแจ้งผล (toast) · HUD การรบ · popup ผ่านด่าน
 --
 -- ⚠️ UI-3: แผง TEMP (อัญเชิญ + กองลูก) · กล่องยืนยันส่งแม่ทีละตัว · แผงจัดคิวปล่อยใกล้จุดปล่อย **ลบแล้ว**
@@ -43,6 +44,8 @@ local MapSigns = require(script.Parent:WaitForChild("MapSigns"))
 local SellWindow = require(script.Parent:WaitForChild("SellWindow"))
 -- UI-3
 local SummonWindow = require(script.Parent:WaitForChild("SummonWindow"))
+-- UI-4
+local IndexWindow = require(script.Parent:WaitForChild("IndexWindow"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -484,7 +487,7 @@ local function updateCombatHud()
 end
 
 --------------------------------------------------------------------------------
--- หน้าต่าง "เร็วๆ นี้" (ร้านค้า → UI-5 · ดัชนี → UI-4)
+-- หน้าต่าง "เร็วๆ นี้" (ร้านค้า → UI-5) · ดัชนีเปิดหน้าต่างจริงแล้ว (UI-4 · IndexWindow)
 --------------------------------------------------------------------------------
 
 local comingSoon = UiKit.frame({
@@ -551,6 +554,8 @@ local function isWindowOpen(name: WindowName): boolean
 		return SellWindow.isOpen()
 	elseif name == "summon" then
 		return SummonWindow.isOpen()
+	elseif name == "index" then
+		return IndexWindow.isOpen()
 	end
 	return comingSoon.Visible and comingSoonKind == name
 end
@@ -559,6 +564,7 @@ local function closeAllWindows()
 	BagWindow.close()
 	SellWindow.close()
 	SummonWindow.close()
+	IndexWindow.close()
 	comingSoon.Visible = false
 	comingSoonKind = nil
 end
@@ -576,12 +582,12 @@ local function toggleWindow(name: WindowName)
 		SellWindow.open()
 	elseif name == "summon" then
 		SummonWindow.open()
+	elseif name == "index" then
+		IndexWindow.open() -- ล้างจุดแดงบนปุ่มดัชนีด้วย
 	else
 		comingSoonKind = name
-		comingSoonTitle.Text = if name == "shop" then "🛒 ร้านค้า" else "📖 ดัชนี"
-		comingSoonNote.Text = if name == "shop"
-			then "ร้านค้า Robux (ไข่ตำนาน · เร่งฟัก · ซื้อเลเวล) มาในรอบ UI-5"
-			else "ดัชนีตัวละครทั้ง 12 ตัว มาในรอบ UI-4"
+		comingSoonTitle.Text = "🛒 ร้านค้า"
+		comingSoonNote.Text = "ร้านค้า Robux (ไข่ตำนาน · เร่งฟัก · ซื้อเลเวล) มาในรอบ UI-5"
 		comingSoon.Visible = true
 	end
 end
@@ -624,6 +630,9 @@ end
 
 local shopButton = makeLeftButton("ShopButton", SHOP_BUTTON_Y, Color3.fromRGB(110, 225, 70), Color3.fromRGB(35, 95, 25), "🛒", "ร้านค้า")
 local indexButton = makeLeftButton("IndexButton", INDEX_BUTTON_Y, Color3.fromRGB(80, 190, 245), Color3.fromRGB(25, 75, 125), "📖", "ดัชนี")
+-- UI-4: หน้าต่างดัชนี + จุดแดงบนปุ่มเมื่อได้ตัวละครใหม่ครั้งแรก (หายเมื่อเปิดดัชนี · จำใน client เท่านั้น)
+IndexWindow.create(hud)
+IndexWindow.attachBadge(indexButton)
 
 shopButton.Activated:Connect(function()
 	toggleWindow("shop")
@@ -928,6 +937,7 @@ farmStateSync.OnClientEvent:Connect(function(payload)
 	SidePanels.setPayload(payload)
 	SellWindow.setPayload(payload)
 	SummonWindow.setPayload(payload)
+	IndexWindow.setPayload(payload)
 	MapSigns.setPayload(payload)
 
 	-- ⚠️ Phase 3B-1: กำแพง (WallRenderer) กับโมเดลทหาร (TroopRenderer) อ่านจากของจริงที่ sync

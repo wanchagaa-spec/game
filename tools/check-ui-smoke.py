@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Smoke test ของ UI ฝั่ง client (UI-1 · UI-2 · UI-3): Hotbar · BagWindow · SidePanels · UiKit · SellWindow · MapSigns
-· SummonWindow
+"""Smoke test ของ UI ฝั่ง client (UI-1 · UI-2 · UI-3 · UI-4): Hotbar · BagWindow · SidePanels · UiKit · SellWindow · MapSigns
+· SummonWindow · IndexWindow
 
     python3 tools/check-ui-smoke.py
 
@@ -18,7 +18,7 @@ LUAU = os.environ.get('LUAU') or shutil.which('luau')
 if not LUAU:
     sys.exit('หา luau CLI ไม่เจอ — ติดตั้งแล้วใส่ใน PATH หรือสั่ง LUAU=/path/to/luau python3 ...')
 
-MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns', 'SummonWindow']
+MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns', 'SummonWindow', 'IndexWindow']
 
 MOCK = r'''--!nocheck
 local Config = require("./src/shared/Config")
@@ -56,7 +56,18 @@ function Vector2.new(x, y)
 	return typed("Vector2", { X = x or 0, Y = y or 0 })
 end
 Vector2.zero = Vector2.new(0, 0)
-local Vector3 = { new = function(x, y, z) return typed("Vector3", { X = x or 0, Y = y or 0, Z = z or 0 }) end }
+-- Vector3 บวก/คูณเลขได้ + Magnitude — พอสำหรับ UiKit.setPortrait วางกล้องใน ViewportFrame (UI-4 เงาโมเดล)
+local Vector3Meta = { __type = "Vector3" }
+local Vector3 = {}
+function Vector3.new(x, y, z)
+	x, y, z = x or 0, y or 0, z or 0
+	return setmetatable({ X = x, Y = y, Z = z, Magnitude = math.sqrt(x * x + y * y + z * z) }, Vector3Meta)
+end
+Vector3Meta.__add = function(a, b) return Vector3.new(a.X + b.X, a.Y + b.Y, a.Z + b.Z) end
+Vector3Meta.__mul = function(a, b)
+	if type(a) == "number" then a, b = b, a end
+	return Vector3.new(a.X * b, a.Y * b, a.Z * b)
+end
 local UDim = { new = function(s, o) return typed("UDim", { Scale = s or 0, Offset = o or 0 }) end }
 local UDim2 = {}
 function UDim2.new(xs, xo, ys, yo)
@@ -185,6 +196,25 @@ function Methods.FindFirstChild(self, name)
 	return nil
 end
 Methods.WaitForChild = Methods.FindFirstChild
+-- โมเดลตัวละคร (เทมเพลตใน ReplicatedStorage.MotherModelTemplates) — พอให้ UiKit.setPortrait สร้าง ViewportFrame ได้
+function Methods.Clone(self)
+	local copy = newInstance(rawget(self, "__class"))
+	for key, value in rawget(self, "__props") do
+		if key ~= "Parent" then
+			rawget(copy, "__props")[key] = value
+		end
+	end
+	for _, child in rawget(self, "__children") do
+		child:Clone().Parent = copy
+	end
+	return copy
+end
+function Methods.GetBoundingBox(_self)
+	return typed("CFrame", { Position = Vector3.new(0, 2, 0) }), Vector3.new(2, 4, 2)
+end
+function Methods.GetPivot(_self)
+	return typed("CFrame", { Position = Vector3.new(0, 0, 0), LookVector = Vector3.new(0, 0, -1) })
+end
 function Methods.IsA(self, className)
 	local own = rawget(self, "__class")
 	if own == className then
@@ -1277,6 +1307,145 @@ do
 	check("กองที่หายไปแล้วหลุดจากติ๊ก", joined(SummonWindow.getTicks("children")), sA.key)
 	SummonWindow.close()
 	check("ปิดหน้าต่าง", SummonWindow.isOpen(), false)
+end
+
+print("\n━━ IndexWindow: ดัชนี (UI-4) ━━")
+do
+	local IndexWindow = loaded.IndexWindow
+	local ip = makePayload()
+	-- ในคอก: ซุนหงอคง + ม้า · กระเป๋า: ลิง/หมู 23 ตัว · roster: ลิง 1 ตัว
+	ip.battleRoster = { mother("9-1", "monkey", 100, false, 1) }
+	ip.discovered = { "horse", "monkey", "pig", "wukong", "ghost_char" } -- ghost_char = ตัวละครที่ถูกลบจาก Config
+	IndexWindow.create(gui)
+	local fakeIndexButton = Instance.new("TextButton")
+	local badge = IndexWindow.attachBadge(fakeIndexButton)
+	check("setPayload ตอนหน้าต่างปิดไม่ error", pcall(IndexWindow.setPayload, ip))
+	check("sync ชุดแรกหลังเข้าเกม → ไม่มีจุดแดง", badge.Visible, false)
+	check("เปิดหน้าต่างไม่ error", pcall(IndexWindow.open))
+
+	local win = findDescendant(gui, "IndexWindow")
+	local grid = findDescendant(win, "Grid")
+	local function cards()
+		local list = {}
+		for _, child in grid:GetChildren() do
+			if child.Name == "Card" and child.Visible then
+				table.insert(list, child)
+			end
+		end
+		return list
+	end
+	local function portraitOf(card)
+		return findDescendant(findDescendant(card, "PortraitHolder"), "Portrait")
+	end
+
+	check("หัว: เก็บแล้ว 4/12 (charId แปลกไม่นับ)", findDescendant(win, "Total").Text, "เก็บแล้ว 4/12")
+	local tabOrder = {}
+	for _, classId in Config.getIndexClasses() do
+		local tab = findDescendant(win, `Tab_{classId}`)
+		table.insert(tabOrder, if tab then findDescendant(tab, "Caption").Text else `ไม่มีแท็บ {classId}`)
+	end
+	check("แท็บคลาสครบ 5 แท็บ ธรรมดา → หายาก พร้อมตัวเลข (คลาสที่ยังไม่ได้ก็มีแท็บ)",
+		table.concat(tabOrder, " | "), "C 3/4 | B 0/3 | A 1/2 | S 0/2 | SS 0/1")
+
+	-- แท็บแรก = C: ลิง หมู ม้า (เคยได้) · ปลา (ยังไม่ได้)
+	local list = cards()
+	check("แท็บ C มี 4 ช่อง (1 ช่อง = 1 ตัวละคร)", #list, 4)
+	check("  เรียงตาม Config: ลิง หมู ม้า ???", `{findDescendant(list[1], "NameLabel").Text} {findDescendant(list[2], "NameLabel").Text} {findDescendant(list[3], "NameLabel").Text} {findDescendant(list[4], "NameLabel").Text}`, "ลิง หมู ม้า ???")
+	check("  เคยได้ = รูปสีตามคลาส", portraitOf(list[1]).BackgroundColor3, UiKit.CLASS_COLORS.C)
+	check("  เคยได้ = บอกคลาส", findDescendant(list[1], "ClassLabel").Text, "คลาส C")
+	check("  ยังไม่ได้ = เงาดำ", portraitOf(list[4]).BackgroundColor3, UiKit.SILHOUETTE)
+	check("  ยังไม่ได้ = ไม่บอกคลาสในรูป (?)", findDescendant(portraitOf(list[4]), "TextLabel").Text, "?")
+	check("  ยังไม่ได้ = ไม่บอกคลาสใต้ชื่อ", findDescendant(list[4], "ClassLabel").Text, "")
+	check("  ขอบการ์ดสีตามคลาส (ทั้งเคยได้และเงา)", findDescendant(list[4], "ClassBorder").Color, UiKit.CLASS_COLORS.C)
+
+	-- กดการ์ดที่เคยได้ → แผงเล็ก
+	local detail = findDescendant(win, "Detail")
+	list[1].Activated:Fire()
+	check("กดการ์ดลิง → แผงรายละเอียดขึ้น", detail.Visible, true)
+	check("  ชื่อ", findDescendant(detail, "Title").Text, "ลิง")
+	local info = findDescendant(detail, "Info").Text
+	local monkeysNow = 1 -- roster
+	for _, m in ip.mothersInBag do
+		if m.charId == "monkey" then
+			monkeysNow += 1
+		end
+	end
+	check("  คลาส + ตัวคูณ + ตอนนี้มี N ตัว (คอก+กระเป๋า+roster)", info, `คลาส C · ×1\nตอนนี้มี {monkeysNow} ตัว`)
+	list[4].Activated:Fire()
+	check("กดการ์ดเงา → ยังไม่เคยได้", findDescendant(detail, "Info").Text, "ยังไม่เคยได้")
+	check("  ชื่อเป็น ???", findDescendant(detail, "Title").Text, "???")
+	list[4].Activated:Fire()
+	check("กดซ้ำ → ปิดแผง", detail.Visible, false)
+
+	-- แท็บ A: ซุนหงอคงเคยได้ · ขาย/ตายหมดแล้วก็ยังนับ (ตอนนี้มี 0 ตัว)
+	findDescendant(win, "Tab_A").Activated:Fire()
+	list = cards()
+	check("แท็บ A มี 2 ช่อง", #list, 2)
+	check("  พระถัง = ???", findDescendant(list[1], "NameLabel").Text, "???")
+	check("  ซุนหงอคง เคยได้", findDescendant(list[2], "NameLabel").Text, "ซุนหงอคง")
+	ip.mothersInPen = {}
+	IndexWindow.setPayload(ip)
+	list[2].Activated:Fire()
+	check("  ไม่มีเหลือแล้ว (ขาย/ตาย) → ยังอยู่ในดัชนี · ตอนนี้มี 0 ตัว", findDescendant(detail, "Info").Text, "คลาส A · ×36\nตอนนี้มี 0 ตัว")
+	check("ไม่สร้างการ์ดเกินจำนวนช่องที่มี (virtual grid)", #grid:GetChildren() <= 4, true)
+
+	-- จุดแดง: ได้ตัวใหม่ระหว่างเล่น (หน้าต่างปิด) → ขึ้น · เปิดดัชนี → หาย
+	IndexWindow.close()
+	table.insert(ip.discovered, "fish")
+	IndexWindow.setPayload(ip)
+	check("ได้ตัวละครใหม่ (ปลา) → จุดแดงขึ้น", badge.Visible, true)
+	check("  hasNewDiscovery", IndexWindow.hasNewDiscovery(), true)
+	check("  ตัวเลขอัปเดต", findDescendant(win, "Total").Text, "เก็บแล้ว 5/12")
+	IndexWindow.open()
+	check("เปิดดัชนี → จุดแดงหาย", badge.Visible, false)
+	IndexWindow.close()
+	IndexWindow.setPayload(ip)
+	check("sync ชุดเดิมซ้ำ → ไม่ขึ้นใหม่", badge.Visible, false)
+	table.insert(ip.discovered, "ghost_two")
+	IndexWindow.setPayload(ip)
+	check("charId ที่ไม่มีใน Config → ไม่ขึ้นจุดแดง", badge.Visible, false)
+	IndexWindow.open()
+	table.insert(ip.discovered, "tang")
+	IndexWindow.setPayload(ip)
+	check("ได้ตัวใหม่ตอนเปิดดัชนีอยู่ → ไม่ขึ้นจุดแดง (เห็นอยู่แล้ว)", badge.Visible, false)
+	IndexWindow.close()
+end
+
+print("\n━━ IndexWindow: เงาของตัวที่มีโมเดลจริง (ViewportFrame ทาดำ) ━━")
+do
+	-- ⚠️ ท้ายไฟล์โดยตั้งใจ — ใส่เทมเพลตโมเดลแล้วทุกหน้าต่างที่วาดลิงจะใช้ ViewportFrame
+	local IndexWindow = loaded.IndexWindow
+	local templates = Instance.new("Folder")
+	templates.Name = "MotherModelTemplates"
+	templates.Parent = services.ReplicatedStorage
+	local monkeyModel = Instance.new("Model")
+	monkeyModel.Name = tostring(Config.getCharacter("monkey").modelAssetId)
+	monkeyModel.Parent = templates
+
+	local ip = makePayload()
+	ip.discovered = { "pig" } -- ลิงยังไม่เคยได้
+	IndexWindow.setPayload(ip)
+	IndexWindow.open()
+	IndexWindow.setTab("C")
+	local win = findDescendant(gui, "IndexWindow")
+	local grid = findDescendant(win, "Grid")
+	local monkeyCard = nil
+	for _, child in grid:GetChildren() do
+		if child.Name == "Card" and child.Visible and monkeyCard == nil then
+			monkeyCard = child -- ลิงอยู่ช่องแรกของคลาส C
+		end
+	end
+	local portrait = findDescendant(findDescendant(monkeyCard, "PortraitHolder"), "Portrait")
+	check("ลิงมีโมเดล → วาดด้วย ViewportFrame", portrait and portrait.__class, "ViewportFrame")
+	check("  ยังไม่เคยได้ → ทาดำทั้งภาพ (ImageColor3 = ดำ)", portrait and portrait.ImageColor3, UiKit.BLACK)
+	check("  ชื่อ ???", findDescendant(monkeyCard, "NameLabel").Text, "???")
+
+	table.insert(ip.discovered, "monkey")
+	IndexWindow.setPayload(ip)
+	portrait = findDescendant(findDescendant(monkeyCard, "PortraitHolder"), "Portrait")
+	check("ได้ลิงแล้ว → วาดใหม่เป็นรูปสี (ไม่ทาดำ)", portrait and portrait.ImageColor3 ~= UiKit.BLACK, true)
+	check("  ชื่อ ลิง", findDescendant(monkeyCard, "NameLabel").Text, "ลิง")
+	IndexWindow.close()
 end
 
 print(string.format("\n=== ผ่าน %d / ตก %d ===", passCount, failCount))

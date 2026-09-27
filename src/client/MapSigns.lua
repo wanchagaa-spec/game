@@ -33,6 +33,9 @@ export type Actions = {
 	openSummon: () -> (),
 	closeSummon: () -> (),
 	isSummonOpen: () -> boolean,
+	-- ⚠️ UI-fix รอบ 1: กด E ค้างที่แท่นตอน**กำลังอัญเชิญอยู่** = หยุดอัญเชิญทันที ไม่เปิดหน้าต่าง
+	-- (ทางลัดเพิ่มเติม — ปุ่ม "หยุดอัญเชิญ" ในหน้าต่างเดิมยังอยู่เผื่อเปิดหน้าต่างค้างไว้อยู่แล้ว)
+	stopSummon: () -> (),
 }
 
 type Sign = {
@@ -336,8 +339,14 @@ local function attachSummonPedestal()
 			HoldDuration = spec.PromptHoldSeconds,
 			MaxActivationDistance = spec.PromptDistance,
 		})
+		-- ⚠️ UI-fix รอบ 1: กำลังอัญเชิญอยู่แล้ว → กด E ค้างซ้ำ = หยุดทันที ไม่เปิดหน้าต่าง
+		-- (lastPayload.summonEnabled มาจาก sync ล่าสุด — client ไม่ตัดสินเอง แค่เลือกยิง remote ไหน)
 		prompt.Triggered:Connect(function()
-			actions.openSummon()
+			if lastPayload and lastPayload.summonEnabled then
+				actions.stopSummon()
+			else
+				actions.openSummon()
+			end
 		end)
 		prompt.Parent = core
 	end)

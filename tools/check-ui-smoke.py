@@ -956,6 +956,7 @@ do
 		isSummonOpen = function()
 			return summonOpen
 		end,
+		stopSummon = record("stopSummon"),
 	}
 	-- ⚠️ task.spawn ของจริงรันทีหลัง — ในเทสต์รันทันที (WaitForChild ปลอม = หาเจอเลย)
 	-- ลูปวัดระยะร้านหยุดที่ task.wait ครั้งแรก (โยน error ให้ pcall จับ) ไม่งั้นวนไม่จบ
@@ -1062,6 +1063,21 @@ do
 	check("  ระยะกดตาม Config", summonPrompt.MaxActivationDistance, Config.MapDimensions.SummonPedestal.PromptDistance)
 	summonPrompt.Triggered:Fire(localPlayer)
 	check("  กด E ค้าง → เปิดหน้าต่างอัญเชิญ", summonOpen, true)
+
+	-- ⚠️ UI-fix รอบ 1: กำลังอัญเชิญอยู่แล้ว → กด E ค้างซ้ำ = หยุดทันที ไม่เปิดหน้าต่างซ้ำ
+	local beforeStopCalls = #calls
+	p.summonEnabled = true
+	MapSigns.setPayload(p)
+	summonPrompt.Triggered:Fire(localPlayer)
+	check("  กำลังอัญเชิญอยู่ → กด E ค้างซ้ำ → เรียก stopSummon", lastCall().name, "stopSummon")
+	check("  ไม่เรียก openSummon ซ้ำ", #calls, beforeStopCalls + 1)
+
+	-- หยุดแล้ว (summonEnabled กลับเป็น false ตาม sync ถัดไป) → กด E ค้างเปิดหน้าต่างได้ตามปกติอีกครั้ง
+	summonOpen = false
+	p.summonEnabled = false
+	MapSigns.setPayload(p)
+	summonPrompt.Triggered:Fire(localPlayer)
+	check("  หยุดแล้ว → กด E ค้างเปิดหน้าต่างได้ตามปกติ", summonOpen, true)
 end
 
 print("\n━━ SummonWindow: หน้าต่างแท่นอัญเชิญ (UI-3) ━━")

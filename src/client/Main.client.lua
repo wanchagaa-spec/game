@@ -122,6 +122,10 @@ local TOAST_SECONDS = 4
 -- ยอดเงิน: 52 เท่าเดิมบนจอสูง · จอเตี้ย (มือถือ) ย่อตามความสูงจอ
 local COIN_TEXT_MAX = 52
 local COIN_TEXT_HEIGHT_RATIO = 0.075
+-- ⚠️ UI-fix รอบ 1: ดันเงินขึ้นชิดขอบบนสุดเท่าที่ทำได้ (ยอมรับได้ถ้าทับ/ชิดแถบเพลเยอร์ลิสต์
+-- หรือปุ่ม Robux ของ Roblox เอง — ตัดสินใจแล้วว่าไม่ต้องเผื่อระยะห่างจาก topbar เหมือนของอื่น)
+-- ⚠️ ตั้งใจไม่ใช้ getTopbarBottom()/topGap แบบของอื่นในไฟล์นี้ — นั่นคือระยะที่ "เผื่อ" ไม่ให้ชนแถบบน
+local COIN_TOP_MARGIN = 2
 -- ระยะห่างจากขอบจอ (ขวา/ล่าง) และใต้แถบบนของ Roblox (สัดส่วนความสูงจอ · 4–10 px)
 local HUD_EDGE_MARGIN = 16
 local HUD_TOP_GAP_RATIO = 0.012
@@ -418,7 +422,7 @@ local function layoutHud()
 		math.max(0, viewport.X - HUD_EDGE_MARGIN - barsRight - COIN_BARS_GAP),
 		math.floor(coinHeight * 1.25)
 	)
-	coinLabel.Position = UDim2.new(1, -HUD_EDGE_MARGIN, 0, top)
+	coinLabel.Position = UDim2.new(1, -HUD_EDGE_MARGIN, 0, COIN_TOP_MARGIN)
 
 	-- toast: ใต้หลอดเลือดตอนเปิดอัญเชิญ · ใต้แถบบนตอนปิด
 	local toastTop = if combatBars.Visible then top + barsHeight + topGap else top
@@ -766,6 +770,11 @@ MapSigns.start(playerGui, {
 		end
 	end,
 	isSummonOpen = SummonWindow.isOpen,
+	-- ⚠️ UI-fix รอบ 1: ทางลัดหยุดอัญเชิญจากแท่นโดยตรง — remote เดิมของปุ่ม "หยุดอัญเชิญ" ในหน้าต่าง
+	-- ไม่เปิด/แตะหน้าต่างเลย (ปิดอยู่ก็ยังปิดต่อ · เปิดอยู่ก็ไม่ถูกสั่งปิดตาม — sync จะทำให้หน้าต่างอัปเดตเอง)
+	stopSummon = function()
+		setSummonEnabledRequest:FireServer(false)
+	end,
 })
 
 --------------------------------------------------------------------------------

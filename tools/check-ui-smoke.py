@@ -832,6 +832,13 @@ do
 	check("  ปุ่มขายโชว์ยอดรวมเต็มหลัก", sellButton.Text, "ขายที่เลือก (22 ตัว · รวม ฿8,250)")
 	check("  ปุ่มกลายเป็นยกเลิกทั้งหมด", selectAll.Text, "ยกเลิกที่เลือกทั้งหมด")
 
+	-- ⚠️ UI-fix รอบ 1: มาตรฐานสีทั้งเกม — ปุ่มขาย = โทนแดง (R เด่นกว่า G และ B)
+	-- เช็คเชิงโครงสร้าง (โทนสี ไม่ปักค่า RGB ตรง ๆ) กันเทสต์เปราะถ้าปรับเฉดทีหลัง
+	local sellColor = sellButton.BackgroundColor3
+	check("ปุ่มขาย = โทนแดง (R > G และ R > B)", sellColor.R > sellColor.G and sellColor.R > sellColor.B, true)
+	local confirmSellColor = findDescendant(confirm, "ConfirmSell").BackgroundColor3
+	check("ปุ่มยืนยันขาย = โทนแดงเช่นกัน", confirmSellColor.R > confirmSellColor.G and confirmSellColor.R > confirmSellColor.B, true)
+
 	-- sync ใหม่: ตัวที่เลือกถูกขาย/ล็อกจากที่อื่น → หลุดจากที่เลือกเอง
 	table.remove(shopPayload.mothersInBag, 2) -- 1-102
 	shopPayload.mothersInBag[2].locked = true -- 1-103
@@ -1511,6 +1518,12 @@ do
 	local rushCard = findDescendant(win, "Card4")
 	check("มีการ์ดครบ 4 ใบ (ไข่ตำนาน · ดาเมจ · ความเร็ว · เร่งฟัก)",
 		eggCard ~= nil and dmgCard ~= nil and spdCard ~= nil and rushCard ~= nil, true)
+
+	-- ⚠️ UI-fix รอบ 1: มาตรฐานสีทั้งเกม — ปุ่มซื้อทุกใบ = โทนเขียว (G เด่นกว่า R และ B)
+	for _, card in { eggCard, dmgCard, spdCard, rushCard } do
+		local buyColor = findDescendant(card, "Buy").BackgroundColor3
+		check("ปุ่มซื้อ = โทนเขียว (G > R และ G > B)", buyColor.G > buyColor.R and buyColor.G > buyColor.B, true)
+	end
 
 	check("ราคาไข่ตำนานดึงจาก GetProductInfo จำลอง (1 Robux)", findDescendant(eggCard, "Price").Text, "💎 1")
 	findDescendant(eggCard, "Buy").Activated:Fire()

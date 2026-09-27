@@ -164,6 +164,17 @@ end
 function Methods.GetChildren(self)
 	return table.clone(rawget(self, "__children"))
 end
+function Methods.GetDescendants(self)
+	local out = {}
+	local function walk(node)
+		for _, child in rawget(node, "__children") do
+			table.insert(out, child)
+			walk(child)
+		end
+	end
+	walk(self)
+	return out
+end
 function Methods.FindFirstChild(self, name)
 	for _, child in rawget(self, "__children") do
 		if child.Name == name then
@@ -796,26 +807,24 @@ print("\n━━ MapSigns: ข้อความบนป้าย (ค่าข�
 do
 	local MapSigns = loaded.MapSigns
 	local p = makePayload()
-	local view = MapSigns.describe("damage", p, true)
+	local view = MapSigns.describe("damage", p)
 	check("ดาเมจ: Lv. 7", view.level, "Lv. 7")
 	check("  ราคาขั้นถัดไป ฿5K · เงินพอ = สีปกติ", view.detail == "฿5K" and view.tone == "price", true)
-	view = MapSigns.describe("speed", p, true)
+	view = MapSigns.describe("speed", p)
 	check("ความเร็ว: เงินไม่พอ → ราคาสีแดง", view.detail == "฿100K" and view.tone == "poor", true)
-	view = MapSigns.describe("pen", p, true)
+	view = MapSigns.describe("pen", p)
 	check("อัปคอก: Lv. 3 · ฿10K", view.level == "Lv. 3" and view.detail == "฿10K", true)
 	p.damageUpgradeCost = nil
 	p.damageLevel = 16
-	view = MapSigns.describe("damage", p, true)
+	view = MapSigns.describe("damage", p)
 	check("ดาเมจชนเพดานด่าน → เต็มแล้ว — พังด่านถัดไป", view.detail, "เต็มแล้ว — พังด่านถัดไปเพื่อปลดล็อก")
 	p.damageLevel = Config.Balance.DamageUpgrade.MAX_LEVEL
-	check("ดาเมจครบทั้งเกม → MAX", MapSigns.describe("damage", p, true).detail, "MAX")
+	check("ดาเมจครบทั้งเกม → MAX", MapSigns.describe("damage", p).detail, "MAX")
 	p.speedUpgradeCost = nil
-	check("ความเร็วสุดทาง → MAX", MapSigns.describe("speed", p, true).detail, "MAX")
+	check("ความเร็วสุดทาง → MAX", MapSigns.describe("speed", p).detail, "MAX")
 	p.penUpgradeCost = nil
-	check("คอกสุดทาง → MAX", MapSigns.describe("pen", p, true).detail, "MAX")
-	view = MapSigns.describe("pen", makePayload(), false)
-	check("ป้ายคอกคนอื่น → ไม่โชว์เลข", view.level == "" and view.detail == "กดได้ที่คอกของตัวเอง", true)
-	check("ยังไม่มี sync → กำลังโหลด", MapSigns.describe("speed", nil, true).detail, "กำลังโหลด...")
+	check("คอกสุดทาง → MAX", MapSigns.describe("pen", p).detail, "MAX")
+	check("ยังไม่มี sync → กำลังโหลด", MapSigns.describe("speed", nil).detail, "กำลังโหลด...")
 end
 
 print("\n━━ MapSigns: ติดป้าย + จุดกด E เฉพาะคอกตัวเอง ━━")
@@ -829,10 +838,15 @@ do
 	signFolder.Name = Config.MAP_SIGN_FOLDER
 	signFolder.Parent = map
 	local boards = {}
+	local posts = {}
 	local function addSign(name)
 		local model = newInstance("Model")
 		model.Name = name
 		model.Parent = signFolder
+		local post = newInstance("Part")
+		post.Name = "Post"
+		post.Parent = model
+		posts[name] = post
 		local board = newInstance("Part")
 		board.Name = "Board"
 		board.Parent = model
@@ -911,13 +925,47 @@ do
 	local p = makePayload()
 	MapSigns.setPayload(p)
 	check("ป้ายตัวเองโชว์เลเวลของตัวเอง", findDescendant(ownGui, "Level").Text, "Lv. 2")
-	local otherGui = findDescendant(playerGui, `Sign_{Config.getMapSignName("speed", 1)}`)
-	check("ป้ายคอกคนอื่นไม่โชว์เลข", findDescendant(otherGui, "Detail").Text, "กดได้ที่คอกของตัวเอง")
+	-- ⚠️ UI-2 (ผลทดสอบ Studio): ป้ายคอกอื่นไม่แสดงเลย — ซ่อนทั้งเสา แผ่นป้าย และข้อความ ในเครื่องเรา
+	local function signShown(kind, index)
+		local name = Config.getMapSignName(kind, index)
+		local gui = findDescendant(playerGui, `Sign_{name}`)
+		local hidden = (boards[name].LocalTransparencyModifier or 0) == 1 and (posts[name].LocalTransparencyModifier or 0) == 1
+		local visible = (boards[name].LocalTransparencyModifier or 0) == 0 and (posts[name].LocalTransparencyModifier or 0) == 0
+		if gui.Enabled == false and hidden then
+			return false
+		elseif gui.Enabled ~= false and visible then
+			return true
+		end
+		return "ครึ่ง ๆ" -- ซ่อนไม่ครบทุกชิ้น
+	end
+	check("ป้ายคอกตัวเอง (2) แสดงครบ", signShown("speed", 2) == true and signShown("pen", 2) == true, true)
+	local othersHidden = true
+	for index = 1, Config.World.MAX_PENS do
+		if index ~= 2 and (signShown("speed", index) ~= false or signShown("pen", index) ~= false) then
+			othersHidden = false
+		end
+	end
+	check("ป้ายคอกอื่นทุกคอก (รวมที่ไม่มีเจ้าของ) ซ่อนหมด — เสา แผ่น ข้อความ", othersHidden, true)
+	local damageGui = findDescendant(playerGui, `Sign_{Config.getMapSignName("damage")}`)
+	check("ป้ายดาเมจแสดงเสมอ", damageGui.Enabled ~= false and (boards[Config.getMapSignName("damage")].LocalTransparencyModifier or 0) == 0, true)
 
 	-- ย้ายคอก (จองใหม่) → จุดกดย้ายตาม
 	localPlayer:SetAttribute(Config.PEN_INDEX_ATTRIBUTE, 5)
 	check("ย้ายเป็นคอก 5 → ป้ายคอก 2 ไม่มีจุดกดแล้ว", promptOn(Config.getMapSignName("speed", 2)) == nil, true)
 	check("  ป้ายคอก 5 มีจุดกด", promptOn(Config.getMapSignName("pen", 5)) ~= nil)
+	check("  ป้ายคอก 2 ถูกซ่อน · คอก 5 แสดง", signShown("speed", 2) == false and signShown("speed", 5) == true, true)
+
+	-- ออกจากคอก (Attribute ถูกล้าง) → ไม่เห็นป้ายค่าวิ่ง/อัปคอกของคอกไหนเลย · ป้ายดาเมจยังอยู่
+	localPlayer:SetAttribute(Config.PEN_INDEX_ATTRIBUTE, nil)
+	local anyShown = false
+	for index = 1, Config.World.MAX_PENS do
+		if signShown("speed", index) ~= false or signShown("pen", index) ~= false then
+			anyShown = true
+		end
+	end
+	check("ไม่มีคอก → ป้ายค่าวิ่ง/อัปคอกซ่อนหมด", anyShown, false)
+	check("  ป้ายดาเมจยังแสดง · ยังมีจุดกด", damageGui.Enabled ~= false and promptOn(Config.getMapSignName("damage")) ~= nil, true)
+	localPlayer:SetAttribute(Config.PEN_INDEX_ATTRIBUTE, 5)
 
 	local sellPrompt = findDescendant(counter, "SellShopPrompt")
 	check("แผงร้านขายแม่มีจุดกด E", sellPrompt ~= nil)

@@ -5,8 +5,9 @@
 --   · SurfaceGui (อยู่ใน PlayerGui · Adornee = แผ่นป้าย) โชว์เลเวล/ราคาของ**ผู้เล่นที่มองอยู่**
 --     ห้ามเขียนค่าของใครลงป้ายฝั่ง server — คนอื่นจะเห็นเลขของคนนั้นไปด้วย
 --   · ProximityPrompt (กด E · มือถือขึ้นเป็นปุ่มให้แตะ) สร้างฝั่ง client → กดแล้วยิง remote ซื้อเดิม
--- ⚠️ ป้ายค่าวิ่ง/อัปคอกมีทุกคอก แต่ติดจุดกดเฉพาะคอกตัวเอง (Attribute Config.PEN_INDEX_ATTRIBUTE)
---   คอกคนอื่นไม่มีปุ่มให้กดเลย · ค่าวิ่งเป็นของบัญชีก็จริง แต่ให้ซื้อที่คอกตัวเองที่เดียวกันงง
+-- ⚠️ ป้ายค่าวิ่ง/อัปคอก server สร้างไว้ทุกคอก แต่ **เครื่องเราแสดงเฉพาะของคอกตัวเอง** (Attribute Config.PEN_INDEX_ATTRIBUTE)
+--   คอกคนอื่น + คอกที่ยังไม่มีเจ้าของ: ซ่อนทั้งป้าย (syncVisibility) ไม่มีจุดกด · ป้ายชื่อ "คอก N" ไม่ถูกแตะ
+--   ค่าวิ่งเป็นของบัญชีก็จริง แต่ให้ซื้อที่คอกตัวเองที่เดียวกันงง
 -- ⚠️ client ไม่ตัดสินอะไร: ราคา/เพดานอ่านจาก sync · server ตรวจเงิน/เพดานซ้ำเองทุกครั้ง
 
 local Players = game:GetService("Players")
@@ -38,6 +39,7 @@ type Sign = {
 	levelLabel: TextLabel,
 	detailLabel: TextLabel,
 	board: BasePart?,
+	model: Model?, -- เสา + แผ่นป้าย (ของ server) — ซ่อนในเครื่องเราถ้าไม่ใช่คอกตัวเอง
 	prompt: ProximityPrompt?,
 }
 
@@ -68,12 +70,9 @@ local lastPayload: any = nil
 -- ข้อความบนป้าย — ฟังก์ชันล้วน ไม่แตะ Instance (เทสต์นอก Studio ได้ · tools/check-ui-smoke.py)
 --------------------------------------------------------------------------------
 
--- payload = FarmStateSync ล่าสุด (nil = ยังไม่มา) · isOwn = false → ป้ายของคอกคนอื่น
-function MapSigns.describe(kind: SignKind, payload: any, isOwn: boolean): SignView
+-- payload = FarmStateSync ล่าสุด (nil = ยังไม่มา) · ป้ายคอกคนอื่นไม่แสดงเลย จึงไม่มีข้อความของกรณีนั้น
+function MapSigns.describe(kind: SignKind, payload: any): SignView
 	local title = TITLES[kind]
-	if not isOwn then
-		return { title = title, level = "", detail = "กดได้ที่คอกของตัวเอง", tone = "dim" }
-	end
 	if not payload then
 		return { title = title, level = "", detail = "กำลังโหลด...", tone = "dim" }
 	end
@@ -129,7 +128,7 @@ end
 
 local function render()
 	for _, sign in signs do
-		local view = MapSigns.describe(sign.kind, lastPayload, isOwn(sign))
+		local view = MapSigns.describe(sign.kind, lastPayload)
 		sign.titleLabel.Text = view.title
 		sign.levelLabel.Text = view.level
 		sign.levelLabel.Visible = view.level ~= ""
@@ -160,8 +159,26 @@ local function syncPrompt(sign: Sign)
 	end
 end
 
+-- ⚠️ UI-2 (ผลทดสอบ Studio): ป้ายค่าวิ่ง/อัปคอกของคอกอื่น (รวมคอกที่ยังไม่มีเจ้าของ) **ไม่แสดงเลย** ในเครื่องเรา
+-- ซ่อนด้วย LocalTransparencyModifier (มีผลเฉพาะเครื่องนี้ ไม่ replicate) + ปิด SurfaceGui · จุดกดถอดใน syncPrompt
+-- ป้ายชื่อ "คอก N" อยู่คนละโมเดล (MapBuilder.buildPenSign) ไม่ถูกแตะ — ยังเห็นทุกคอก
+local function syncVisibility(sign: Sign)
+	local shown = isOwn(sign)
+	sign.gui.Enabled = shown
+	local model = sign.model
+	if model then
+		for _, part in model:GetDescendants() do
+			if part:IsA("BasePart") then
+				part.LocalTransparencyModifier = if shown then 0 else 1
+			end
+		end
+	end
+end
+
+-- จองคอก / ย้ายคอก / ล้างตอนออก (Attribute เปลี่ยน) → ป้าย + จุดกดตามคอกใหม่
 local function refreshOwnership()
 	for _, sign in signs do
+		syncVisibility(sign)
 		syncPrompt(sign)
 	end
 	render()
@@ -219,9 +236,11 @@ local function createSign(parent: Instance, kind: SignKind, penIndex: number?, f
 		levelLabel = levelLabel,
 		detailLabel = detailLabel,
 		board = nil,
+		model = nil,
 		prompt = nil,
 	}
 	table.insert(signs, sign)
+	syncVisibility(sign)
 	return sign
 end
 
@@ -233,9 +252,11 @@ local function attachBoard(sign: Sign)
 		local folder = map and map:WaitForChild(Config.MAP_SIGN_FOLDER)
 		local model = folder and folder:WaitForChild(sign.name)
 		local board = model and model:WaitForChild("Board")
-		if board and board:IsA("BasePart") then
+		if board and board:IsA("BasePart") and model and model:IsA("Model") then
 			sign.board = board
+			sign.model = model
 			sign.gui.Adornee = board
+			syncVisibility(sign)
 			syncPrompt(sign)
 		end
 	end)

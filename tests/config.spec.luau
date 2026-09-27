@@ -886,10 +886,12 @@ return function(t, Config)
 	check("แผงอยู่ในแนวทางเดินกลาง (กลางผนังหลัง)", math.abs(s1.Z) + map.Shop.StallSize.Y / 2 < map.Pen.RowGap / 2, true)
 	check("แผงไม่บังลานคอก (อยู่ซ้ายลานคอก)", s1.X + map.Shop.StallSize.X / 2 < Config.getPenYardLeftX(), true)
 
-	-- ⚠️ UI-2: กำแพงข้างเลนเริ่มเสมอกำแพงใสฝั่งตะวันออก ไม่ยื่นเข้าลาน · ต้นเลน/ระยะการรบไม่เปลี่ยน
+	-- ⚠️ UI-2: กำแพงข้างเลนเริ่มเสมอกำแพงขอบแมพฝั่งตะวันออก ไม่ยื่นเข้าลาน · ต้นเลน/ระยะการรบไม่เปลี่ยน
+	-- ⚠️ UI-fix รอบ 1: เปลี่ยนจากผิวด้านใน (`- Thickness/2`) เป็นผิวด้านนอก (`+ Thickness/2`) — ผิวด้านใน
+	-- ทำให้กำแพงข้างเลนซ้อนทับกำแพงขอบแมพเต็มความหนา (5 studs) = z-fighting ตรงมุมปากเลน
 	local wallStart = Config.getLaneWallStartX()
-	check("กำแพงข้างเลนเริ่ม = ผิวด้านในกำแพงใสฝั่งตะวันออก",
-		wallStart, Config.getEastBoundaryX() - map.Boundary.Thickness / 2)
+	check("กำแพงข้างเลนเริ่ม = ผิวด้านนอกกำแพงขอบแมพฝั่งตะวันออก (ไม่ซ้อนทับ)",
+		wallStart, Config.getEastBoundaryX() + map.Boundary.Thickness / 2)
 	check("กำแพงข้างเลนไม่ยื่นเข้าลาน (เริ่มหลังต้นเลน)", wallStart >= Config.getLaneStartX(), true)
 	check("ต้นเลนยังอยู่ที่ขอบลานคอก (ระยะการรบไม่เปลี่ยน)", Config.getLaneStartX(), Config.getPenYardRightX())
 
@@ -1018,7 +1020,7 @@ return function(t, Config)
 	check("แท่นอัญเชิญอยู่กลางเลน (Z 0)", pedestalCenter.Z, 0)
 	check("แท่นเริ่มที่ต้นเลนหรือหลังจากนั้น (ไม่ล้ำลานคอก)",
 		pedestalCenter.X - pedestal.Diameter / 2 >= Config.getLaneStartX(), true)
-	check("แท่นจบก่อนกำแพงข้างเลน (X 157.5)", pedestalCenter.X + pedestal.Diameter / 2 <= Config.getLaneWallStartX(), true)
+	check("แท่นจบก่อนกำแพงข้างเลน (X 162.5)", pedestalCenter.X + pedestal.Diameter / 2 <= Config.getLaneWallStartX(), true)
 	check("ข้างแท่นเหลือทางเดินกว้างกว่าประตูคอก", map.Lane.Width / 2 - pedestal.Diameter / 2 >= map.Pen.GateWidth, true)
 	check("กด E ค้างครึ่งวินาที", pedestal.PromptHoldSeconds, 0.5)
 	local damageSpotP = Config.getDamageSignSpot()
@@ -1031,7 +1033,7 @@ return function(t, Config)
 	local savedPedestalPrompt = pedestal.PromptDistance
 	local savedPedestalClose = pedestal.CloseDistance
 	check("แท่นยื่นเลยกำแพงข้างเลน → ล้ม", mapGuardCatches(
-		function() pedestal.CenterInsetX = 14 end, function() pedestal.CenterInsetX = savedInset end), true)
+		function() pedestal.CenterInsetX = 20 end, function() pedestal.CenterInsetX = savedInset end), true)
 	check("แท่นล้ำเข้าลานคอก → ล้ม", mapGuardCatches(
 		function() pedestal.CenterInsetX = 2 end, function() pedestal.CenterInsetX = savedInset end), true)
 	check("แท่นกว้างจนบังทางเข้าเลน → ล้ม", mapGuardCatches(

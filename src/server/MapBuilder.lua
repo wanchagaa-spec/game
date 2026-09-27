@@ -581,8 +581,10 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	local roomHalfZ = MAP.BossRoom.Size.Y / 2
 	local roomHalfX = MAP.BossRoom.Size.X / 2
 
-	-- ⚠️ UI-2: กำแพงข้างเริ่มเสมอกำแพงใสฝั่งตะวันออก (Config.getLaneWallStartX) ไม่ใช่ต้นเลน —
-	-- เดิมยื่นเข้าลานเกินแนวกำแพงใสทั้งสองฝั่งปากเลน · พื้นเลน/จุดปล่อยทหารยังเริ่มที่ต้นเลนเหมือนเดิม
+	-- ⚠️ UI-2: กำแพงข้างเริ่มเสมอกำแพงขอบแมพฝั่งตะวันออก (Config.getLaneWallStartX) ไม่ใช่ต้นเลน —
+	-- เดิมยื่นเข้าลานเกินแนวกำแพงขอบแมพทั้งสองฝั่งปากเลน · พื้นเลน/จุดปล่อยทหารยังเริ่มที่ต้นเลนเหมือนเดิม
+	-- ⚠️ UI-fix รอบ 1: getLaneWallStartX() ขยับจากผิวด้านใน → ผิวด้านนอกของกำแพงขอบแมพแล้ว
+	-- (กันซ้อนทับกำแพงขอบแมพเต็มความหนา = z-fighting ตรงมุมปากเลน — ดูคอมเมนต์ที่ตัวฟังก์ชันใน Config.lua)
 	local wallStartX = Config.getLaneWallStartX()
 	for _, sign in { 1, -1 } do
 		local side = if sign == 1 then "North" else "South"

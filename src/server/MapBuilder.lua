@@ -54,6 +54,9 @@ local COLORS = {
 	spawn = Color3.fromRGB(230, 200, 120),
 	sign = Color3.fromRGB(196, 158, 112),
 	boundary = Color3.fromRGB(118, 112, 104), -- หินเทาอมน้ำตาล ให้ธีมใกล้เคียง WALL_COLOR ใน WallRenderer.lua
+	-- ⚠️ UI-fix รอบ 1: สีตกแต่งผิวกำแพงขอบแมพ (ดู decorateBoundaryWall) — หน้าตาล้วน ๆ ไม่กระทบขนาด/การชน
+	boundaryDamp = Color3.fromRGB(80, 76, 70), -- แถบคราบชื้นเข้มด้านล่างกำแพง
+	moss = Color3.fromRGB(90, 118, 62), -- หย่อมมอส/เถาวัลย์
 }
 
 local FLOOR_THICKNESS = 2
@@ -702,6 +705,55 @@ end
 -- **ไม่ใช้วิธี "ตกแล้วเกิดใหม่"** เพราะน่ารำคาญตอนกำลังฟาร์ม → กั้นไว้ตั้งแต่แรก
 -- ⚠️ กั้นเฉพาะรอบ **ลานคอก** เพราะเลนรบมีกำแพงทึบสองข้างอยู่แล้ว
 -- และต้องเว้นช่องฝั่งที่ต่อกับเลน ไม่งั้นเดินออกไปรบไม่ได้
+
+-- ⚠️ UI-fix รอบ 1: ตกแต่งผิวกำแพงหินขอบแมพให้มีมิติ (หน้าตาล้วน ๆ ไม่แตะขนาด/ตำแหน่ง/CanCollide ของกำแพงจริงเลย)
+-- เลือกวิธี "Part แปะเยื้องผิว" แทน SurfaceAppearance/Decal/Texture เพราะสามวิธีนั้นต้องมี asset รูปภาพ
+-- ที่อัปโหลดขึ้น Roblox ไว้แล้ว (เหมือนข้อจำกัดเดียวกับโมเดล mesh ในคอก — repo นี้ยังไม่มี asset แบบนั้น
+-- และสร้างจากสคริปต์ตรง ๆ ไม่ได้) ส่วน `Material = Rock` ที่กำแพงใช้อยู่แล้วมีลายผิวขรุขระแบบ built-in
+-- ของ Roblox ให้ฟรีโดยไม่ต้องมี asset — ของที่เพิ่มตรงนี้คือมิติ/สีที่ engine material เดียวให้ไม่ได้
+-- · แถบคราบชื้นเข้มด้านล่าง + หย่อมมอส/เถาวัลย์ 3 จุดต่อผืน เยื้องออกจากผิวจริง `DECOR_EPSILON`
+--   กัน z-fighting (หลักการเดียวกับ getLaneWallStartX ด้านบน) · CanCollide = false ทั้งคู่ (ของประดับ ไม่ใช่กำแพง)
+-- · ตำแหน่งหย่อมมอสคงที่ (ไม่สุ่ม) กันสองผู้เล่นเห็นไม่ตรงกัน แม้เรื่องนี้ไม่กระทบกติกาเกม
+local DECOR_EPSILON = 0.05
+local MOSS_FRACTIONS = { 0.18, 0.47, 0.79 } -- ตำแหน่งตามสัดส่วนความยาวกำแพง ไม่เท่ากันให้ดูเป็นธรรมชาติ
+
+local function decorateBoundaryWall(size: Vector3, position: Vector3, normal: Vector3, folder: Instance)
+	local lengthAlongX = normal.Z ~= 0 -- normal ชี้ตามแกน Z (North/South) → ตัวกำแพงยาวไปตามแกน X
+	local wallLength = if lengthAlongX then size.X else size.Z
+	local wallHeight = size.Y
+	local thickness = if lengthAlongX then size.Z else size.X
+
+	local faceOffset = thickness / 2 + DECOR_EPSILON
+	local faceX = position.X + normal.X * faceOffset
+	local faceZ = position.Z + normal.Z * faceOffset
+
+	-- แถบคราบชื้นเข้ม สูงประมาณ 28% ของกำแพง วิ่งเกือบเต็มความยาว (เว้นขอบเล็กน้อยกันโผล่พ้นมุม)
+	local bandHeight = wallHeight * 0.28
+	local bandSize = if lengthAlongX
+		then Vector3.new(wallLength * 0.94, bandHeight, 0.08)
+		else Vector3.new(0.08, bandHeight, wallLength * 0.94)
+	local band = makePart("WeatherBand", bandSize, Vector3.new(faceX, 0, faceZ), COLORS.boundaryDamp, folder)
+	band.Material = Enum.Material.Rock
+	band.CanCollide = false
+	band.CastShadow = false
+
+	-- หย่อมมอส/เถาวัลย์ กระจายตาม MOSS_FRACTIONS สูงไม่เท่ากันสลับกันไปให้ดูเป็นธรรมชาติ
+	for i, frac in MOSS_FRACTIONS do
+		local along = (frac - 0.5) * wallLength
+		local mossHeight = wallHeight * (0.16 + (i % 2) * 0.08)
+		local mossWidth = wallLength * 0.05
+		local mossSize = if lengthAlongX
+			then Vector3.new(mossWidth, mossHeight, 0.06)
+			else Vector3.new(0.06, mossHeight, mossWidth)
+		local mossX = if lengthAlongX then faceX + along else faceX
+		local mossZ = if lengthAlongX then faceZ else faceZ + along
+		local moss = makePart("Moss", mossSize, Vector3.new(mossX, 0, mossZ), COLORS.moss, folder)
+		moss.Material = Enum.Material.LeafyGrass
+		moss.CanCollide = false
+		moss.CastShadow = false
+	end
+end
+
 function MapBuilder.buildBoundary(parent: Folder)
 	local folder = Instance.new("Folder")
 	folder.Name = "Boundary"
@@ -726,29 +778,33 @@ function MapBuilder.buildBoundary(parent: Folder)
 	-- ไม่กระทบการชน — CanCollide ยังคง true เหมือนเดิม
 	-- ⚠️ CastShadow เดิมปิดไว้เพราะของที่มองไม่เห็นแล้วมีเงาจะดูเป็นบั๊ก (เงาลอยมาจากอากาศ)
 	-- ตอนนี้เป็นกำแพงทึบจริงแล้ว ปล่อยให้ทอดเงาตามปกติ (ค่า default ของ Part) ถึงจะดูเป็นกำแพงหินจริง
-	local function stoneWall(name: string, size: Vector3, position: Vector3)
+	-- innerNormal = ทิศตั้งฉากที่ชี้เข้าหาลาน (ฝั่งที่ผู้เล่นเดินเห็น) — ใช้ตกแต่งผิวด้านที่มีคนมองเท่านั้น
+	local function stoneWall(name: string, size: Vector3, position: Vector3, innerNormal: Vector3)
 		local part = makePart(name, size, position, COLORS.boundary, folder)
 		part.Material = Enum.Material.Rock
 		part.Transparency = 0
 		part.CanCollide = true
+		decorateBoundaryWall(size, position, innerNormal, folder)
 	end
 
 	-- ซ้าย · หน้า · หลัง
-	stoneWall("West", Vector3.new(t, h, halfZ * 2), Vector3.new(minX, 0, 0))
-	stoneWall("North", Vector3.new(maxX - minX, h, t), Vector3.new((minX + maxX) / 2, 0, halfZ))
-	stoneWall("South", Vector3.new(maxX - minX, h, t), Vector3.new((minX + maxX) / 2, 0, -halfZ))
+	stoneWall("West", Vector3.new(t, h, halfZ * 2), Vector3.new(minX, 0, 0), Vector3.new(1, 0, 0))
+	stoneWall("North", Vector3.new(maxX - minX, h, t), Vector3.new((minX + maxX) / 2, 0, halfZ), Vector3.new(0, 0, -1))
+	stoneWall("South", Vector3.new(maxX - minX, h, t), Vector3.new((minX + maxX) / 2, 0, -halfZ), Vector3.new(0, 0, 1))
 
 	-- ฝั่งขวาแบ่งเป็นสองชิ้น เว้นช่องกลางไว้ให้เดินเข้าเลนรบ
 	local gapHalf = laneHalf
 	stoneWall(
 		"EastUpper",
 		Vector3.new(t, h, halfZ - gapHalf),
-		Vector3.new(maxX, 0, (halfZ + gapHalf) / 2)
+		Vector3.new(maxX, 0, (halfZ + gapHalf) / 2),
+		Vector3.new(-1, 0, 0)
 	)
 	stoneWall(
 		"EastLower",
 		Vector3.new(t, h, halfZ - gapHalf),
-		Vector3.new(maxX, 0, -(halfZ + gapHalf) / 2)
+		Vector3.new(maxX, 0, -(halfZ + gapHalf) / 2),
+		Vector3.new(-1, 0, 0)
 	)
 end
 

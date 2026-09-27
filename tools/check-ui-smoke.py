@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Smoke test ของ UI ฝั่ง client (UI-1 · UI-2 · UI-3 · UI-4 · UI-5): Hotbar · BagWindow · SidePanels · UiKit · SellWindow · MapSigns
-· SummonWindow · IndexWindow · RobuxShopWindow
+"""Smoke test ของ UI ฝั่ง client (UI-1 · UI-2 · UI-3 · UI-4 · UI-5 · Phase 5A): Hotbar · BagWindow · SidePanels · UiKit · SellWindow
+· MapSigns · SummonWindow · IndexWindow · RobuxShopWindow · BossHud
 
     python3 tools/check-ui-smoke.py
 
@@ -18,7 +18,7 @@ LUAU = os.environ.get('LUAU') or shutil.which('luau')
 if not LUAU:
     sys.exit('หา luau CLI ไม่เจอ — ติดตั้งแล้วใส่ใน PATH หรือสั่ง LUAU=/path/to/luau python3 ...')
 
-MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns', 'SummonWindow', 'IndexWindow', 'RobuxShopWindow']
+MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns', 'SummonWindow', 'IndexWindow', 'RobuxShopWindow', 'BossHud']
 
 MOCK = r'''--!nocheck
 local Config = require("./src/shared/Config")
@@ -1078,6 +1078,17 @@ do
 	MapSigns.setPayload(p)
 	summonPrompt.Triggered:Fire(localPlayer)
 	check("  หยุดแล้ว → กด E ค้างเปิดหน้าต่างได้ตามปกติ", summonOpen, true)
+
+	-- ⚠️ Phase 5A: ติดล็อกบอส (server ปิดอัญเชิญให้แล้ว) → กด E ค้างแค่เปิดหน้าต่าง (ที่ปุ่มส่งถูกปิด) ไม่เริ่มอัญเชิญเอง
+	summonOpen = false
+	p.summonEnabled = false
+	p.summonBlockReason = Config.BOSS_LOCK_MESSAGE
+	MapSigns.setPayload(p)
+	local beforeLocked = #calls
+	summonPrompt.Triggered:Fire(localPlayer)
+	check("  ติดล็อกบอส → กด E ค้างแค่เปิดหน้าต่าง", summonOpen, true)
+	check("  ไม่ยิงคำสั่งอัญเชิญ/หยุดใด ๆ", #calls, beforeLocked)
+	p.summonBlockReason = nil
 end
 
 print("\n━━ SummonWindow: หน้าต่างแท่นอัญเชิญ (UI-3) ━━")
@@ -1299,6 +1310,33 @@ do
 	bagCards[1].Activated:Fire()
 	check("  กดแล้วแจ้งเหตุผล ไม่ติ๊ก", callNames(before) == "notify" and #SummonWindow.getTicks("mothers") == 0, true)
 	sp.sendStageBlockReason = nil
+
+	-- ⚠️ Phase 5A: ล็อกอัญเชิญเพราะบอส — ปุ่มส่งไปรบกดไม่ได้ + ข้อความ · รวมกับ auto-pause (ไม่แทนที่)
+	-- server ใส่ข้อความล็อกทั้ง summonBlockReason และ sendStageBlockReason (ส่งแม่ไม่ได้ด้วย)
+	sp.summonEnabled = false
+	sp.summonBlockReason = Config.BOSS_LOCK_MESSAGE
+	sp.sendStageBlockReason = Config.BOSS_LOCK_MESSAGE
+	sp.combatAutoPaused = true
+	SummonWindow.setPayload(sp)
+	findDescendant(win, "Tab_children").Activated:Fire()
+	check("ล็อกบอส → ปุ่มส่งไปรบถูกปิด", sendButton.AutoButtonColor, false)
+	check("  ปุ่มบอกว่าติดล็อก", string.find(sendButton.Text, "กำจัดบอสก่อน", 1, true) ~= nil)
+	check("  ข้อความล็อกในหัวหน้าต่าง", string.find(notice.Text, Config.BOSS_LOCK_MESSAGE, 1, true) ~= nil)
+	check("  รวมกับคำเตือน auto-pause (ไม่แทนที่กัน)", string.find(notice.Text, "ตีไม่เข้า", 1, true) ~= nil)
+	before = #summonCalls
+	sendButton.Activated:Fire()
+	check("  กดส่งแล้วไม่ยิงอะไรเลย (ไม่เปิดอัญเชิญ)", #summonCalls, before)
+	findDescendant(win, "Tab_mothers").Activated:Fire()
+	local _, lockCount = string.gsub(notice.Text, Config.BOSS_LOCK_MESSAGE, "")
+	check("  แท็บแม่: ข้อความล็อกขึ้นครั้งเดียว (ไม่ซ้ำกับเหตุผลส่งแม่)", lockCount, 1)
+	-- บอสตาย → server ล้างเหตุผล → ปุ่มกลับเป็นปกติ
+	sp.summonBlockReason = nil
+	sp.sendStageBlockReason = nil
+	sp.combatAutoPaused = false
+	SummonWindow.setPayload(sp)
+	findDescendant(win, "Tab_children").Activated:Fire()
+	check("ปลดล็อก → ปุ่มไม่ติดล็อกแล้ว", string.find(sendButton.Text, "กำจัดบอสก่อน", 1, true) == nil)
+	check("  ข้อความล็อกหายไป", string.find(notice.Text, Config.BOSS_LOCK_MESSAGE, 1, true) == nil)
 
 	-- ลำดับปล่อยว่าง (ไม่เคยติ๊ก) → เปิดมาติ๊กทุกกองไว้ก่อน เรียงพลังต่อตัวมาก → น้อย
 	SummonWindow.close()
@@ -1581,6 +1619,43 @@ do
 
 	RobuxShopWindow.close()
 	check("ปิดหน้าต่าง", RobuxShopWindow.isOpen(), false)
+end
+
+print("\n━━ BossHud: ตัวเลขนับถอยหลังบนกำแพงกั้นบอส (Phase 5A) ━━")
+do
+	local BossHud = loaded.BossHud
+	local barrier = newInstance("Part")
+	barrier.Name = Config.BOSS_BARRIER_NAME
+	local hudGui = newInstance("PlayerGui")
+	check("ติดตัวเลขกับกำแพงกั้นไม่ error", pcall(BossHud.attach, hudGui, barrier))
+	local surface = findDescendant(hudGui, "BossBarrierCountdown")
+	local count = findDescendant(hudGui, "Count")
+	check("  SurfaceGui ติดกำแพงกั้น (Adornee)", surface and surface.Adornee == barrier, true)
+	check("  อยู่ผิวหน้า −X (ฝั่งที่ผู้เล่นยืนรอ)", surface and surface.Face, "Enum.NormalId.Left")
+
+	local night = Config.Balance.BossCycle.NIGHT_SECONDS
+	local endsAt = 10000
+	BossHud.setState({ phase = "night", phaseEndsAt = endsAt, bossAlive = true })
+	BossHud.render(endsAt - night)
+	check("กลางคืนวินาทีแรก → โชว์ 59", count.Text, "59")
+	check("  แผ่นตัวเลขเปิดอยู่", surface.Enabled, true)
+	BossHud.render(endsAt - 30.5)
+	check("กลางคืนเหลือ 30.5 วิ → 30", count.Text, "30")
+	BossHud.render(endsAt - 0.4)
+	check("วินาทีสุดท้าย → 0", count.Text, "0")
+	BossHud.render(endsAt + 2)
+	check("เลยเวลาไปแล้ว (รอ server เปลี่ยน phase) → ค้าง 0 ไม่ติดลบ", count.Text, "0")
+
+	BossHud.setState({ phase = "day", phaseEndsAt = endsAt + 540, bossAlive = true })
+	BossHud.render(endsAt + 3)
+	check("กลางวัน → ซ่อนตัวเลข", surface.Enabled, false)
+
+	BossHud.setState({ phase = "night", phaseEndsAt = endsAt + 1200, bossAlive = true })
+	BossHud.render(endsAt + 1200 - night)
+	check("คืนถัดไป → โชว์ 59 ใหม่", count.Text .. tostring(surface.Enabled), "59true")
+
+	BossHud.setState({})
+	check("ยังไม่ได้สถานะจาก server → ไม่ error และไม่โชว์", pcall(BossHud.render, 0) and surface.Enabled == false, true)
 end
 
 print(string.format("\n=== ผ่าน %d / ตก %d ===", passCount, failCount))

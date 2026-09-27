@@ -53,6 +53,8 @@ local SummonWindow = require(script.Parent:WaitForChild("SummonWindow"))
 local IndexWindow = require(script.Parent:WaitForChild("IndexWindow"))
 -- UI-5
 local RobuxShopWindow = require(script.Parent:WaitForChild("RobuxShopWindow"))
+-- Phase 5A: ตัวเลขนับถอยหลังบนกำแพงกั้นบอส (อ่านสถานะจาก Attribute ที่ server ตั้ง ไม่ผ่าน FarmStateSync)
+local BossHud = require(script.Parent:WaitForChild("BossHud"))
 
 local MarketplaceService = game:GetService("MarketplaceService")
 
@@ -85,6 +87,8 @@ local sendMothersToBattleBatchRequest = Remotes.waitFor(Config.RemoteNames.SEND_
 local stageClearedNotify = Remotes.waitFor(Config.RemoteNames.STAGE_CLEARED_NOTIFY)
 -- ⚠️ Phase 4B: สลับล็อกแม่ (คอก/กระเป๋า) — ล็อกแล้วขาย/ส่งไปรบไม่ได้ · server ตรวจซ้ำเองทั้งสองทาง
 local toggleMotherLockRequest = Remotes.waitFor(Config.RemoteNames.TOGGLE_MOTHER_LOCK_REQUEST)
+-- ⚠️ Phase 5A: server แจ้งทุกคนเอง ("night" / "day" / "killed") — ข้อความจริงอยู่ที่ Config.formatBossEventMessage
+local bossEventNotify = Remotes.waitFor(Config.RemoteNames.BOSS_EVENT_NOTIFY)
 
 --------------------------------------------------------------------------------
 -- สี / ค่าคงที่
@@ -931,6 +935,13 @@ actionResult.OnClientEvent:Connect(function(ok: boolean, message: string)
 	showToast(message, ok)
 end)
 
+bossEventNotify.OnClientEvent:Connect(function(kind: string)
+	local message = Config.formatBossEventMessage(kind)
+	if message ~= "" then
+		showToast(message, true)
+	end
+end)
+
 eggHatched.OnClientEvent:Connect(function(payload)
 	local place = if payload.placedIn == "pen" then "เข้าคอก" else "เข้ากระเป๋า"
 	showToast(`🥚 ฟักได้ {payload.charName} ({payload.class}) {payload.weightText} kg → {place}`, true)
@@ -943,6 +954,9 @@ WallRenderer.start()
 
 -- ⚠️ Phase 3B-1: โมเดลทหารฝ่ายเรา/ฝ่ายรับ วาดฝั่งนี้ด้วยเหตุผลเดียวกัน (ดู TroopRenderer.lua)
 TroopRenderer.start()
+
+-- ⚠️ Phase 5A: ตัวเลข 59 → 0 บนกำแพงกั้นกลางคืน (รอของจาก server เบื้องหลัง ไม่บล็อกบรรทัดถัดไป)
+BossHud.start(playerGui)
 
 print("[egg-army-game] client พร้อมแล้ว")
 print("   จำลองด่านที่พังแล้วเพื่อทดสอบกำแพง (ค่าจริงจาก sync จะเขียนทับทันที): WallRenderer.setWallProgress(n)")

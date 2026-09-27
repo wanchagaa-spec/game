@@ -124,6 +124,12 @@ local function stageBlockReason(): string?
 	return if lastPayload then lastPayload.sendStageBlockReason else nil
 end
 
+-- Phase 5A: เปิดอัญเชิญไม่ได้ตอนนี้เพราะอะไร (nil = ได้) — ตอนนี้มีเหตุเดียว: ล็อกเพราะบอส
+-- ⚠️ server ตัดสิน (FarmStateSync.summonBlockReason) และปฏิเสธคำขอเองอยู่แล้ว · ตรงนี้แค่ปิดปุ่ม + บอกเหตุผล
+local function summonBlockReason(): string?
+	return if lastPayload then lastPayload.summonBlockReason else nil
+end
+
 local function classRank(class: string): number
 	local info = Config.CharacterClasses[class]
 	return if info then info.multiplier else 0
@@ -535,14 +541,22 @@ refreshHeader = function()
 	statusLabel.Text = `{if summoning then "🟢 กำลังอัญเชิญ" else "⏸ หยุดอยู่"} · ด่านที่กำลังตี: {stage}`
 		.. ` · แม่ในสนามรบ {rosterCount()}/{MAX_BATTLE_MOTHERS}`
 
+	-- ⚠️ Phase 5A: รวมเหตุผลทุกข้อที่บล็อกอยู่ (ไม่แทนที่กัน) — ล็อกบอสขึ้นก่อนเพราะเป็นตัวที่ห้ามกดส่งจริง
+	local blocked = summonBlockReason()
 	local warnings: { string } = {}
+	if blocked then
+		table.insert(warnings, blocked)
+	end
 	if payload.combatAutoPaused then
 		table.insert(warnings, "ตีไม่เข้า — หยุดปล่อยอัตโนมัติ · กดส่งไปรบเพื่อเริ่มใหม่")
 	end
 	if activeTab == "mothers" then
 		local reason = stageBlockReason()
 		if reason then
-			table.insert(warnings, reason)
+			-- server ใส่เหตุผลล็อกบอสใน sendStageBlockReason ด้วย (ส่งแม่ไม่ได้) — ไม่ต้องขึ้นซ้ำสองรอบ
+			if reason ~= blocked then
+				table.insert(warnings, reason)
+			end
 		elseif freeSlots() == 0 then
 			table.insert(warnings, `roster เต็มแล้ว ({rosterCount()}/{MAX_BATTLE_MOTHERS})`)
 		end
@@ -559,12 +573,17 @@ refreshHeader = function()
 	end
 
 	local mothers, children = #ticks.mothers, #ticks.children
-	setButton(
-		sendButton,
-		if mothers + children > 0 then `⚔️ ส่งไปรบ (แม่ {mothers} · ลูก {children} กอง)` else "ส่งไปรบ (ยังไม่ได้ติ๊ก)",
-		SEND_COLOR,
-		mothers + children > 0
-	)
+	if blocked then
+		setButton(sendButton, "🔒 ส่งไปรบไม่ได้ — กำจัดบอสก่อน", SEND_COLOR, false)
+		confirm.Visible = false -- ล็อกเข้ามาตอนกล่องยืนยันเปิดอยู่ → ปิดทิ้ง (กดยืนยันไปก็ไม่มีผล)
+	else
+		setButton(
+			sendButton,
+			if mothers + children > 0 then `⚔️ ส่งไปรบ (แม่ {mothers} · ลูก {children} กอง)` else "ส่งไปรบ (ยังไม่ได้ติ๊ก)",
+			SEND_COLOR,
+			mothers + children > 0
+		)
+	end
 	stopButton.Visible = summoning
 	if confirm.Visible then
 		refreshConfirm()
@@ -595,7 +614,7 @@ end
 
 local function onSend()
 	local mothers, children = #ticks.mothers, #ticks.children
-	if mothers + children == 0 then
+	if mothers + children == 0 or summonBlockReason() then
 		return
 	end
 	if mothers > 0 then
@@ -608,7 +627,7 @@ end
 
 local function onConfirm()
 	confirm.Visible = false
-	if #ticks.mothers == 0 then
+	if #ticks.mothers == 0 or summonBlockReason() then
 		return
 	end
 	fire()

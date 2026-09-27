@@ -200,13 +200,18 @@ end
 local function spawnOurTroop(stage: number)
 	local oursFolder = ensureSubFolder("Ours")
 
-	local startX = Config.getLaneStartX() + MAP.Lane.ReleasePadSize.X / 2
+	-- UI-3: โผล่บนแท่นอัญเชิญ (กึ่งกลาง X 148 = กึ่งกลางแท่นปล่อยเดิม · จุดเริ่มเดินไม่เปลี่ยน)
+	-- แล้วค่อยกระจายออกทั้งความกว้างเลนระหว่างเดิน · ภาพล้วน ไม่ผูกกับการรบ
+	local pedestal = Config.getSummonPedestalCenter()
+	local startX = pedestal.X
+	local startHalf = MAP.SummonPedestal.CoreDiameter / 2 * 0.8
+	local startZ = pedestal.Z + (math.random() * 2 - 1) * startHalf
 	-- ⚠️ เว้นขอบจากผนังเลนทั้งสองข้างกันโมเดลโผล่ทะลุกำแพงข้างเลน
 	local laneHalf = math.max(MAP.Lane.Width / 2 - 6, 1)
 	local z = (math.random() * 2 - 1) * laneHalf
 
 	local wallX = getStageTargetX(stage)
-	local from = Vector3.new(startX, 0, z)
+	local from = Vector3.new(startX, 0, startZ)
 	local to = Vector3.new(wallX, 0, z)
 
 	-- ⚠️ ดึงทหารฝ่ายรับที่ยืนรออยู่ (ถ้ามี) ออกจากพูล defenderModels มาเดินออกมาชนกึ่งกลางเลน
@@ -219,7 +224,7 @@ local function spawnOurTroop(stage: number)
 		if defenderModel then
 			pairedDefender = defenderModel
 			defenderFrom = defenderModel:GetPivot().Position
-			-- ⚠️ จุด "ชนกัน" กึ่งกลางระหว่าง release pad กับกำแพงด่านที่กำลังตี — ปรับตามความยาว
+			-- ⚠️ จุด "ชนกัน" กึ่งกลางระหว่างแท่นอัญเชิญกับกำแพงด่านที่กำลังตี — ปรับตามความยาว
 			-- เลนจริงของด่านนั้นเองเพราะ wallX เปลี่ยนไปตามด่าน (ด่าน 2 ใกล้กว่าด่าน 9 มาก)
 			to = Vector3.new((startX + wallX) / 2, 0, z)
 		end

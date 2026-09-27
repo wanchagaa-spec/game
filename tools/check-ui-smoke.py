@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Smoke test ของ UI ฝั่ง client (UI-1 · UI-2): Hotbar · BagWindow · SidePanels · UiKit · SellWindow · MapSigns
+"""Smoke test ของ UI ฝั่ง client (UI-1 · UI-2 · UI-3): Hotbar · BagWindow · SidePanels · UiKit · SellWindow · MapSigns
+· SummonWindow
 
     python3 tools/check-ui-smoke.py
 
@@ -17,7 +18,7 @@ LUAU = os.environ.get('LUAU') or shutil.which('luau')
 if not LUAU:
     sys.exit('หา luau CLI ไม่เจอ — ติดตั้งแล้วใส่ใน PATH หรือสั่ง LUAU=/path/to/luau python3 ...')
 
-MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns']
+MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns', 'SummonWindow']
 
 MOCK = r'''--!nocheck
 local Config = require("./src/shared/Config")
@@ -450,10 +451,8 @@ do
 	BagWindow.create(gui, {
 		moveMother = record("moveMother"),
 		toggleLock = record("toggleLock"),
-		sendToBattle = record("sendToBattle"),
 		placeEgg = record("placeEgg"),
 		notify = record("notify"),
-		isRosterFull = function() return false end,
 	})
 	local ok = pcall(BagWindow.setPayload, payload)
 	check("setPayload ตอนหน้าต่างปิดไม่ error", ok)
@@ -504,27 +503,27 @@ do
 	check("  ปุ่มย้ายเข้าคอก (คอกไม่เต็ม)", findDescendant(detail, "Action2").Text, "ย้ายเข้าคอก")
 	findDescendant(detail, "Action2").Activated:Fire()
 	check("  กดย้าย → moveMother(uid, pen)", lastCall().name == "moveMother" and lastCall().args[2] == "pen", true)
-	-- UI-2: ปุ่มขาย (TEMP) ย้ายไปร้านขายแม่หลังแมพแล้ว → ส่งไปรบขยับขึ้นมาช่อง 3
-	local anySell = false
+	-- UI-2: ปุ่มขาย (TEMP) ย้ายไปร้านขายแม่แล้ว · UI-3: ปุ่มส่งไปรบ (TEMP) ย้ายไปแท่นอัญเชิญแล้ว
+	local anySell, anyBattle = false, false
 	for index = 1, 4 do
 		local button = findDescendant(detail, `Action{index}`)
 		if button.Visible and string.find(button.Text, "ขาย", 1, true) then
 			anySell = true
 		end
+		if button.Visible and string.find(button.Text, "รบ", 1, true) then
+			anyBattle = true
+		end
 	end
 	check("  ไม่มีปุ่มขายในหน้ารายละเอียดแล้ว (UI-2)", anySell, false)
-	check("  ปุ่ม 3 = ส่งไปรบ (TEMP)", findDescendant(detail, "Action3").Text, "ส่งไปรบ (TEMP)")
+	check("  ไม่มีปุ่มส่งไปรบในหน้ารายละเอียดแล้ว (UI-3)", anyBattle, false)
+	check("  ปุ่ม 3 ซ่อน", findDescendant(detail, "Action3").Visible, false)
 	check("  ปุ่ม 4 ซ่อน", findDescendant(detail, "Action4").Visible, false)
-	findDescendant(detail, "Action3").Activated:Fire()
-	check("  ส่งไปรบ → เปิดกล่องยืนยัน (sendToBattle ได้ตัวแม่)", lastCall().name == "sendToBattle" and lastCall().args[1].uid == "1-123", true)
 
-	-- แม่ในกระเป๋าที่ล็อก → ปุ่มส่งรบถูกปิด กดแล้วแค่แจ้งเตือน
+	-- แม่ในกระเป๋าที่ล็อก → ปุ่ม 1 เป็นปลดล็อก · ยังไม่มีปุ่มส่งรบ
 	payload.mothersInBag[23].locked = true
 	BagWindow.setPayload(payload)
-	check("ล็อกแล้ว: ปุ่มส่งรบถูกปิด", findDescendant(detail, "Action3").AutoButtonColor, false)
-	local before = #calls
-	findDescendant(detail, "Action3").Activated:Fire()
-	check("  กดส่งรบตอนล็อก → notify ไม่ใช่ sendToBattle", lastCall().name == "notify" and #calls == before + 1, true)
+	check("ล็อกแล้ว: ปุ่ม 1 = ปลดล็อก", findDescendant(detail, "Action1").Text, "🔓 ปลดล็อก")
+	check("  ไม่มีปุ่มส่งรบ", findDescendant(detail, "Action3").Visible, false)
 	payload.mothersInBag[23].locked = false
 
 	-- คอกเต็ม → ปุ่มย้ายเข้าคอกถูกปิด
@@ -866,10 +865,18 @@ do
 	local counter = newInstance("Part")
 	counter.Name = "Counter"
 	counter.Parent = stall
+	-- UI-3: แท่นอัญเชิญ (MapBuilder.buildSummonPedestal · Config.SUMMON_PEDESTAL_NAME)
+	local pedestal = newInstance("Model")
+	pedestal.Name = Config.SUMMON_PEDESTAL_NAME
+	pedestal.Parent = map
+	local pedestalCore = newInstance("Part")
+	pedestalCore.Name = Config.SUMMON_PEDESTAL_CORE
+	pedestalCore.Parent = pedestal
 
 	localPlayer:SetAttribute(Config.PEN_INDEX_ATTRIBUTE, 2)
 	local playerGui = newInstance("PlayerGui")
 	local shopOpen = false
+	local summonOpen = false
 	local signActions = {
 		buy = record("buy"),
 		openSellShop = function()
@@ -878,6 +885,13 @@ do
 		closeSellShop = record("closeSellShop"),
 		isSellShopOpen = function()
 			return shopOpen
+		end,
+		openSummon = function()
+			summonOpen = true
+		end,
+		closeSummon = record("closeSummon"),
+		isSummonOpen = function()
+			return summonOpen
 		end,
 	}
 	-- ⚠️ task.spawn ของจริงรันทีหลัง — ในเทสต์รันทันที (WaitForChild ปลอม = หาเจอเลย)
@@ -976,6 +990,271 @@ do
 	check("  props อื่นยังใช้ได้", forced.ActionText, "ทดสอบ")
 	sellPrompt.Triggered:Fire(localPlayer)
 	check("  กด E → เปิดร้าน", shopOpen, true)
+
+	-- UI-3: แท่นอัญเชิญ — กด E ค้าง (ไม่ใช่กดครั้งเดียว) · ผ่าน UiKit.prompt (OnePerButton)
+	local summonPrompt = findDescendant(pedestalCore, "SummonPrompt")
+	check("แท่นอัญเชิญมีจุดกด E (ติดที่แกนเรืองแสง)", summonPrompt ~= nil)
+	check("  กดค้าง 0.5 วินาที", summonPrompt.HoldDuration, Config.MapDimensions.SummonPedestal.PromptHoldSeconds)
+	check("  ขึ้นเฉพาะอันที่ใกล้สุด (OnePerButton)", summonPrompt.Exclusivity, "Enum.ProximityPromptExclusivity.OnePerButton")
+	check("  ระยะกดตาม Config", summonPrompt.MaxActivationDistance, Config.MapDimensions.SummonPedestal.PromptDistance)
+	summonPrompt.Triggered:Fire(localPlayer)
+	check("  กด E ค้าง → เปิดหน้าต่างอัญเชิญ", summonOpen, true)
+end
+
+print("\n━━ SummonWindow: หน้าต่างแท่นอัญเชิญ (UI-3) ━━")
+do
+	local SummonWindow = loaded.SummonWindow
+	local sp = makePayload()
+	local function stack(charId, motherWeight, count, power)
+		local character = Config.getCharacter(charId)
+		return {
+			key = Config.makeStackKey(charId, motherWeight, {}),
+			charId = charId,
+			charName = character.name,
+			class = character.class,
+			weight = motherWeight,
+			weightText = Config.formatWeight(Config.getChildWeight(motherWeight)),
+			statuses = {},
+			count = count,
+			power = power,
+		}
+	end
+	local sA = stack("wukong", 50000, 120, 900)
+	local sB = stack("monkey", 100, 40, 1)
+	local sC = stack("pig", 800, 7, 30)
+	local sW = stack("horse", 800, 0, 20) -- ติ๊กไว้แต่หมด · แม่ในคอกผลิตเติมอยู่
+	sp.children = { sA, sB, sC }
+	sp.waitingStacks = { sW }
+	sp.releaseOrder = { sB.key, sW.key, sA.key }
+	sp.summonEnabled = false
+	sp.combatAutoPaused = false
+	sp.activeStage = 3
+	sp.sendStageBlockReason = nil
+	-- แม่ในสนามแล้ว 7 ตัว → ที่ว่าง 3
+	local roster = {}
+	for index = 1, 7 do
+		local m = mother(`9-{index}`, "tang", 1000, false, 1)
+		m.statuses = {}
+		table.insert(roster, m)
+	end
+	sp.battleRoster = roster
+
+	local summonCalls = {}
+	local function recordSummon(name)
+		return function(...)
+			table.insert(summonCalls, { name = name, args = table.pack(...) })
+		end
+	end
+	SummonWindow.create(gui, {
+		sendMothers = recordSummon("sendMothers"),
+		setReleaseOrder = recordSummon("setReleaseOrder"),
+		setSummonEnabled = recordSummon("setSummonEnabled"),
+		notify = recordSummon("notify"),
+	})
+	check("setPayload ตอนหน้าต่างปิดไม่ error", pcall(SummonWindow.setPayload, sp))
+	check("เปิดหน้าต่างไม่ error", pcall(SummonWindow.open))
+	check("isOpen", SummonWindow.isOpen())
+
+	local win = findDescendant(gui, "SummonWindow")
+	local grid2 = findDescendant(win, "Grid")
+	local sendButton = findDescendant(win, "Send")
+	local stopButton = findDescendant(win, "Stop")
+	local confirm = findDescendant(win, "Confirm")
+	local notice = findDescendant(win, "Notice")
+	local function cards()
+		local list = {}
+		for _, child in grid2:GetChildren() do
+			if child.Name == "Card" and child.Visible then
+				table.insert(list, child)
+			end
+		end
+		return list
+	end
+	local function cardFor(text)
+		for _, card in cards() do
+			if string.find(findDescendant(card, "NameLabel").Text, text, 1, true) then
+				return card
+			end
+		end
+		return nil
+	end
+	local function badge(card)
+		local b = findDescendant(card, "OrderBadge")
+		return if b.Visible then b.Text else ""
+	end
+	local function joined(list)
+		return table.concat(list, ",")
+	end
+	local function callNames(fromIndex)
+		local names = {}
+		for index = fromIndex + 1, #summonCalls do
+			table.insert(names, summonCalls[index].name)
+		end
+		return table.concat(names, ",")
+	end
+
+	-- ── แท็บลูก (เปิดครั้งแรก = แท็บลูก) ──
+	check("แท็บลูก: ทุกกอง + กองรอผลิต = 4 ใบ", #cards(), 4)
+	check("เปิดมา = ติ๊กตาม releaseOrder ล่าสุด", joined(SummonWindow.getTicks("children")), joined({ sB.key, sW.key, sA.key }))
+	check("  เลขบนการ์ด: ลิง = 1", badge(cardFor(sB.charName)), "1")
+	check("  กองรอผลิต = 2 · มีคำว่ารอผลิต", badge(cardFor(sW.charName)) == "2"
+		and string.find(findDescendant(cardFor(sW.charName), "InfoLabel").Text, "รอผลิต", 1, true) ~= nil, true)
+	check("  ซุนหงอคง = 3", badge(cardFor(sA.charName)), "3")
+	check("  กองที่ไม่ได้ติ๊ก (หมู) ไม่มีเลข", badge(cardFor(sC.charName)), "")
+	check("  การ์ดโชว์จำนวน + พลังต่อตัว", string.find(findDescendant(cardFor(sA.charName), "InfoLabel").Text, "×120", 1, true) ~= nil
+		and string.find(findDescendant(cardFor(sA.charName), "InfoLabel").Text, "⚔️900", 1, true) ~= nil, true)
+	check("  ข้อความบอกว่ากองที่ไม่ติ๊กไม่ถูกปล่อย", string.find(notice.Text, "ไม่ถูกปล่อย", 1, true) ~= nil)
+	check("หยุดอยู่ → ไม่มีปุ่มหยุดอัญเชิญ", stopButton.Visible, false)
+
+	-- เอากองลำดับ 1 ออก → ตัวหลังเลื่อนขึ้น · ติ๊กหมูเพิ่ม → ต่อท้าย
+	cardFor(sB.charName).Activated:Fire()
+	check("เอาลิง (1) ออก → กองรอผลิตเลื่อนเป็น 1", badge(cardFor(sW.charName)), "1")
+	check("  ซุนหงอคงเลื่อนเป็น 2", badge(cardFor(sA.charName)), "2")
+	cardFor(sC.charName).Activated:Fire()
+	check("ติ๊กหมูเพิ่ม → ได้เลข 3", badge(cardFor(sC.charName)), "3")
+	check("  ลำดับ = รอผลิต, ซุนหงอคง, หมู", joined(SummonWindow.getTicks("children")), joined({ sW.key, sA.key, sC.key }))
+
+	-- ติ๊กแค่ลูก → ส่งไปรบ = ไม่มีกล่องยืนยัน · ตั้งลำดับ แล้วเปิดอัญเชิญ
+	local before = #summonCalls
+	sendButton.Activated:Fire()
+	check("ติ๊กแค่ลูก → ไม่มีกล่องยืนยัน", confirm.Visible, false)
+	check("  ยิง ตั้งลำดับ → เปิดอัญเชิญ (ไม่ส่งแม่)", callNames(before), "setReleaseOrder,setSummonEnabled")
+	check("  ลำดับที่ส่ง = ที่ติ๊ก", joined(summonCalls[before + 1].args[1]), joined({ sW.key, sA.key, sC.key }))
+	check("  เปิดอัญเชิญ = true", summonCalls[before + 2].args[1], true)
+
+	-- ── แท็บแม่ ──
+	findDescendant(win, "Tab_mothers").Activated:Fire()
+	local motherCards = cards()
+	check("แท็บแม่: แม่ในสนามอยู่บนสุด ติดป้ายในสนาม", findDescendant(motherCards[1], "FieldTag").Visible, true)
+	local penShown = cardFor("ซุนหงอคง") ~= nil
+	check("  แม่ในคอกไม่แสดง", penShown, false)
+	before = #summonCalls
+	motherCards[1].Activated:Fire()
+	check("  กดแม่ในสนาม → แจ้งเตือน ไม่ติ๊ก", callNames(before) == "notify" and #SummonWindow.getTicks("mothers") == 0, true)
+
+	-- แม่ในกระเป๋า: หลังแม่ในสนาม 7 ตัว · เรียงคลาสสูง/หนักก่อน · ตัวที่ล็อก (1-101) ติ๊กไม่ได้
+	grid2.CanvasPosition = Vector2.new(0, 10000)
+	local lockedCard = nil
+	for _, card in cards() do
+		if findDescendant(card, "LockBadge").Visible then
+			lockedCard = card
+		end
+	end
+	check("แม่ที่ล็อกมี 🔒 + ทาเทา", lockedCard ~= nil and findDescendant(lockedCard, "Shade").Visible == true, true)
+	before = #summonCalls
+	lockedCard.Activated:Fire()
+	check("  กดแม่ที่ล็อก → แจ้งเตือน ไม่ติ๊ก", callNames(before) == "notify" and #SummonWindow.getTicks("mothers") == 0, true)
+	grid2.CanvasPosition = Vector2.zero
+
+	-- ที่ว่าง 3 ตัว (ในสนาม 7/10): ติ๊ก 4 ตัว → ตัวที่ 4 ไม่ติด
+	local bagCards = {}
+	for _, card in cards() do
+		if not findDescendant(card, "FieldTag").Visible and not findDescendant(card, "LockBadge").Visible then
+			table.insert(bagCards, card)
+		end
+	end
+	check("มีแม่ในกระเป๋าให้ติ๊กอย่างน้อย 4 ใบบนจอ", #bagCards >= 4)
+	bagCards[1].Activated:Fire()
+	bagCards[2].Activated:Fire()
+	bagCards[3].Activated:Fire()
+	before = #summonCalls
+	bagCards[4].Activated:Fire()
+	check("ติ๊กเกินที่ว่างใน roster (3) → ไม่ติด + แจ้งเตือน", #SummonWindow.getTicks("mothers") == 3 and callNames(before) == "notify", true)
+	check("  เลขบนการ์ด 1 · 2 · 3", badge(bagCards[1]) .. badge(bagCards[2]) .. badge(bagCards[3]), "123")
+	local firstThree = SummonWindow.getTicks("mothers")
+	bagCards[1].Activated:Fire()
+	check("เอาตัวที่ 1 ออก → ที่เหลือเลื่อนเป็น 1 · 2", badge(bagCards[2]) .. badge(bagCards[3]), "12")
+	bagCards[4].Activated:Fire()
+	check("  ตอนนี้ติ๊กตัวที่ 4 ได้แล้ว (เลข 3)", badge(bagCards[4]), "3")
+	local motherTicks = SummonWindow.getTicks("mothers")
+	check("  ลำดับแม่ = 2, 3, 4", joined(motherTicks), joined({ firstThree[2], firstThree[3], motherTicks[3] }))
+	check("  ลำดับแยกจากแท็บลูก (ลูกยังเหมือนเดิม)", joined(SummonWindow.getTicks("children")), joined({ sW.key, sA.key, sC.key }))
+
+	-- ส่งไปรบ (มีแม่) → กล่องยืนยัน → ยกเลิก = ไม่ยิงอะไร
+	before = #summonCalls
+	sendButton.Activated:Fire()
+	check("มีแม่ → กล่องยืนยันขึ้น", confirm.Visible, true)
+	local confirmTextNow = findDescendant(confirm, "Text").Text
+	check("  บอกจำนวน + ตายถาวร + ดึงกลับไม่ได้", string.find(confirmTextNow, "ส่งแม่ 3 ตัว", 1, true) ~= nil
+		and string.find(confirmTextNow, "ตายถาวร", 1, true) ~= nil
+		and string.find(confirmTextNow, "ดึงกลับไม่ได้", 1, true) ~= nil, true)
+	findDescendant(confirm, "ConfirmCancel").Activated:Fire()
+	check("  ยกเลิก → กล่องปิด ไม่ยิงอะไรเลย", confirm.Visible == false and #summonCalls == before, true)
+	check("  ยกเลิกแล้วที่ติ๊กไว้ยังอยู่", #SummonWindow.getTicks("mothers"), 3)
+
+	-- ยืนยัน → ส่งแม่ → ตั้งลำดับ → เปิดอัญเชิญ (ตามลำดับนี้เท่านั้น)
+	sendButton.Activated:Fire()
+	findDescendant(confirm, "ConfirmSend").Activated:Fire()
+	check("ยืนยัน → ยิง ส่งแม่ → ตั้งลำดับ → เปิดอัญเชิญ", callNames(before), "sendMothers,setReleaseOrder,setSummonEnabled")
+	check("  แม่ที่ส่ง = ที่ติ๊กตามลำดับ", joined(summonCalls[before + 1].args[1]), joined(motherTicks))
+	check("  ลำดับลูกที่ส่ง = ที่ติ๊กไว้ในแท็บลูก", joined(summonCalls[before + 2].args[1]), joined({ sW.key, sA.key, sC.key }))
+	check("  ส่งแล้วล้างที่ติ๊กแม่", #SummonWindow.getTicks("mothers"), 0)
+	check("ไม่ได้ติ๊กอะไรในแท็บแม่ แต่ลูกยังติ๊กอยู่ → ปุ่มส่งยังกดได้", sendButton.AutoButtonColor, true)
+
+	-- กำลังอัญเชิญ → ปุ่มหยุดโผล่ · กดแล้วปิดอัญเชิญ
+	sp.summonEnabled = true
+	SummonWindow.setPayload(sp)
+	check("กำลังอัญเชิญ → ปุ่มหยุดอัญเชิญโผล่", stopButton.Visible, true)
+	before = #summonCalls
+	stopButton.Activated:Fire()
+	check("  กดหยุด → setSummonEnabled(false)", callNames(before) == "setSummonEnabled" and summonCalls[before + 1].args[1] == false, true)
+
+	-- auto-pause → เตือนในหัวหน้าต่าง
+	sp.combatAutoPaused = true
+	SummonWindow.setPayload(sp)
+	check("auto-pause → เตือนตีไม่เข้า", string.find(notice.Text, "ตีไม่เข้า", 1, true) ~= nil)
+	sp.combatAutoPaused = false
+
+	-- ไม่มีด่านให้ส่ง → บอกเหตุผล · ติ๊กแม่ไม่ได้
+	sp.sendStageBlockReason = "ผ่านครบทุกด่านแล้ว ไม่มีด่านให้ส่งแม่ไปรบ"
+	SummonWindow.setPayload(sp)
+	check("ไม่มีด่าน → โชว์เหตุผลในหัวแท็บแม่", string.find(notice.Text, "ผ่านครบทุกด่านแล้ว", 1, true) ~= nil)
+	bagCards = {}
+	for _, card in cards() do
+		if not findDescendant(card, "FieldTag").Visible and not findDescendant(card, "LockBadge").Visible then
+			table.insert(bagCards, card)
+		end
+	end
+	check("  การ์ดแม่ในกระเป๋าทาเทา", findDescendant(bagCards[1], "Shade").Visible, true)
+	before = #summonCalls
+	bagCards[1].Activated:Fire()
+	check("  กดแล้วแจ้งเหตุผล ไม่ติ๊ก", callNames(before) == "notify" and #SummonWindow.getTicks("mothers") == 0, true)
+	sp.sendStageBlockReason = nil
+
+	-- ไม่ติ๊กอะไรเลยทั้งสองแท็บ → ปุ่มส่งถูกปิด กดแล้วไม่ยิง
+	SummonWindow.close()
+	sp.releaseOrder = {}
+	SummonWindow.setPayload(sp)
+	SummonWindow.open()
+	check("ไม่ติ๊กอะไร → ปุ่มส่งไปรบถูกปิด", sendButton.AutoButtonColor, false)
+	before = #summonCalls
+	sendButton.Activated:Fire()
+	check("  กดแล้วไม่ยิงอะไร", #summonCalls, before)
+
+	-- ปิดแล้วเปิดใหม่: ติ๊กแม่ไม่ค้าง · ติ๊กลูกกลับมาตาม releaseOrder
+	sp.releaseOrder = { sC.key, sA.key }
+	SummonWindow.setPayload(sp)
+	findDescendant(win, "Tab_mothers").Activated:Fire()
+	for _, card in cards() do
+		if not findDescendant(card, "FieldTag").Visible and not findDescendant(card, "LockBadge").Visible then
+			card.Activated:Fire()
+			break
+		end
+	end
+	check("ติ๊กแม่ไว้ 1 ตัว", #SummonWindow.getTicks("mothers"), 1)
+	SummonWindow.close()
+	SummonWindow.open()
+	check("เปิดใหม่ → ไม่มีแม่ค้างติ๊ก", #SummonWindow.getTicks("mothers"), 0)
+	check("  ลูกติ๊กตาม releaseOrder ล่าสุด", joined(SummonWindow.getTicks("children")), joined({ sC.key, sA.key }))
+
+	-- กองในลำดับที่ไม่ได้แสดง (หมด + ไม่มีแม่ผลิตเติม) → ไม่ติ๊ก
+	SummonWindow.close()
+	sp.releaseOrder = { "ghost|123|", sA.key }
+	SummonWindow.setPayload(sp)
+	SummonWindow.open()
+	check("กองที่หายไปแล้วหลุดจากติ๊ก", joined(SummonWindow.getTicks("children")), sA.key)
+	SummonWindow.close()
+	check("ปิดหน้าต่าง", SummonWindow.isOpen(), false)
 end
 
 print(string.format("\n=== ผ่าน %d / ตก %d ===", passCount, failCount))

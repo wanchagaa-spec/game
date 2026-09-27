@@ -400,9 +400,25 @@ Config.MapDimensions = {
 
 		-- เลนต่อจากปลายลานคอกทันที ไม่มีช่องว่างคั่น (ตามรูปทรงที่ตกลง)
 		StartGap = 0,
+	},
 
-		-- แท่นปล่อยทหาร อยู่ที่ต้นเลน ทหารโผล่ที่นี่เลย ไม่ต้องเดินมาจากคอก
-		ReleasePadSize = vec3(16, 1, 28),
+	-- ══ แท่นอัญเชิญ (UI-3) ══ แทนแท่นปล่อยทหารสี่เหลี่ยมเดิม (16 × 28 · X 140–156)
+	-- จานหินเรืองแสงกลางปากเลน · ทหาร (ภาพ) โผล่ที่กึ่งกลางแท่นแล้วเดินเข้าเลน · กด E ค้างเปิดหน้าต่างอัญเชิญ
+	-- ⚠️ **ภาพ + จุดกดเท่านั้น** — การรบคิดเป็นตัวเลขล้วน (CombatService ไม่อ่านพิกัดใด ๆ)
+	--   ต้นเลน · ความยาวเลน · ระยะด่าน ยังอ่าน getLaneStartX / LengthPerStage เหมือนเดิม
+	-- กึ่งกลาง = ต้นเลน + CenterInsetX = X 148 = **กึ่งกลางแท่นเดิมพอดี** ทหารจึงเริ่มเดินจุดเดิม
+	-- ⚠️ CanCollide = false ทั้งแท่น (เดินทับได้ ไม่บังทางเข้าเลน) · validate() บังคับว่าอยู่ในปากเลน
+	--   ก่อนถึงกำแพงข้างเลน (X 157.5) และระยะกด E ไม่ทับป้ายดาเมจ
+	SummonPedestal = {
+		Diameter = 14, -- ฐานหิน
+		CoreDiameter = 10, -- แกนเรืองแสง (Neon) บนฐาน
+		BaseHeight = 0.4,
+		CoreHeight = 0.2, -- แกนนูนเหนือฐานเท่านี้
+		CenterInsetX = 8,
+		PromptHoldSeconds = 0.5, -- กด E ค้าง
+		PromptDistance = 12, -- วัดจากกึ่งกลางแท่น (รัศมีแท่น 7)
+		CloseDistance = 18, -- เดินออกห่างจากกึ่งกลางแท่นเกินนี้ หน้าต่างอัญเชิญปิดเอง
+		LightRange = 18,
 	},
 
 	-- ══ กำแพงกั้นด่าน ══ **วาดฝั่ง client** (ค่าตรงนี้ให้ทั้งสองฝั่งอ่านตรงกัน)
@@ -552,6 +568,8 @@ Config.RemoteNames = {
 	AUTO_FILL_PEN_REQUEST = "AutoFillPenRequest",
 
 	-- client → server : FireServer(orderedStackKeys: {string})
+	-- ⚠️ UI-3: แทนที่ releaseOrder ทั้งชุด = **กองที่ติ๊กให้ปล่อย** เรียงตามลำดับติ๊ก (ว่าง = ไม่ปล่อยลูกเลย)
+	-- กองที่ไม่อยู่ในนี้ไม่ถูกปล่อย (เดิม server ต่อท้ายกองใหม่ให้เองทุก tick — ตัดแล้ว) · signature ไม่เปลี่ยน
 	-- ⚠️ ต้องเป็น stack key ที่ผ่าน Config.makeStackKey() เป๊ะ (round-trip ตรงตัว) เท่านั้น
 	-- ไม่ต้องเป็นกองที่ผู้เล่นมีอยู่ตอนนี้ (กองที่ว่างชั่วคราวยังตั้งลำดับล่วงหน้าได้) —
 	-- server ปฏิเสธทั้งคำขอเงียบ ๆ ถ้ามี key แปลกปลอมหรือซ้ำแม้แค่ตัวเดียว (CombatService)
@@ -584,6 +602,7 @@ Config.RemoteNames = {
 	-- client → server : FireServer(motherUid) — ส่งแม่ **จากกระเป๋าเท่านั้น** เข้า battleRoster
 	-- ⚠️ ย้อนกลับไม่ได้ แม่ตายถาวรตอนด่านที่กำลังตีพัง (CombatService.handleSendMotherToBattle)
 	-- client ต้องขึ้นกล่องยืนยันก่อนยิงทุกครั้ง · ผลตอบกลับทาง ACTION_RESULT
+	-- · UI-3: client ไม่ใช้แล้ว (หน้าต่างแท่นอัญเชิญยิง SEND_MOTHERS_TO_BATTLE_BATCH_REQUEST) — server ยังรับอยู่
 	SEND_MOTHER_TO_BATTLE_REQUEST = "SendMotherToBattleRequest",
 
 	-- server → client : FireClient(stage, eggCount, deathCount) — ด่านเพิ่งพัง (Phase 4A · ขยาย 4B)
@@ -2651,6 +2670,12 @@ function Config.getLaneStartX(): number
 	return Config.getPenYardRightX() + Config.MapDimensions.Lane.StartGap
 end
 
+-- กึ่งกลางแท่นอัญเชิญบนพื้น (UI-3) — MapBuilder วางแท่น · client ติดจุดกด E · TroopRenderer เริ่มเดินทหารจากตรงนี้
+-- ⚠️ ภาพ/จุดกดเท่านั้น ไม่มีการคำนวณรบใดอ่านค่านี้
+function Config.getSummonPedestalCenter(): Vector3
+	return vec3(Config.getLaneStartX() + Config.MapDimensions.SummonPedestal.CenterInsetX, 0, 0)
+end
+
 -- ความยาวเลนทั้งเส้น
 function Config.getLaneLength(): number
 	return Config.MapDimensions.Lane.LengthPerStage * Config.Balance.Stage.COUNT
@@ -2896,6 +2921,9 @@ end
 
 -- ชื่อโมเดลป้ายใน Workspace.Map.MapSigns — MapBuilder ตั้ง · client หาด้วยชื่อเดียวกัน
 Config.MAP_SIGN_FOLDER = "MapSigns"
+-- แท่นอัญเชิญ (UI-3) — MapBuilder สร้างโมเดลชื่อนี้ใต้ Workspace.Map · client ติดจุดกด E ที่ชิ้นแกน (CORE)
+Config.SUMMON_PEDESTAL_NAME = "SummonPedestal"
+Config.SUMMON_PEDESTAL_CORE = "Core"
 -- Attribute บนตัว Player = เลขคอกที่จองได้ (PenService ตั้งตอนจอง · ล้างตอนคืน) · client ใช้แยกป้ายคอกตัวเอง
 Config.PEN_INDEX_ATTRIBUTE = "PenIndex"
 function Config.getMapSignName(kind: "damage" | PenSignKind, penIndex: number?): string
@@ -3783,6 +3811,38 @@ function Config.validate()
 	assert(
 		damageSpot.X < Config.getLaneStartX() and damageSpot.X <= eastWallInnerX,
 		"Config: ป้ายดาเมจต้องอยู่ในลาน ก่อนถึงต้นเลน (ในกำแพงใส)"
+	)
+
+	-- ══ แท่นอัญเชิญ (UI-3): อยู่ในปากเลน ไม่ทับกำแพง ไม่บังทาง · จุดกดไม่ทับป้ายดาเมจ ══
+	local pedestal = dim.SummonPedestal
+	local pedestalCenter = Config.getSummonPedestalCenter()
+	local pedestalHalf = pedestal.Diameter / 2
+	assert(pedestal.CoreDiameter < pedestal.Diameter, "Config: แกนเรืองแสงของแท่นอัญเชิญต้องเล็กกว่าฐาน")
+	assert(
+		pedestalCenter.X - pedestalHalf >= Config.getLaneStartX(),
+		"Config: แท่นอัญเชิญล้ำเข้าไปในลานคอก (ต้องเริ่มที่ต้นเลนหรือหลังจากนั้น)"
+	)
+	assert(
+		pedestalCenter.X + pedestalHalf <= laneWallStart,
+		`Config: แท่นอัญเชิญยื่นเลยจุดเริ่มกำแพงข้างเลน (X {laneWallStart}) — ต้องอยู่ในปากเลนทั้งแท่น`
+	)
+	assert(
+		dim.Lane.Width / 2 - pedestalHalf >= dim.Pen.GateWidth,
+		"Config: แท่นอัญเชิญกว้างจนเหลือทางเดินข้างแท่นแคบกว่าประตูคอก (บังทางเข้าเลน)"
+	)
+	assert(pedestal.PromptHoldSeconds > 0, "Config: แท่นอัญเชิญต้องกด E ค้าง (PromptHoldSeconds > 0)")
+	assert(
+		pedestal.PromptDistance > pedestalHalf,
+		"Config: ระยะกด E ของแท่นอัญเชิญสั้นกว่ารัศมีแท่น — ยืนบนขอบแท่นแล้วกดไม่ได้"
+	)
+	assert(
+		pedestal.CloseDistance > pedestal.PromptDistance,
+		"Config: SummonPedestal.CloseDistance ต้องไกลกว่า PromptDistance ไม่งั้นกดเปิดแล้วหน้าต่างปิดเองทันที"
+	)
+	local pedestalToDamage = math.sqrt((damageSpot.X - pedestalCenter.X) ^ 2 + (damageSpot.Z - pedestalCenter.Z) ^ 2)
+	assert(
+		pedestalToDamage > pedestal.PromptDistance + sign.PromptDistance,
+		`Config: ระยะกด E ของแท่นอัญเชิญทับป้ายดาเมจ (ห่างกัน {pedestalToDamage})`
 	)
 
 	-- ══ แม่เดินไปมา ══

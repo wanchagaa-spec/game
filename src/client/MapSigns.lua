@@ -1,5 +1,5 @@
 --!strict
--- egg-army-game :: ป้ายอัปเกรดบนแมพ + จุดเปิดร้านขายแม่ — UI-2
+-- egg-army-game :: ป้ายอัปเกรดบนแมพ + จุดเปิดร้านขายแม่ (UI-2) + จุดเปิดแท่นอัญเชิญ (UI-3)
 --
 -- ตัวป้าย (เสา + แผ่นไม้) server สร้างใน MapBuilder.buildMapSigns — ไฟล์นี้ติดของที่เป็น "ของแต่ละคน":
 --   · SurfaceGui (อยู่ใน PlayerGui · Adornee = แผ่นป้าย) โชว์เลเวล/ราคาของ**ผู้เล่นที่มองอยู่**
@@ -9,6 +9,8 @@
 --   คอกคนอื่น + คอกที่ยังไม่มีเจ้าของ: ซ่อนทั้งป้าย (syncVisibility) ไม่มีจุดกด · ป้ายชื่อ "คอก N" ไม่ถูกแตะ
 --   ค่าวิ่งเป็นของบัญชีก็จริง แต่ให้ซื้อที่คอกตัวเองที่เดียวกันงง
 -- ⚠️ client ไม่ตัดสินอะไร: ราคา/เพดานอ่านจาก sync · server ตรวจเงิน/เพดานซ้ำเองทุกครั้ง
+-- UI-3: แท่นอัญเชิญ (server สร้างใน MapBuilder · Config.SUMMON_PEDESTAL_NAME) — จุดกด E **ค้าง** ที่แกนเรืองแสง
+--   เปิดหน้าต่างอัญเชิญ (SummonWindow.lua) · เดินออกห่างเกิน SummonPedestal.CloseDistance แล้วปิดเอง
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -28,6 +30,9 @@ export type Actions = {
 	openSellShop: () -> (),
 	closeSellShop: () -> (),
 	isSellShopOpen: () -> boolean,
+	openSummon: () -> (),
+	closeSummon: () -> (),
+	isSummonOpen: () -> boolean,
 }
 
 type Sign = {
@@ -288,14 +293,13 @@ local function attachSellShop()
 	end)
 end
 
--- ⚠️ โพลระยะแทน Heartbeat — แค่ปิดหน้าต่าง ไม่ต้องละเอียดระดับเฟรม (แบบเดียวกับแผงจัดคิวปล่อย)
-local function watchSellDistance()
+-- ⚠️ โพลระยะแทน Heartbeat — แค่ปิดหน้าต่าง ไม่ต้องละเอียดระดับเฟรม
+-- ใช้ร่วมกันทั้งร้านขายแม่และแท่นอัญเชิญ: หน้าต่างเปิดอยู่ + ยืนห่างจากจุด (แนวราบ) เกิน limit → ปิด
+local function watchDistance(spot: Vector3, limit: number, isOpen: () -> boolean, close: () -> ())
 	task.spawn(function()
-		local spot = Config.getSellShopSpot()
-		local limit = Config.MapDimensions.MapSign.SellCloseDistance
 		while true do
 			task.wait(CLOSE_POLL_SECONDS)
-			if actions.isSellShopOpen() then
+			if isOpen() then
 				local character = Players.LocalPlayer.Character
 				local root = character and character.PrimaryPart
 				local far = true
@@ -304,10 +308,38 @@ local function watchSellDistance()
 					far = offset.Magnitude > limit
 				end
 				if far then
-					actions.closeSellShop()
+					close()
 				end
 			end
 		end
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- แท่นอัญเชิญ (UI-3) — จุดกด E ค้างที่แกนเรืองแสง
+--------------------------------------------------------------------------------
+
+local function attachSummonPedestal()
+	task.spawn(function()
+		local map = Workspace:WaitForChild("Map")
+		local pedestal = map and map:WaitForChild(Config.SUMMON_PEDESTAL_NAME)
+		local core = pedestal and pedestal:WaitForChild(Config.SUMMON_PEDESTAL_CORE)
+		if not (core and core:IsA("BasePart")) then
+			return
+		end
+		local spec = Config.MapDimensions.SummonPedestal
+		-- ⚠️ ผ่าน UiKit.prompt เท่านั้น (บังคับ OnePerButton — tools/check-prompt-exclusivity.py) · กดค้าง ไม่ใช่กดครั้งเดียว
+		local prompt = UiKit.prompt({
+			Name = "SummonPrompt",
+			ActionText = "อัญเชิญ",
+			ObjectText = "แท่นอัญเชิญ",
+			HoldDuration = spec.PromptHoldSeconds,
+			MaxActivationDistance = spec.PromptDistance,
+		})
+		prompt.Triggered:Connect(function()
+			actions.openSummon()
+		end)
+		prompt.Parent = core
 	end)
 end
 
@@ -336,7 +368,19 @@ function MapSigns.start(parent: Instance, signActions: Actions)
 		attachBoard(sign)
 	end
 	attachSellShop()
-	watchSellDistance()
+	watchDistance(
+		Config.getSellShopSpot(),
+		Config.MapDimensions.MapSign.SellCloseDistance,
+		actions.isSellShopOpen,
+		actions.closeSellShop
+	)
+	attachSummonPedestal()
+	watchDistance(
+		Config.getSummonPedestalCenter(),
+		Config.MapDimensions.SummonPedestal.CloseDistance,
+		actions.isSummonOpen,
+		actions.closeSummon
+	)
 
 	-- จองคอกเสร็จหลังเข้าเกม (หรือย้ายคอก) → ย้ายจุดกดไปป้ายของคอกใหม่
 	Players.LocalPlayer:GetAttributeChangedSignal(Config.PEN_INDEX_ATTRIBUTE):Connect(refreshOwnership)

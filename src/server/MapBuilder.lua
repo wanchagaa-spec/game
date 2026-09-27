@@ -44,7 +44,8 @@ local COLORS = {
 	fence = Color3.fromRGB(146, 104, 62),
 	lane = Color3.fromRGB(176, 158, 126),
 	laneWall = Color3.fromRGB(122, 116, 106),
-	releasePad = Color3.fromRGB(88, 148, 214),
+	pedestalBase = Color3.fromRGB(92, 96, 110), -- หินเทาอมฟ้า
+	pedestalGlow = Color3.fromRGB(120, 200, 255), -- แกนเรืองแสง + แสง + อนุภาค
 	bossFloor = Color3.fromRGB(150, 122, 94),
 	bossEgg = Color3.fromRGB(230, 218, 190),
 	stall = Color3.fromRGB(158, 112, 76),
@@ -135,7 +136,6 @@ export type BossRoom = {
 local root: Folder? = nil
 local penPlots: { PenPlot } = {}
 local bossRooms: { BossRoom } = {}
-local releasePad: Part? = nil
 local spawnPads: { SpawnLocation } = {}
 local built = false
 
@@ -459,6 +459,84 @@ local function laneWallJog(parent: Folder, name: string, x: number, fromZ: numbe
 	part.CanCollide = true
 end
 
+-- ══ แท่นอัญเชิญ (UI-3) ══ จานหินกลมเรืองแสงกลางปากเลน · ทหาร (ภาพ) โผล่ที่กึ่งกลางแท่นแล้วเดินเข้าเลน
+-- ⚠️ ภาพล้วน — การรบไม่อ่านพิกัดแท่น (Config.getSummonPedestalCenter) · CanCollide = false เดินทับได้ ไม่บังทางเข้าเลน
+-- ⚠️ Persistent: client ติดจุดกด E (UiKit.prompt · กดค้าง) ที่ชิ้นแกน ถ้าเปิด StreamingEnabled แล้วแท่นถูก
+--   stream ออก จุดกดจะหายตามไปด้วย (เหตุผลเดียวกับป้ายบนแมพ)
+-- Part ทรงกระบอกของ Roblox วางแกนตาม X → หมุน 90° รอบแกน Z ให้แกนตั้งขึ้น (ขนาด = สูง × กว้าง × กว้าง)
+local function makeDisc(name: string, diameter: number, height: number, bottomY: number, color: Color3, parent: Instance): Part
+	local center = Config.getSummonPedestalCenter()
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Shape = Enum.PartType.Cylinder
+	part.Size = Vector3.new(height, diameter, diameter)
+	part.CFrame = CFrame.new(center.X, bottomY + height / 2, center.Z) * CFrame.Angles(0, 0, math.rad(90))
+	part.Color = color
+	part.Anchored = true
+	part.CanCollide = false
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Parent = parent
+	return part
+end
+
+local function buildSummonPedestal(parent: Instance)
+	local spec = MAP.SummonPedestal
+	local center = Config.getSummonPedestalCenter()
+
+	local model = Instance.new("Model")
+	model.Name = Config.SUMMON_PEDESTAL_NAME
+	model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
+	model.Parent = parent
+
+	local base = makeDisc("Base", spec.Diameter, spec.BaseHeight, 0, COLORS.pedestalBase, model)
+	base.Material = Enum.Material.Slate
+
+	local core = makeDisc(
+		Config.SUMMON_PEDESTAL_CORE,
+		spec.CoreDiameter,
+		spec.CoreHeight,
+		spec.BaseHeight,
+		COLORS.pedestalGlow,
+		model
+	)
+	core.Material = Enum.Material.Neon
+
+	local light = Instance.new("PointLight")
+	light.Color = COLORS.pedestalGlow
+	light.Range = spec.LightRange
+	light.Brightness = 2
+	light.Parent = core
+
+	-- อนุภาคลอยขึ้นช้า ๆ — ติดกับแผ่นใสไม่หมุน (ด้านบน = ขึ้นฟ้าจริง) แทนแกนที่หมุนไปแล้ว
+	local aura = makePart(
+		"Aura",
+		Vector3.new(spec.CoreDiameter * 0.8, 0.1, spec.CoreDiameter * 0.8),
+		Vector3.new(center.X, spec.BaseHeight + spec.CoreHeight, center.Z),
+		COLORS.pedestalGlow,
+		model
+	)
+	aura.Transparency = 1
+	aura.CanCollide = false
+	aura.CanQuery = false
+	aura.CanTouch = false
+
+	local particles = Instance.new("ParticleEmitter")
+	particles.Name = "Rise"
+	particles.EmissionDirection = Enum.NormalId.Top
+	particles.Color = ColorSequence.new(COLORS.pedestalGlow)
+	particles.LightEmission = 1
+	particles.Rate = 8
+	particles.Lifetime = NumberRange.new(2, 3)
+	particles.Speed = NumberRange.new(1.5, 2.5)
+	particles.SpreadAngle = Vector2.new(8, 8)
+	particles.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.35), NumberSequenceKeypoint.new(1, 0) })
+	particles.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1) })
+	particles.Parent = aura
+
+	makeLabel("แท่นอัญเชิญ", 220, core, 6)
+end
+
 function MapBuilder.buildBattleLane(parent: Folder)
 	local lane = Instance.new("Folder")
 	lane.Name = "BattleLane"
@@ -544,17 +622,8 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	)
 	cap.Material = Enum.Material.Slate
 
-	-- ⚠️ แท่นปล่อยทหารอยู่ที่ต้นเลน — ทหารโผล่ที่นี่เลย ไม่ต้องเดินมาจากคอก
-	local pad = makePart(
-		"ReleasePad",
-		MAP.Lane.ReleasePadSize,
-		Vector3.new(startX + MAP.Lane.ReleasePadSize.X / 2, 0, 0),
-		COLORS.releasePad,
-		lane
-	)
-	pad.CanCollide = false
-	makeLabel("จุดปล่อยทหาร", 240, pad, 5)
-	releasePad = pad
+	-- ⚠️ UI-3: แท่นอัญเชิญแทนแท่นปล่อยทหารสี่เหลี่ยมเดิม (buildSummonPedestal) · ทหาร (ภาพ) ยังโผล่ที่ปากเลนจุดเดิม
+	buildSummonPedestal(parent)
 
 	-- เส้นบอกรอยต่อด่าน — ⚠️ **เครื่องหมายเฉย ๆ ไม่ใช่กำแพง** กำแพงจริงวาดฝั่ง client
 	local markers = Instance.new("Folder")
@@ -799,10 +868,6 @@ end
 
 function MapBuilder.getBossRoom(stage: number): BossRoom?
 	return bossRooms[stage]
-end
-
-function MapBuilder.getReleasePad(): Part?
-	return releasePad
 end
 
 -- จุดเกิดของคอกหมายเลข index — Main เอาไปตั้ง player.RespawnLocation

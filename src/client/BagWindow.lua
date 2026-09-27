@@ -3,7 +3,8 @@
 --
 -- ตำแหน่ง/สี/การจัดวางตามภาพต้นแบบ (docs/ui-overhaul-plan.md §3) · ข้อมูลอ่านจาก FarmStateSync ล้วน ๆ
 -- ⚠️ client ไม่ตัดสินอะไรเอง: ปุ่มทุกปุ่มแค่ยิงคำขอผ่าน actions (Main.client.lua ต่อ remote ให้)
--- การตรวจล็อก/คอกเต็ม/roster เต็มฝั่งนี้เป็นแค่การปิดปุ่มให้ผู้เล่นรู้เร็ว ๆ — server ตรวจซ้ำเสมอ
+-- การตรวจล็อก/คอกเต็มฝั่งนี้เป็นแค่การปิดปุ่มให้ผู้เล่นรู้เร็ว ๆ — server ตรวจซ้ำเสมอ
+-- ⚠️ UI-3: ส่งแม่ไปรบย้ายไปหน้าต่างแท่นอัญเชิญแล้ว (SummonWindow) — หน้ารายละเอียดแม่ไม่มีปุ่มส่งรบอีก
 --
 -- ⚠️ ประสิทธิภาพ: แม่มีได้ ~100+ ตัว ห้ามสร้าง ViewportFrame ทุกใบพร้อมกัน
 -- ใช้ "virtual grid" — สร้างการ์ดเท่าที่มองเห็น (+1 แถวกันขอบ) เป็น pool แล้วใช้ซ้ำตอนเลื่อน
@@ -19,10 +20,8 @@ local BagWindow = {}
 export type Actions = {
 	moveMother: (uid: string, target: string) -> (),
 	toggleLock: (uid: string) -> (),
-	sendToBattle: (mother: any) -> (),
 	placeEgg: (heldEggId: number) -> (),
 	notify: (text: string, ok: boolean) -> (),
-	isRosterFull: () -> boolean,
 }
 
 type Tab = "pets" | "eggs" | "items"
@@ -70,8 +69,6 @@ local CARD_SELECTED_COLOR = Color3.fromRGB(72, 92, 64)
 local PEN_TAG_COLOR = Color3.fromRGB(80, 185, 90)
 local LOCK_COLOR = Color3.fromRGB(120, 110, 170)
 local MOVE_COLOR = Color3.fromRGB(60, 150, 230)
-local TEMP_COLOR = Color3.fromRGB(205, 140, 55)
-local BATTLE_COLOR = Color3.fromRGB(200, 60, 60)
 
 local actions: Actions
 local window: Frame
@@ -420,9 +417,8 @@ local function renderMotherDetail(item: Item)
 				actions.moveMother(mother.uid, "bag")
 			end
 		)
-		-- ส่งไปรบได้เฉพาะแม่ในกระเป๋า (กฎเดิม — กันส่งตัวที่กำลังผลิต)
-		setDetailButton(3, nil, BATTLE_COLOR, false, nil)
-		setDetailButton(4, nil, BATTLE_COLOR, false, nil)
+		setDetailButton(3, nil, MOVE_COLOR, false, nil)
+		setDetailButton(4, nil, MOVE_COLOR, false, nil)
 		return
 	end
 
@@ -437,25 +433,9 @@ local function renderMotherDetail(item: Item)
 		end
 	)
 
-	-- ⚠️ TEMP: ปุ่มส่งไปรบอยู่ตรงนี้ชั่วคราว — ย้ายไปแท่นอัญเชิญใน UI-3
-	-- (ปุ่มขายย้ายไปร้านขายแม่หลังแมพแล้วใน UI-2 · SellWindow.lua)
-	setDetailButton(4, nil, BATTLE_COLOR, false, nil)
-	if locked then
-		setDetailButton(3, "ส่งไปรบไม่ได้ — ล็อกอยู่ (TEMP)", BATTLE_COLOR, false, function()
-			actions.notify(`แม่ตัวนี้ถูกล็อกไว้ ส่งไปรบไม่ได้ — กด "🔓 ปลดล็อก" ก่อน`, false)
-		end)
-		return
-	end
-	if actions.isRosterFull() then
-		setDetailButton(3, "ส่งไปรบไม่ได้ — roster เต็ม (TEMP)", BATTLE_COLOR, false, function()
-			actions.notify("roster เต็มแล้ว", false)
-		end)
-	else
-		-- ปุ่มนี้**แค่เปิดกล่องยืนยันเดิม** (Phase 3C-2) ไม่ยิง remote ตรง ๆ
-		setDetailButton(3, "ส่งไปรบ (TEMP)", BATTLE_COLOR, true, function()
-			actions.sendToBattle(mother)
-		end)
-	end
+	-- ขาย → ร้านขายแม่ (UI-2 · SellWindow) · ส่งไปรบ → แท่นอัญเชิญ (UI-3 · SummonWindow)
+	setDetailButton(3, nil, MOVE_COLOR, false, nil)
+	setDetailButton(4, nil, MOVE_COLOR, false, nil)
 end
 
 local function renderEggDetail(item: Item)
@@ -478,8 +458,8 @@ local function renderEggDetail(item: Item)
 		end
 	)
 	setDetailButton(2, nil, MOVE_COLOR, false, nil)
-	setDetailButton(3, nil, TEMP_COLOR, false, nil)
-	setDetailButton(4, nil, BATTLE_COLOR, false, nil)
+	setDetailButton(3, nil, MOVE_COLOR, false, nil)
+	setDetailButton(4, nil, MOVE_COLOR, false, nil)
 end
 
 renderDetail = function()

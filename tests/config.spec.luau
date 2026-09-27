@@ -974,6 +974,39 @@ return function(t, Config)
 	check("ความเร็วเดินเป็น 0 → ล้ม", mapGuardCatches(
 		function() map.Wander.Speed = 0 end,
 		function() map.Wander.Speed = savedWanderSpeed end), true)
+	-- ══ แท่นอัญเชิญ (UI-3) ══ แทนแท่นปล่อยเดิม — ภาพ + จุดกดเท่านั้น ไม่แตะต้นเลน/ระยะการรบ
+	local pedestal = map.SummonPedestal
+	local pedestalCenter = Config.getSummonPedestalCenter()
+	check("แท่นอัญเชิญอยู่ที่ X 148 = กึ่งกลางแท่นปล่อยเดิม (140 + 16/2)", pedestalCenter.X, 148)
+	check("แท่นอัญเชิญอยู่กลางเลน (Z 0)", pedestalCenter.Z, 0)
+	check("แท่นเริ่มที่ต้นเลนหรือหลังจากนั้น (ไม่ล้ำลานคอก)",
+		pedestalCenter.X - pedestal.Diameter / 2 >= Config.getLaneStartX(), true)
+	check("แท่นจบก่อนกำแพงข้างเลน (X 157.5)", pedestalCenter.X + pedestal.Diameter / 2 <= Config.getLaneWallStartX(), true)
+	check("ข้างแท่นเหลือทางเดินกว้างกว่าประตูคอก", map.Lane.Width / 2 - pedestal.Diameter / 2 >= map.Pen.GateWidth, true)
+	check("กด E ค้างครึ่งวินาที", pedestal.PromptHoldSeconds, 0.5)
+	local damageSpotP = Config.getDamageSignSpot()
+	local pedestalGap = math.sqrt((damageSpotP.X - pedestalCenter.X) ^ 2 + (damageSpotP.Z - pedestalCenter.Z) ^ 2)
+	check("ระยะกด E แท่นกับป้ายดาเมจไม่ทับกัน", pedestalGap > pedestal.PromptDistance + map.MapSign.PromptDistance, true)
+	check("ต้นเลนไม่ขยับ (ยังเป็นขอบลานคอก)", Config.getLaneStartX(), Config.getPenYardRightX())
+	check("ไม่มีแท่นปล่อยสี่เหลี่ยมเดิมเหลือใน Config", map.Lane.ReleasePadSize, nil)
+	local savedInset = pedestal.CenterInsetX
+	local savedDiameter = pedestal.Diameter
+	local savedPedestalPrompt = pedestal.PromptDistance
+	local savedPedestalClose = pedestal.CloseDistance
+	check("แท่นยื่นเลยกำแพงข้างเลน → ล้ม", mapGuardCatches(
+		function() pedestal.CenterInsetX = 14 end, function() pedestal.CenterInsetX = savedInset end), true)
+	check("แท่นล้ำเข้าลานคอก → ล้ม", mapGuardCatches(
+		function() pedestal.CenterInsetX = 2 end, function() pedestal.CenterInsetX = savedInset end), true)
+	check("แท่นกว้างจนบังทางเข้าเลน → ล้ม", mapGuardCatches(
+		function() pedestal.Diameter = map.Lane.Width end, function() pedestal.Diameter = savedDiameter end), true)
+	check("ระยะกด E แท่นทับป้ายดาเมจ → ล้ม", mapGuardCatches(
+		function() pedestal.PromptDistance = 35; pedestal.CloseDistance = 40 end,
+		function() pedestal.PromptDistance = savedPedestalPrompt; pedestal.CloseDistance = savedPedestalClose end), true)
+	check("ระยะปิดหน้าต่างสั้นกว่าระยะกด → ล้ม", mapGuardCatches(
+		function() pedestal.CloseDistance = pedestal.PromptDistance end,
+		function() pedestal.CloseDistance = savedPedestalClose end), true)
+	check("ชื่อโมเดลแท่นที่ client หา", Config.SUMMON_PEDESTAL_NAME, "SummonPedestal")
+
 	check("คืนค่าแมพเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
 
 	--------------------------------------------------------------------------

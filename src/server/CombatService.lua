@@ -126,7 +126,7 @@ function CombatService.releaseFromQueue(data: Data, unitsToRelease: number): (nu
 			if charId and motherWeight then
 				local take = math.min(available, remaining)
 				local childWeight = Config.getChildWeight(motherWeight, statuses)
-				local power = Config.computeBattlePower(childWeight, charId, statuses, data.damageLevel)
+				local power = Config.computeBattlePower(childWeight, charId, statuses, data.damageLevel, data.robuxDamageBonus)
 
 				totalReleased += take
 				totalPower += take * power
@@ -158,7 +158,7 @@ end
 function CombatService.getRosterDps(data: Data): number
 	local total = 0
 	for _, mother in data.battleRoster do
-		total += Config.computeBattlePower(mother.weight, mother.charId, mother.statuses, data.damageLevel)
+		total += Config.computeBattlePower(mother.weight, mother.charId, mother.statuses, data.damageLevel, data.robuxDamageBonus)
 	end
 	return total
 end

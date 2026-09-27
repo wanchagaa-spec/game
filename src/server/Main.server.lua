@@ -10,6 +10,7 @@
 -- Phase 2A: ข้อมูลเซฟลง DataStore แล้ว ออกเกมแล้วเข้าใหม่ของยังอยู่
 
 local Players = game:GetService("Players")
+local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -133,6 +134,16 @@ end
 
 Remotes.setupServer()
 DataService.init()
+
+-- ⚠️ UI-5: ร้าน Robux — ผูกก่อนปล่อยให้ใครเข้าเล่นเสมอ (เหตุผลเดียวกับ BindToClose ด้านล่าง
+-- ต่อช้ากว่านี้ = มีช่วงที่ซื้อของแล้ว ProcessReceipt ยังไม่มีใครรับ)
+-- ตัว handler จริงอยู่ที่ EggService.processReceipt (idempotent + ให้ของก่อนเซฟก่อนคืนผล — §8.7)
+-- ⚠️ EggService.processReceipt คืน string ธรรมดา ("PurchaseGranted"/"NotProcessedYet") ไม่ใช่ Enum
+-- ตรง ๆ (กัน EggService.lua ต้องรู้จัก Roblox global `Enum` — ทดสอบนอก Studio ได้มากขึ้น) แปลงตรงนี้ที่เดียว
+MarketplaceService.ProcessReceipt = function(receiptInfo)
+	return Enum.ProductPurchaseDecision[EggService.processReceipt(receiptInfo)]
+end
+
 MapBuilder.build()
 PenService.buildWorld()
 -- UI-1: โหลดโมเดลตัวละครล่วงหน้า (เบื้องหลัง) ให้รูปในกระเป๋าฝั่ง client มีโมเดลใช้ตั้งแต่ต้น

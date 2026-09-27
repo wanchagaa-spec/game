@@ -195,13 +195,14 @@ local function describeMother(mother: Mother, wallProgress: number)
 end
 
 -- กองลูก 1 กอง (stack key + จำนวน) ในรูปพร้อมโชว์
-local function describeStack(key: string, count: number, damageLevel: number)
+local function describeStack(key: string, count: number, damageLevel: number, robuxDamageBonus: number)
 	local charId, weight, statuses = Config.parseStackKey(key)
 	local character = if charId then Config.getCharacter(charId) else nil
-	-- UI-3: พลังต่อตัว — สูตรเดียวกับที่ CombatService.releaseFromQueue ใช้ตีจริง (รวมสถานะ + damageLevel)
+	-- UI-3: พลังต่อตัว — สูตรเดียวกับที่ CombatService.releaseFromQueue ใช้ตีจริง (รวมสถานะ + damageLevel
+	-- + โบนัส Robux ที่ทะลุเพดาน — UI-5)
 	-- ⚠️ คิดที่ server (client ห้ามคิดเอง) · key เพี้ยน = nil (ไม่น่าเกิด — key มาจาก makeStackKey เท่านั้น)
 	local power = if charId and weight
-		then Config.computeBattlePower(Config.getChildWeight(weight, statuses), charId, statuses, damageLevel)
+		then Config.computeBattlePower(Config.getChildWeight(weight, statuses), charId, statuses, damageLevel, robuxDamageBonus)
 		else nil
 	return {
 		key = key,
@@ -285,7 +286,7 @@ local function buildSyncPayload(data: Data)
 	-- ต่างจากกระเป๋าไข่ (10,000 ฟอง) ที่ต้อง virtualize เพราะเป็นคนละขนาดกัน
 	local children = {}
 	for key, count in data.children do
-		table.insert(children, describeStack(key, count, data.damageLevel))
+		table.insert(children, describeStack(key, count, data.damageLevel, data.robuxDamageBonus))
 	end
 
 	local discoveredList: { string } = {}
@@ -306,7 +307,7 @@ local function buildSyncPayload(data: Data)
 	local waitingStacks = {}
 	for _, key in data.releaseOrder do
 		if producing[key] and not data.children[key] then
-			table.insert(waitingStacks, describeStack(key, 0, data.damageLevel))
+			table.insert(waitingStacks, describeStack(key, 0, data.damageLevel, data.robuxDamageBonus))
 		end
 	end
 
@@ -341,12 +342,18 @@ local function buildSyncPayload(data: Data)
 		wallProgress = data.wallProgress,
 		damageLevel = data.damageLevel,
 		maxDamageLevel = maxDamageLevel,
-		damageMultiplier = Config.getArmyDamageMultiplier(data.damageLevel),
+		-- ⚠️ UI-5: ตัวคูณ/ความเร็วที่แสดง = ค่าจริงที่ใช้รบ (ปกติ + โบนัส Robux รวมแล้ว) ไม่ใช่แค่ส่วนที่ซื้อด้วยเงินในเกม
+		-- ป้าย UI-2 เดิมจึงเห็นค่าจริงถูกต้องโดยอัตโนมัติโดยไม่ต้องแก้โค้ดฝั่งนั้นเลย
+		damageMultiplier = Config.getArmyDamageMultiplier(data.damageLevel) * Config.getRobuxDamageMultiplier(data.robuxDamageBonus),
 		damageUpgradeCost = damageUpgradeCost, -- nil = เต็มเพดานของด่านนี้แล้ว
 		speedLevel = data.speedLevel,
 		maxSpeedLevel = Config.Balance.SpeedUpgrade.MAX_LEVEL,
-		walkSpeed = Config.getWalkSpeed(data.speedLevel),
+		walkSpeed = Config.getEffectiveWalkSpeed(data.speedLevel, data.robuxSpeedBonus),
 		speedUpgradeCost = Config.getSpeedUpgradeCost(data.speedLevel), -- nil = เต็มเพดานแล้ว
+		-- UI-5: ร้าน Robux — จำนวนขั้นที่ซื้อไปแล้ว (ตัวคูณ/โบนัสจริงคำนวณรวมไว้ในสองฟิลด์ข้างบนแล้ว)
+		robuxDamageBonus = data.robuxDamageBonus,
+		robuxSpeedBonus = data.robuxSpeedBonus,
+		robuxSpeedHardCap = Config.getRobuxSpeedHardCap(), -- client เช็คว่า "ซื้อต่อไปก็ไม่มีผลแล้ว"
 		children = children,
 		waitingStacks = waitingStacks, -- UI-3: กองที่ติ๊กไว้แต่หมดชั่วคราว (count 0 · แม่ในคอกผลิตเติมอยู่)
 		-- UI-4: ตัวละครที่เคยได้ (ดัชนี) — array ของ charId เรียงแล้ว (ข้อมูลเล็ก ≤ จำนวนตัวละคร)
@@ -1079,7 +1086,8 @@ function EggService.applyWalkSpeed(player: Player)
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
-		humanoid.WalkSpeed = Config.getWalkSpeed(data.speedLevel)
+		-- UI-5: รวมโบนัส Robux เข้ากับความเร็วปกติเสมอ (แทร็ก SpeedUpgrade เดิมไม่ถูกแก้เลย)
+		humanoid.WalkSpeed = Config.getEffectiveWalkSpeed(data.speedLevel, data.robuxSpeedBonus)
 	end
 end
 
@@ -1142,6 +1150,125 @@ function EggService.buySpeedUpgrade(player: Player): (boolean, string?)
 
 	print(`[EggService] {player.Name} ซื้อความเร็ววิ่งขั้น {data.speedLevel} (จ่าย {cost} coins)`)
 	return true, nil
+end
+
+--------------------------------------------------------------------------------
+-- ร้าน Robux (UI-5)
+--------------------------------------------------------------------------------
+
+-- เร่งไข่ที่กำลังฟักอยู่ **ทุกฟอง** ให้ครบเวลาทันที — ใช้ตรรกะฟักเดิม (processReadyHatchSlots/hatch)
+-- ทั้งหมด ไม่เขียนใหม่ (แม่ยังวางไม่ได้ถ้าคอก+กระเป๋าเต็มพร้อมกัน = ข้อ D เดิมเป๊ะ ไม่ใช่เคสพิเศษ)
+-- ⚠️ คืน (true, nil, จำนวนที่เร่ง) เสมอตราบใดที่มีข้อมูลผู้เล่น แม้ rushed = 0 (ไม่มีไข่ให้เร่งตอนนั้นพอดี)
+-- — **ไม่ใช่ความล้มเหลว** เพราะ Robux ถูกใช้ไปแล้ว การ retry ไปก็ไม่มีไข่งอกขึ้นมาเองให้เร่ง
+function EggService.rushAllHatching(player: Player): (boolean, string?, number?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น", nil
+	end
+
+	local now = os.time()
+	local rushed = PlayerData.rushAllHatchSlots(data, now)
+	processReadyHatchSlots(player, data, now)
+	EggService.sync(player)
+
+	return true, nil, rushed
+end
+
+-- เพิ่มขั้นโบนัส damage จาก Robux — แยกจาก buyDamageUpgrade (เงินในเกม) โดยสิ้นเชิง ไม่แตะ damageLevel
+function EggService.grantRobuxDamageBonus(player: Player, steps: number): boolean
+	local data = dataOf(player)
+	if not data then
+		return false
+	end
+	PlayerData.addRobuxDamageSteps(data, steps)
+	EggService.sync(player)
+	return true
+end
+
+-- เพิ่มขั้นโบนัส speed จาก Robux — แยกจาก buySpeedUpgrade (เงินในเกม) โดยสิ้นเชิง ไม่แตะ speedLevel
+function EggService.grantRobuxSpeedBonus(player: Player, steps: number): boolean
+	local data = dataOf(player)
+	if not data then
+		return false
+	end
+	PlayerData.addRobuxSpeedSteps(data, steps)
+	-- ⚠️ ต้องมีผลทันที เหมือน buySpeedUpgrade — ผู้เล่นกดซื้อแล้วคาดว่าจะวิ่งเร็วขึ้นเลย
+	EggService.applyWalkSpeed(player)
+	EggService.sync(player)
+	return true
+end
+
+-- ⚠️ จุดเดียวที่ผูกกับ MarketplaceService.ProcessReceipt (Main.server.lua เป็นคนต่อสาย)
+-- กฎเหล็ก (docs/data-schema.md §8.7):
+--   1. idempotent ด้วย PurchaseId — Roblox เรียกซ้ำได้เสมอไม่ว่าจะสำเร็จแค่ไหน ต้องคืน
+--      PurchaseGranted ทันทีถ้าเคยให้ของจากใบเสร็จนี้ไปแล้ว โดยไม่ให้ของซ้ำ
+--   2. ให้ของก่อน แล้วค่อยเซฟ แล้วค่อยคืน PurchaseGranted — **ห้ามคืนก่อนเซฟสำเร็จ**
+--      (เซฟไม่ผ่านแล้วเซิร์ฟดับ = ของที่เพิ่งให้หายไปจริง ทั้งที่ Roblox คิดว่าจบแล้วไม่ retry อีก)
+--   3. ให้ของไม่สำเร็จไม่ว่าเหตุผลอะไร (ผู้เล่นออกไปแล้ว/ข้อมูลยังไม่โหลด/กระเป๋าเต็มจริง ๆ)
+--      → คืน NotProcessedYet เสมอ ไม่ error ไม่ throw — Roblox จะเรียกซ้ำเอง (อาจข้ามเซิร์ฟเวอร์)
+--
+-- ⚠️ คืน **string ธรรมดา** ("PurchaseGranted" / "NotProcessedYet") ไม่ใช่ Enum.ProductPurchaseDecision
+-- ตรง ๆ — กัน EggService.lua ต้องรู้จัก global `Enum` ของ Roblox (ไฟล์นี้จงใจแตะ Roblox API ให้น้อย
+-- ที่สุด เหมือน CombatService ที่กันไว้ที่ .start() เท่านั้น — ทดสอบนอก Studio ได้มากขึ้น)
+-- Main.server.lua เป็นคนแปลงเป็น Enum จริงตรงจุดที่ผูกกับ MarketplaceService.ProcessReceipt
+function EggService.processReceipt(receiptInfo: { [string]: any }): string
+	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+	if not player then
+		-- ผู้เล่นออกจากเซิร์ฟไปแล้วระหว่างซื้อ (หรือกำลังจะเข้า) — Roblox จะ retry เองตอนเข้าเซิร์ฟถัดไป
+		return "NotProcessedYet"
+	end
+
+	local data = dataOf(player)
+	if not data then
+		-- ข้อมูลยังโหลดไม่เสร็จ (เพิ่งเข้าเกม) — รอรอบถัดไป
+		return "NotProcessedYet"
+	end
+
+	local purchaseId = tostring(receiptInfo.PurchaseId)
+	if PlayerData.hasProcessedPurchase(data, purchaseId) then
+		return "PurchaseGranted"
+	end
+
+	local productId = receiptInfo.ProductId
+	local eggProduct = Config.findProductByRobloxId(productId)
+	local robuxProduct = Config.findRobuxProductByRobloxId(productId)
+
+	local granted = false
+	local grantLabel = "?"
+
+	if eggProduct then
+		grantLabel = eggProduct.name
+		granted = (EggService.grantEgg(player, eggProduct.grantEggId))
+	elseif robuxProduct then
+		grantLabel = robuxProduct.name
+		if robuxProduct.kind == "damage_bonus" then
+			granted = EggService.grantRobuxDamageBonus(player, robuxProduct.amount)
+		elseif robuxProduct.kind == "speed_bonus" then
+			granted = EggService.grantRobuxSpeedBonus(player, robuxProduct.amount)
+		elseif robuxProduct.kind == "hatch_rush" then
+			granted = (EggService.rushAllHatching(player))
+		end
+	else
+		-- productId ไม่รู้จัก (ปิด enabled ไปแล้ว/ตั้งผิด) — ไม่คืน Granted เดี๋ยวของหาย เผื่อเป็นแค่ชั่วคราว
+		warn(`[EggService] ProcessReceipt: ไม่รู้จัก productId {productId} (PurchaseId {purchaseId})`)
+		return "NotProcessedYet"
+	end
+
+	if not granted then
+		return "NotProcessedYet"
+	end
+
+	PlayerData.markPurchaseProcessed(data, purchaseId)
+
+	-- ⚠️ ห้ามคืน PurchaseGranted ก่อนจุดนี้ — ดูกฎข้อ 2 ข้างบน
+	local saved, saveErr = DataService.saveAsync(player.UserId, false)
+	if not saved then
+		warn(`[EggService] ProcessReceipt: ให้ "{grantLabel}" แล้วแต่เซฟไม่สำเร็จ ({saveErr}) — รอ retry`)
+		return "NotProcessedYet"
+	end
+
+	print(`[EggService] {player.Name} ซื้อ "{grantLabel}" สำเร็จ (PurchaseId {purchaseId})`)
+	return "PurchaseGranted"
 end
 
 --------------------------------------------------------------------------------
@@ -1558,6 +1685,25 @@ function EggService.debugSetCurrency(player: Player, coins: number)
 	EggService.sync(player)
 
 	print(`[EggService] debugSetCurrency: {player.Name} เงิน {before} → {clamped} coins · ` .. debugSaveNow(player))
+end
+
+-- ⚠️ UI-5: จำลอง MarketplaceService.ProcessReceipt โดยไม่ต้องมี Robux จริง/publish จริง
+-- ใช้ทดสอบ idempotency ตรง ๆ: เรียกซ้ำด้วย purchaseId เดิม → ครั้งที่สองต้องไม่ให้ของซ้ำ (docs/data-schema.md §8.7)
+-- productKey = "legendary_egg" | "robux_damage_step" | "robux_speed_step" | "robux_hatch_rush"
+-- คืน string ของ Enum.ProductPurchaseDecision ที่ processReceipt ตัดสินใจจริง (เรียกฟังก์ชันเดียวกับที่
+-- MarketplaceService.ProcessReceipt ผูกไว้เป๊ะ ไม่ใช่โค้ดทดสอบแยกชุด)
+function EggService.debugSimulateReceipt(player: Player, productKey: string, purchaseId: string): string
+	local product = Config.getDeveloperProduct(productKey) or Config.getRobuxProduct(productKey)
+	if not product then
+		return `ไม่รู้จัก product "{productKey}"`
+	end
+
+	local decision = EggService.processReceipt({
+		PlayerId = player.UserId,
+		ProductId = product.productId,
+		PurchaseId = purchaseId,
+	})
+	return tostring(decision)
 end
 
 -- พิมพ์ข้อมูลสำคัญทั้งหมดของผู้เล่นแบบอ่านง่าย — ⚠️ read-only ไม่แก้อะไรเลย จึงไม่เซฟ

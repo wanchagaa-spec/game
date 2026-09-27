@@ -76,6 +76,14 @@ local function capturingPrint(...)
 \tprint(line) -- ยังโชว์ log จริงด้วย เผื่อไล่ดูตอนดีบัก
 end
 
+-- UI-5: EggService.processReceipt เรียก Players:GetPlayerByUserId จริง (เดิม Players ไม่เคยถูกใช้
+-- จริงจนกว่าจะถึงตอนนี้ — คนละ instance กับของ Roblox แต่ต้องมีเมธอดนี้ให้เรียกได้) freshPlayer()
+-- ใน CHECK เป็นคนลงทะเบียนผู้เล่นที่สร้างเข้า __registry ให้เอง
+local FakePlayers = { __registry = {} }
+function FakePlayers:GetPlayerByUserId(userId)
+\treturn self.__registry[userId]
+end
+
 local __env = {
 \tConfig = Config,
 \tPlayerData = PlayerData,
@@ -84,7 +92,7 @@ local __env = {
 \tPenService = FakePenService,
 \tProductionService = FakeProductionService,
 \tCombatService = CombatService,
-\tPlayers = {},
+\tPlayers = FakePlayers,
 \tRandom = FakeRandom,
 \twarn = capturingPrint,
 \tprint = capturingPrint,
@@ -165,6 +173,7 @@ local function freshPlayer(tag)
 \tfunction player:Kick(message)
 \t\tself.__kicked = message
 \tend
+\t__env.Players.__registry[userId] = player -- UI-5: ให้ Players:GetPlayerByUserId หาเจอ
 \tlocal okAdd = EggService.onPlayerAdded(player)
 \tassert(okAdd, `เซ็ตอัพเทสต์ผิด — onPlayerAdded ของ {tag} ล้ม`)
 \treturn player, DataService.getCached(userId)
@@ -491,6 +500,73 @@ do
 \tcheck("บอกเหตุผลว่าไม่มีข้อมูลในแคช",
 \t\tstring.find(reason or "", "หน่วยความจำ", 1, true) ~= nil, true)
 \tcheck("ไม่ถูกเตะ", fakePlayer.__kicked == nil, true)
+end
+
+print("\\n━━ debugSimulateReceipt (UI-5): ProcessReceipt จำลอง — idempotency + ให้ของถูกชนิด ━━")
+do
+\tlocal player, data = freshPlayer("Buyer1")
+
+\t-- ไข่ตำนาน: ซื้อครั้งแรก → ได้ของ + PurchaseGranted
+\ttable.clear(data.heldEggs.items)
+\tlocal decision1 = EggService.debugSimulateReceipt(player, "legendary_egg", "receipt-egg-1")
+\tcheck("ซื้อไข่ตำนานครั้งแรก → PurchaseGranted", decision1, "PurchaseGranted")
+\tcheck("ได้ไข่ 1 ฟองในกระเป๋า", #data.heldEggs.items, 1)
+\tcheck("  เป็นไข่ตำนานจริง", data.heldEggs.items[1].eggId, "egg_legendary")
+
+\t-- เรียกซ้ำด้วย purchaseId เดิม (จำลอง Roblox retry ใบเสร็จเดิม) → ต้องไม่ได้ไข่เพิ่ม
+\tlocal decision1Again = EggService.debugSimulateReceipt(player, "legendary_egg", "receipt-egg-1")
+\tcheck("ยิงซ้ำด้วย purchaseId เดิม → ยัง PurchaseGranted", decision1Again, "PurchaseGranted")
+\tcheck("  แต่ไม่ได้ไข่เพิ่ม (idempotent จริง)", #data.heldEggs.items, 1)
+
+\t-- purchaseId ใหม่ → ให้ของอีกครั้งได้ตามปกติ
+\tEggService.debugSimulateReceipt(player, "legendary_egg", "receipt-egg-2")
+\tcheck("purchaseId ใหม่ → ได้ไข่เพิ่มฟองที่สอง", #data.heldEggs.items, 2)
+
+\t-- ทะลุเพดานดาเมจ/ความเร็ว — เพิ่มขั้นสะสม ไม่แตะ damageLevel/speedLevel (แทร็กเงินในเกม)
+\tdata.robuxDamageBonus = 0
+\tdata.robuxSpeedBonus = 0
+\tdata.damageLevel = 0
+\tdata.speedLevel = 0
+\tEggService.debugSimulateReceipt(player, "robux_damage_step", "receipt-dmg-1")
+\tcheck("ซื้อทะลุเพดานดาเมจ → robuxDamageBonus +1", data.robuxDamageBonus, 1)
+\tcheck("  ไม่แตะ damageLevel (แทร็กเงินในเกม)", data.damageLevel, 0)
+\tEggService.debugSimulateReceipt(player, "robux_speed_step", "receipt-spd-1")
+\tcheck("ซื้อทะลุเพดานความเร็ว → robuxSpeedBonus +1", data.robuxSpeedBonus, 1)
+\tcheck("  ไม่แตะ speedLevel (แทร็กเงินในเกม)", data.speedLevel, 0)
+\t-- ซ้ำ purchaseId เดิม → ไม่เพิ่มซ้ำ
+\tEggService.debugSimulateReceipt(player, "robux_damage_step", "receipt-dmg-1")
+\tcheck("ยิงซ้ำ purchaseId เดิม → ไม่เพิ่มขั้นซ้ำ", data.robuxDamageBonus, 1)
+
+\t-- เร่งฟักไข่ทั้งหมด — วางไข่ 2 ฟองในสวนฟักไว้ก่อน (ครบเวลาอีก 999999 วิ)
+\tlocal farFuture = os.time() + 999999
+\tdata.hatching[1] = { eggId = "egg_stage1", weight = 100, charId = "monkey", startedAt = os.time(), hatchAt = farFuture }
+\tdata.hatching[2] = { eggId = "egg_stage1", weight = 200, charId = "monkey", startedAt = os.time(), hatchAt = farFuture }
+\tlocal penBefore = #data.mothersInPen + #data.mothersInBag
+\tEggService.debugSimulateReceipt(player, "robux_hatch_rush", "receipt-rush-1")
+\tcheck("เร่งฟักไข่ทั้งหมด → ทั้งสองช่องฟักเสร็จทันที (false)", data.hatching[1] == false and data.hatching[2] == false, true)
+\tcheck("  ได้แม่เพิ่ม 2 ตัว (คอก+กระเป๋ารวมกัน)", #data.mothersInPen + #data.mothersInBag - penBefore, 2)
+
+\t-- ไม่มีไข่กำลังฟักเลย → ยังคืน PurchaseGranted (ให้ของสำเร็จแล้ว แค่ "เร่ง 0 ฟอง" ไม่ใช่ error)
+\tlocal decisionEmptyRush = EggService.debugSimulateReceipt(player, "robux_hatch_rush", "receipt-rush-2")
+\tcheck("ไม่มีไข่ให้เร่ง → ยัง PurchaseGranted (ไม่ error)", decisionEmptyRush, "PurchaseGranted")
+
+\t-- ผู้เล่นไม่ได้ออนไลน์อยู่ (ไม่มีในแคช) → NotProcessedYet เสมอ ไม่ error
+\tlocal offlinePlayer = { UserId = 888888888, Name = "Offline" }
+\tlocal decisionOffline = EggService.debugSimulateReceipt(offlinePlayer, "legendary_egg", "receipt-offline-1")
+\tcheck("ผู้เล่นออฟไลน์ → NotProcessedYet", decisionOffline, "NotProcessedYet")
+
+\t-- productKey ที่ไม่รู้จัก → ข้อความเตือน ไม่ error ไม่ throw
+\tlocal decisionUnknown = EggService.debugSimulateReceipt(player, "not_a_real_product", "receipt-x")
+\tcheck("productKey ไม่รู้จัก → ข้อความเตือน ไม่ throw", string.find(decisionUnknown, "ไม่รู้จัก", 1, true) ~= nil, true)
+
+\t-- processedPurchaseIds เก็บครบทุกใบเสร็จที่ให้ของสำเร็จจริง (ไม่ซ้ำ)
+\tlocal ids = {}
+\tfor _, id in data.processedPurchaseIds do
+\t\tids[id] = true
+\tend
+\tcheck("processedPurchaseIds เก็บทุกใบเสร็จที่ให้ของสำเร็จ",
+\t\tids["receipt-egg-1"] and ids["receipt-egg-2"] and ids["receipt-dmg-1"] and ids["receipt-spd-1"]
+\t\t\tand ids["receipt-rush-1"] and ids["receipt-rush-2"], true)
 end
 
 print(string.format("\\n=== ผ่าน %d / ตก %d ===", passCount, failCount))

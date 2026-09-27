@@ -503,9 +503,12 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	local roomHalfZ = MAP.BossRoom.Size.Y / 2
 	local roomHalfX = MAP.BossRoom.Size.X / 2
 
+	-- ⚠️ UI-2: กำแพงข้างเริ่มเสมอกำแพงใสฝั่งตะวันออก (Config.getLaneWallStartX) ไม่ใช่ต้นเลน —
+	-- เดิมยื่นเข้าลานเกินแนวกำแพงใสทั้งสองฝั่งปากเลน · พื้นเลน/จุดปล่อยทหารยังเริ่มที่ต้นเลนเหมือนเดิม
+	local wallStartX = Config.getLaneWallStartX()
 	for _, sign in { 1, -1 } do
 		local side = if sign == 1 then "North" else "South"
-		local cursor = startX
+		local cursor = wallStartX
 
 		for stage = 1, Config.Balance.Stage.COUNT do
 			local room = Config.getBossNestCenter(stage)

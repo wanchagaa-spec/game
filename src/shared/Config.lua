@@ -430,6 +430,9 @@ Config.MapDimensions = {
 		StallCount = 2,
 		StallHeight = 8, -- ความสูงหลังคาแผง (แค่ฉาก)
 		Gap = 20, -- ระยะจากขอบซ้ายของลานคอก ถึงแนวแผง
+		-- ⚠️ UI-2 (ผลทดสอบ Studio): แผงวาง**ติดกันกลางผนังด้านหลัง** (Z = 0) ไม่ใช่ขนาบทางเดินกลางไปคนละฝั่งแล้ว
+		-- ช่องเดินระหว่างสองแผง — ต้องไม่แคบกว่าประตูคอก (validate() บังคับ)
+		StallGap = 10,
 	},
 
 	-- ══ ป้ายบนแมพ (UI-2) ══ แผ่นไม้บนเสา เดินเข้าใกล้แล้วกด E (ProximityPrompt)
@@ -2641,7 +2644,7 @@ function Config.getBossEggSpot(stage: number, index: number): Vector3
 	)
 end
 
--- ══ ร้านค้า ══ แผงเล็ก ๆ วางเรียงที่ขอบซ้ายของลานคอก ขนาบทางเดินกลาง
+-- ══ ร้านค้า ══ แผงเล็ก ๆ วางเรียงติดกันที่ขอบซ้ายของลานคอก ตรงกลางผนังด้านหลัง (UI-2)
 -- กึ่งกลางแนวแผง (ใช้เป็น "ตำแหน่งร้าน" ตอนวัดระยะ)
 function Config.getShopCenter(): Vector3
 	local map = Config.MapDimensions
@@ -2649,14 +2652,15 @@ function Config.getShopCenter(): Vector3
 	return vec3(x, 0, 0)
 end
 
--- กึ่งกลางแผงที่ i (1..SHOP_STALL_COUNT) — กระจายตามแกน Z ขนาบทางเดิน
+-- กึ่งกลางแผงที่ i (1..SHOP_STALL_COUNT) — เรียงตามแกน Z ติดกัน สมมาตรรอบ Z = 0
 function Config.getShopStallCenter(index: number): Vector3
 	local map = Config.MapDimensions
 	local center = Config.getShopCenter()
 	local count = map.Shop.StallCount
-	-- วางสมมาตรรอบ Z = 0 ให้ผู้เล่นเดินผ่านตรงกลางได้
-	local spacing = map.Pen.RowGap / 2 + map.Shop.StallSize.Y / 2
-	local offset = (index - (count + 1) / 2) * spacing * 2
+	-- ⚠️ UI-2: เรียงติดกันกลางผนังด้านหลัง สมมาตรรอบ Z = 0 · เว้นช่องเดิน Shop.StallGap ระหว่างแผง
+	-- (เดิมขนาบทางเดินกลาง Z = ±51 — ผลทดสอบ Studio: แยกไปคนละฝั่ง ไกลกันเกิน)
+	local spacing = map.Shop.StallSize.Y + map.Shop.StallGap -- กึ่งกลางแผงถึงกึ่งกลางแผงถัดไป
+	local offset = (index - (count + 1) / 2) * spacing
 	return vec3(center.X, center.Y, offset)
 end
 
@@ -2688,6 +2692,15 @@ end
 -- Y ของพื้นคอก (ดู Config.getPenRestingY)
 function Config.getEastBoundaryX(): number
 	return Config.getPlazaMaxX() + Config.MapDimensions.Shop.Gap
+end
+
+-- ══ กำแพงข้างเลน: จุดเริ่ม ══ เสมอผิวด้านในของกำแพงใสฝั่งตะวันออก (UI-2 · ผลทดสอบ Studio)
+-- ⚠️ เดิมเริ่มที่ต้นเลน (getLaneStartX = ขอบคอกคอลัมน์ขวา X 140) → ยื่นเข้าลานเกินแนวกำแพงใส 17.5 studs
+--   ทั้งสองฝั่งปากเลน (ข้างคอก 3 และคอก 6)
+-- ⚠️ ขยับแค่ "ตัวกำแพงข้างเลน" — ต้นเลน · พื้นเลน · จุดปล่อยทหาร · ทางเดินทหาร · ความยาวเลน · ระยะการรบ
+--   ยังอ่าน getLaneStartX เหมือนเดิม ไม่มีอะไรเปลี่ยน · จุดปล่อยทหารจึงอยู่ตรงปากเลน ก่อนถึงกำแพงข้าง
+function Config.getLaneWallStartX(): number
+	return Config.getEastBoundaryX() - Config.MapDimensions.Boundary.Thickness / 2
 end
 
 -- ขอบพื้นจริงฝั่งตะวันออก — แถบหญ้าที่มองเห็นได้แต่เดินไปไม่ถึง เท่ากับสามด้านที่เหลือ
@@ -3647,6 +3660,22 @@ function Config.validate()
 			`Config: แผงร้าน {stallIndex} อยู่นอกกำแพงใสตามแกน Z`
 		)
 	end
+
+	-- ══ แผงร้าน (UI-2): ติดกันกลางผนังหลัง เว้นช่องเดินได้ ══
+	assert(
+		dim.Shop.StallGap >= dim.Pen.GateWidth,
+		`Config: Shop.StallGap = {dim.Shop.StallGap} แคบกว่าประตูคอก ({dim.Pen.GateWidth}) — เดินผ่านระหว่างแผงไม่สะดวก`
+	)
+	-- ══ กำแพงข้างเลน (UI-2): เริ่มเสมอกำแพงใสฝั่งตะวันออก ไม่ยื่นเข้าลาน ══
+	local laneWallStart = Config.getLaneWallStartX()
+	assert(
+		laneWallStart >= Config.getLaneStartX(),
+		"Config: กำแพงข้างเลนเริ่มก่อนต้นเลน — ยื่นเข้าลานคอก"
+	)
+	assert(
+		laneWallStart < Config.getBossNestCenter(1).X - dim.BossRoom.Size.X / 2,
+		"Config: กำแพงข้างเลนเริ่มเลยห้องบอสด่าน 1 — ช่วงก่อนห้องไม่มีกำแพง"
+	)
 
 	-- ══ ป้ายบนแมพ (UI-2) ══ ต้องไม่ขวางประตู · ไม่ทับป้ายชื่อ · ไม่ล้ำไปแปลงข้าง ๆ · อยู่ในกำแพงใส
 	local sign = dim.MapSign

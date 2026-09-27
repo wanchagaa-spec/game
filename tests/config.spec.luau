@@ -838,14 +838,23 @@ return function(t, Config)
 	check("แผงร้านค้าอยู่ซ้ายลานคอก", shopRight < Config.getPenYardLeftX(), true)
 	check("เลนรบอยู่ขวาลานคอก", Config.getLaneStartX() >= Config.getPenYardRightX(), true)
 	check("แผงร้านมีมากกว่าหนึ่งแผง", map.Shop.StallCount >= 2, true)
-	local stallGap = true
-	for i = 1, map.Shop.StallCount do
-		-- แผงต้องขนาบทางเดิน ไม่ใช่ตั้งขวางตรงกลาง
-		if math.abs(Config.getShopStallCenter(i).Z) < map.Pen.RowGap / 2 then
-			stallGap = false
-		end
-	end
-	check("แผงร้านไม่ตั้งขวางทางเดินกลาง", stallGap, true)
+	-- ⚠️ UI-2 (ผลทดสอบ Studio): แผงวางติดกันกลางผนังด้านหลัง เว้นช่องเดินระหว่างแผง
+	-- (เดิมบังคับให้ขนาบทางเดินกลางไปคนละฝั่ง — ผู้ใช้เปลี่ยนแล้ว)
+	local s1, s2 = Config.getShopStallCenter(1), Config.getShopStallCenter(2)
+	check("แผงร้านสมมาตรรอบกลางผนังหลัง (Z = 0)", math.abs(s1.Z + s2.Z) < 1e-6, true)
+	check("ร้านขายแม่ (แผง 1) อยู่ฝั่ง −Z · ซื้ออาวุธ (แผง 2) ฝั่ง +Z", s1.Z < 0 and s2.Z > 0, true)
+	local walkGap = math.abs(s2.Z - s1.Z) - map.Shop.StallSize.Y
+	check("ช่องเดินระหว่างแผง = Shop.StallGap", math.abs(walkGap - map.Shop.StallGap) < 1e-6, true)
+	check("ช่องเดินกว้างไม่น้อยกว่าประตูคอก", walkGap >= map.Pen.GateWidth, true)
+	check("แผงอยู่ในแนวทางเดินกลาง (กลางผนังหลัง)", math.abs(s1.Z) + map.Shop.StallSize.Y / 2 < map.Pen.RowGap / 2, true)
+	check("แผงไม่บังลานคอก (อยู่ซ้ายลานคอก)", s1.X + map.Shop.StallSize.X / 2 < Config.getPenYardLeftX(), true)
+
+	-- ⚠️ UI-2: กำแพงข้างเลนเริ่มเสมอกำแพงใสฝั่งตะวันออก ไม่ยื่นเข้าลาน · ต้นเลน/ระยะการรบไม่เปลี่ยน
+	local wallStart = Config.getLaneWallStartX()
+	check("กำแพงข้างเลนเริ่ม = ผิวด้านในกำแพงใสฝั่งตะวันออก",
+		wallStart, Config.getEastBoundaryX() - map.Boundary.Thickness / 2)
+	check("กำแพงข้างเลนไม่ยื่นเข้าลาน (เริ่มหลังต้นเลน)", wallStart >= Config.getLaneStartX(), true)
+	check("ต้นเลนยังอยู่ที่ขอบลานคอก (ระยะการรบไม่เปลี่ยน)", Config.getLaneStartX(), Config.getPenYardRightX())
 
 	-- คอกทุกแปลงต้องไม่ทับกัน และอยู่คนละฝั่งของทางเดินตามจำนวนแถว
 	local overlap, rowsSeen = false, {}

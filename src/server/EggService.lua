@@ -50,6 +50,8 @@ type HatchSlot = PlayerData.HatchSlot
 -- ⚠️ โครงของตัวแม่ย้ายไปอยู่ที่ PlayerData แล้ว (เพราะมันเป็นส่วนหนึ่งของข้อมูลที่เซฟ)
 -- ประกาศ export ต่อไว้เพื่อให้โมดูลที่เคย require ชนิดนี้จาก EggService ใช้ได้เหมือนเดิม
 export type Mother = PlayerData.Mother
+-- ผลของ "สวมใส่ที่ดีที่สุด" (autoFillPen) — ไว้ให้ handler ประกอบข้อความตอบกลับ
+export type EquipBestSummary = { movedIn: number, movedOut: number }
 
 -- รูปทรงของ 1 ช่องสวนฟักที่ส่งไปให้ client
 type SlotView = {
@@ -171,7 +173,7 @@ end
 -- ประกอบข้อมูลที่ส่งให้ client
 --------------------------------------------------------------------------------
 
-local function describeMother(mother: Mother)
+local function describeMother(mother: Mother, wallProgress: number)
 	local character = Config.getCharacter(mother.charId)
 	return {
 		uid = mother.uid,
@@ -181,6 +183,10 @@ local function describeMother(mother: Mother)
 		weight = mother.weight,
 		weightText = Config.formatWeight(mother.weight),
 		locked = mother.locked,
+		-- UI-1: ค่าแสดงผลเท่านั้น (แผงเท้า/หน้ารายละเอียดแม่) — สูตรเดียวกับที่ ProductionService จ่ายจริง
+		-- ⚠️ คิดที่ server เพราะรวมบัฟสถานะ (statuses ไม่ได้ส่งให้ client) · แม่ในกระเป๋าไม่ได้ผลิตจริง
+		-- ค่านี้คือ "ถ้าเข้าคอกจะได้เท่าไหร่"
+		coinsPerMinute = Config.getCoinsPerMinute(mother.weight, wallProgress, mother.statuses),
 	}
 end
 
@@ -241,12 +247,12 @@ local function buildSyncPayload(data: Data)
 
 	local pen = table.create(#data.mothersInPen)
 	for _, mother in data.mothersInPen do
-		table.insert(pen, describeMother(mother))
+		table.insert(pen, describeMother(mother, data.wallProgress))
 	end
 
 	local bag = table.create(#data.mothersInBag)
 	for _, mother in data.mothersInBag do
-		table.insert(bag, describeMother(mother))
+		table.insert(bag, describeMother(mother, data.wallProgress))
 	end
 
 	-- ⚠️ กองลูก — จำนวน stack key ยังเล็กมาก (สถานะยังไม่เปิดใช้จริง) ส่งทั้งหมดได้
@@ -631,54 +637,116 @@ end
 -- จัดแม่เข้าคอกอัตโนมัติ — ฟีเจอร์ถาวร (ไม่ใช่ TEMP)
 --------------------------------------------------------------------------------
 
--- ⚠️ เติมเฉพาะ "ช่องว่างที่เหลือ" เท่านั้น — ห้ามเตะแม่ที่อยู่ในคอกอยู่แล้วออกไม่ว่ากรณีไหน
--- (โค้ดนี้ไม่มี path ไหนแตะ data.mothersInPen นอกจากการ table.insert เพิ่มเข้าไปเลย)
--- เกณฑ์ "ดีที่สุด" = รายได้เงิน/นาทีสูงสุด ใช้ Config.getCoinsPerMinute() สูตรเดียวกับที่ทั้งเกม
--- ใช้จริงตรง ๆ (ไม่ใช้น้ำหนักเทียบตรง ๆ) เพราะสถานะ (Phase 7 — ยังไม่เปิดใช้) มีผลต่อรายได้ด้วย
--- แต่ไม่มีผลต่อน้ำหนัก ใช้สูตรจริงเผื่อผลลัพธ์ไม่เพี้ยนตอนสถานะเปิดใช้งานจริงทีหลัง
-function EggService.autoFillPen(player: Player): (boolean, string?)
-	local data = dataOf(player)
-	if not data then
-		return false, "ยังไม่มีข้อมูลผู้เล่น"
+-- "สวมใส่ที่ดีที่สุด" (UI-1 · ผู้ใช้อนุมัติแล้ว) — คอกต้องจบด้วยแม่ N ตัวที่เก่งที่สุด (N = ความจุคอก)
+-- จากแม่ทั้งหมดในคอก + กระเป๋า · ตัวอ่อนกว่าในคอกถูกสลับออกไปกระเป๋า ตัวเก่งกว่าในกระเป๋าเข้ามาแทน
+-- (เดิมเติมแค่ช่องว่าง ไม่เคยเอาตัวในคอกออก)
+-- เกณฑ์ "เก่ง" = รายได้เงิน/นาที Config.getCoinsPerMinute() สูตรเดียวกับที่จ่ายจริง (รวมบัฟสถานะ Phase 7)
+-- ⚠️ เสมอกัน → ตัวที่อยู่ในคอกอยู่แล้วชนะ (ไม่สลับเปล่า ๆ) แล้วค่อยเรียงด้วย uid → กดซ้ำรอบสองไม่มีอะไรเปลี่ยน
+-- ⚠️ แม่ที่ล็อกก็ถูกสลับได้ (ล็อกกันแค่ขาย/ส่งไปรบ ไม่กันย้ายคอก — Phase 4B) · แม่ใน battleRoster ไม่อยู่ในการพิจารณา
+-- คืนรายชื่อ uid ที่ต้องย้าย: toPen (จากกระเป๋า เก่งสุดก่อน) · toBag (จากคอก อ่อนสุดก่อน)
+function EggService.planEquipBest(data: Data): ({ string }, { string })
+	local capacity = Config.getPenCapacity(data.penLevel)
+	local entries: { { mother: Mother, inPen: boolean, coins: number } } = {}
+	for _, mother in data.mothersInPen do
+		table.insert(entries, {
+			mother = mother,
+			inPen = true,
+			coins = Config.getCoinsPerMinute(mother.weight, data.wallProgress, mother.statuses),
+		})
 	end
-
-	local freeSlots = Config.getPenCapacity(data.penLevel) - #data.mothersInPen
-	if freeSlots <= 0 then
-		return false, "คอกเต็มแล้ว"
+	for _, mother in data.mothersInBag do
+		table.insert(entries, {
+			mother = mother,
+			inPen = false,
+			coins = Config.getCoinsPerMinute(mother.weight, data.wallProgress, mother.statuses),
+		})
 	end
-	if #data.mothersInBag == 0 then
-		return false, "ไม่มีแม่ให้จัด"
-	end
-
-	-- เรียงกระเป๋าจากรายได้/นาทีมากไปน้อย แล้วหยิบจากหัวลิสต์ไปเรื่อย ๆ จนเต็มช่องว่างหรือกระเป๋าหมด
-	table.sort(data.mothersInBag, function(a, b)
-		return Config.getCoinsPerMinute(a.weight, data.wallProgress, a.statuses)
-			> Config.getCoinsPerMinute(b.weight, data.wallProgress, b.statuses)
+	table.sort(entries, function(a, b)
+		if a.coins ~= b.coins then
+			return a.coins > b.coins
+		end
+		if a.inPen ~= b.inPen then
+			return a.inPen
+		end
+		return a.mother.uid < b.mother.uid
 	end)
 
-	local moved = 0
-	while moved < freeSlots and #data.mothersInBag > 0 do
-		local mother = table.remove(data.mothersInBag, 1)
-		if not mother then
-			-- ⚠️ เข้าไม่ถึงจริงเพราะเช็ค #data.mothersInBag > 0 ไว้แล้วในเงื่อนไข while
-			-- แต่ table.remove() คืน T? เสมอตามชนิดของมัน ต้องเช็คให้ type checker ยอมผ่าน
-			break
+	local toPen: { string } = {}
+	local toBag: { string } = {}
+	for rank, entry in entries do
+		if rank <= capacity and not entry.inPen then
+			table.insert(toPen, entry.mother.uid)
 		end
-		-- เริ่มนับเวลาผลิตใหม่ตั้งแต่วินาทีที่เข้าคอก (เหมือน moveMother ตอนย้ายเข้าคอก)
-		mother.lastProducedAt = os.time()
-		table.insert(data.mothersInPen, mother)
-		moved += 1
+	end
+	for rank = #entries, capacity + 1, -1 do
+		local entry = entries[rank]
+		if entry.inPen then
+			table.insert(toBag, entry.mother.uid)
+		end
+	end
+	return toPen, toBag
+end
+
+function EggService.autoFillPen(player: Player): (boolean, string?, EquipBestSummary?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น", nil
+	end
+	if #data.mothersInPen + #data.mothersInBag == 0 then
+		return false, "ไม่มีแม่ให้จัด", nil
 	end
 
-	-- ⚠️ เหตุผลเดียวกับ moveMother — เปิดที่ว่างในกระเป๋าแล้ว ลองย้ายแม่ที่ค้างในสวนฟักมาเข้าทันที
-	-- เผื่อพอดีมีของรออยู่ (ข้อ D — data-schema §13)
-	processReadyHatchSlots(player, data, os.time())
+	local toPen, toBag = EggService.planEquipBest(data)
+	local capacity = Config.getPenCapacity(data.penLevel)
+	local now = os.time()
+	local movedIn, movedOut = 0, 0
 
-	PenService.refreshMothers(player, data.mothersInPen)
+	for _, inUid in toPen do
+		if #data.mothersInPen < capacity then
+			-- ช่องว่างในคอก: ย้ายเข้าตรง ๆ (กระเป๋าลดลง ไม่มีทางล้น)
+			local incoming = takeMother(data.mothersInBag, inUid)
+			if not incoming then
+				break
+			end
+			incoming.lastProducedAt = now
+			table.insert(data.mothersInPen, incoming)
+			movedIn += 1
+		else
+			-- คอกเต็ม: สลับทีละคู่ — ⚠️ ดึงตัวเก่งออกจากกระเป๋า**ก่อน** แล้วค่อยใส่ตัวอ่อนกลับ
+			-- จำนวนแม่ในกระเป๋าจึงไม่เกินความจุแม้แต่จังหวะเดียว (กระเป๋าเต็มพอดีก็สลับได้)
+			local outUid = toBag[movedOut + 1]
+			if not outUid then
+				break
+			end
+			local incoming = takeMother(data.mothersInBag, inUid)
+			if not incoming then
+				break
+			end
+			local outgoing = takeMother(data.mothersInPen, outUid)
+			if not outgoing then
+				table.insert(data.mothersInBag, incoming) -- คืนที่เดิม (เข้าไม่ถึงจริง — plan มาจากข้อมูลชุดเดียวกัน)
+				break
+			end
+			-- ⚠️ settle ผลผลิตค้างก่อนออกจากคอกเสมอ (เหตุผลเดียวกับ moveMother)
+			ProductionService.settleMother(data, outgoing, true)
+			outgoing.lastProducedAt = nil
+			incoming.lastProducedAt = now
+			table.insert(data.mothersInPen, incoming)
+			table.insert(data.mothersInBag, outgoing)
+			movedIn += 1
+			movedOut += 1
+		end
+	end
+
+	-- ⚠️ เหตุผลเดียวกับ moveMother — ช่องว่างในกระเป๋าอาจเปิด ลองย้ายแม่ที่ค้างในสวนฟักมาเข้าทันที (ข้อ D)
+	if movedIn > 0 then
+		processReadyHatchSlots(player, data, now)
+		PenService.refreshMothers(player, data.mothersInPen)
+	end
 	EggService.sync(player)
 
-	print(`[EggService] {player.Name} จัดแม่เข้าคอกอัตโนมัติ {moved} ตัว`)
-	return true, nil
+	print(`[EggService] {player.Name} สวมใส่ที่ดีที่สุด: เข้าคอก {movedIn} ตัว · ออกไปกระเป๋า {movedOut} ตัว`)
+	return true, nil, { movedIn = movedIn, movedOut = movedOut }
 end
 
 --------------------------------------------------------------------------------
@@ -1572,15 +1640,20 @@ function EggService.start()
 	end)
 
 	autoFillPenRequest.OnServerEvent:Connect(function(player)
-		local data = dataOf(player)
-		local penBefore = if data then #data.mothersInPen else 0
-		local ok, reason = EggService.autoFillPen(player)
-		if not ok then
-			print(`[EggService] จัดแม่เข้าคอกอัตโนมัติของ {player.Name} ไม่ทำอะไร: {reason}`)
-			reportResult(player, false, reason or "จัดแม่เข้าคอกไม่สำเร็จ")
+		local ok, reason, summary = EggService.autoFillPen(player)
+		if not ok or not summary then
+			print(`[EggService] สวมใส่ที่ดีที่สุดของ {player.Name} ไม่ทำอะไร: {reason}`)
+			reportResult(player, false, reason or "สวมใส่ที่ดีที่สุดไม่สำเร็จ")
+		elseif summary.movedIn == 0 then
+			reportResult(player, true, "คอกมีแม่ที่ดีที่สุดครบแล้ว ไม่มีอะไรเปลี่ยน")
+		elseif summary.movedOut == 0 then
+			reportResult(player, true, `สวมใส่ที่ดีที่สุดแล้ว: เข้าคอก +{summary.movedIn} ตัว`)
 		else
-			local penAfter = if data then #data.mothersInPen else penBefore
-			reportResult(player, true, `จัดแม่เข้าคอกสำเร็จ +{penAfter - penBefore} ตัว`)
+			reportResult(
+				player,
+				true,
+				`สวมใส่ที่ดีที่สุดแล้ว: สลับเข้า {summary.movedIn} ตัว · ออกไปกระเป๋า {summary.movedOut} ตัว`
+			)
 		end
 	end)
 

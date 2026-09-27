@@ -135,6 +135,8 @@ Remotes.setupServer()
 DataService.init()
 MapBuilder.build()
 PenService.buildWorld()
+-- UI-1: โหลดโมเดลตัวละครล่วงหน้า (เบื้องหลัง) ให้รูปในกระเป๋าฝั่ง client มีโมเดลใช้ตั้งแต่ต้น
+PenService.preloadMeshTemplates()
 EggService.start()
 
 -- ⚠️ Phase 2B-1: ผลิตลูก + ผลิตเงินจากแม่ในคอก ทำงานเป็น periodic tick แยกจากลูปของ

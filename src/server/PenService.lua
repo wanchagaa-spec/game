@@ -329,6 +329,8 @@ local lastMothersByUserId: { [number]: { any } } = {}
 
 -- โหลดนานเกินนี้ = warn ให้รู้ตัว (LoadAsset ไม่มี timeout ในตัว และเคยค้างเงียบ ๆ ไม่ error เลยจริง)
 local MESH_LOAD_SLOW_WARN_SECONDS = 15
+-- Folder ใน ReplicatedStorage ที่เก็บสำเนาโมเดลให้ client วาดรูป (UI-1) — ชื่อต้องตรงกับ UiKit.lua ฝั่ง client
+local PORTRAIT_TEMPLATE_FOLDER = "MotherModelTemplates"
 
 -- ดึง Model asset ที่ publish ขึ้น Roblox ไว้แล้ว (ดู Character.modelAssetId) — **yield** (ยิงเน็ต)
 -- เรียกจาก getMeshTemplate ในเธรดเบื้องหลังเท่านั้น ห้ามเรียกตรงจาก refreshMothers
@@ -397,6 +399,26 @@ local function redrawPensUsing(assetId: number)
 	end
 end
 
+-- UI-1: ส่งสำเนาต้นแบบไปไว้ใน ReplicatedStorage ให้ client เอาไปวาดรูปใน ViewportFrame (กระเป๋า/แผงเท้า)
+-- ⚠️ client โหลด asset เองไม่ได้ (InsertService:LoadAsset ใช้ได้เฉพาะ server) · ชื่อลูก = tostring(assetId)
+-- เป็นภาพประกอบล้วน ๆ ไม่มีผลกับเกม · ไม่มีสำเนา (ยังโหลดไม่เสร็จ/ไม่มีโมเดล) = client วาดกล่องสีแทน
+local function publishPortraitTemplate(assetId: number, model: Model)
+	local folder = ReplicatedStorage:FindFirstChild(PORTRAIT_TEMPLATE_FOLDER)
+	if not folder then
+		local created = Instance.new("Folder")
+		created.Name = PORTRAIT_TEMPLATE_FOLDER
+		created.Parent = ReplicatedStorage
+		folder = created
+	end
+	local name = tostring(assetId)
+	if (folder :: Instance):FindFirstChild(name) then
+		return
+	end
+	local copy = model:Clone()
+	copy.Name = name
+	copy.Parent = folder
+end
+
 -- ⚠️ **ไม่ yield เด็ดขาด** — ครั้งแรกเริ่มโหลดเบื้องหลังแล้วคืน nil ทันที (ผู้เรียกวาดกล่องสีไปก่อน)
 -- โหลดเสร็จเมื่อไหร่ค่อยวาดคอกใหม่เองผ่าน redrawPensUsing
 -- เหตุผล: LoadAsset เคย**ค้างไม่ return เลย**ในเซิร์ฟจริง ถ้า refreshMothers รอ LoadAsset
@@ -430,6 +452,7 @@ local function getMeshTemplate(assetId: number): Model?
 		if model then
 			meshTemplates[assetId] = model
 			meshTemplateHeights[assetId] = nativeHeight
+			publishPortraitTemplate(assetId, model)
 			print(`[PenService] โหลด modelAssetId {assetId} สำเร็จ — วาดคอกใหม่`)
 			redrawPensUsing(assetId)
 		else
@@ -437,6 +460,18 @@ local function getMeshTemplate(assetId: number): Model?
 		end
 	end)
 	return nil
+end
+
+-- UI-1: เริ่มโหลดโมเดลของทุกตัวละครที่มี modelAssetId ตั้งแต่เซิร์ฟบูต (เบื้องหลัง ไม่ yield)
+-- เดิมโหลดตอนมีแม่ตัวนั้นเข้าคอกครั้งแรกเท่านั้น → แม่ที่อยู่แค่ในกระเป๋าจะไม่มีรูปในกระเป๋าเลย
+-- เรียกจาก Main.server.lua ต่อจาก buildWorld()
+function PenService.preloadMeshTemplates()
+	for _, character in Config.Characters do
+		local assetId = character.modelAssetId
+		if character.enabled and assetId then
+			getMeshTemplate(assetId)
+		end
+	end
 end
 
 -- clone จากต้นแบบแล้วสเกลตามน้ำหนักแม่ — ไม่ yield

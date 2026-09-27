@@ -718,6 +718,125 @@ do
 \tcheck("กระเป๋าว่างเปล่าหลังจากนั้น (ที่ว่างเหลือเยอะกว่าที่มี)", #data.mothersInBag, 0)
 end
 
+-- ⚠️ UI-1: "สวมใส่ที่ดีที่สุด" สลับตัวอ่อนในคอกออกได้แล้ว (เดิมเติมแค่ช่องว่าง)
+local function uidSet(list)
+\tlocal set = {}
+\tfor _, m in list do
+\t\tset[m.uid] = (set[m.uid] or 0) + 1
+\tend
+\treturn set
+end
+
+local function allUnique(data)
+\tlocal seen = {}
+\tfor _, list in { data.mothersInPen, data.mothersInBag, data.battleRoster } do
+\t\tfor _, m in list do
+\t\t\tif seen[m.uid] then
+\t\t\t\treturn false
+\t\t\tend
+\t\t\tseen[m.uid] = true
+\t\tend
+\tend
+\treturn true
+end
+
+print("\\n━━ สวมใส่ที่ดีที่สุด: คอกเต็มด้วยตัวอ่อน → สลับตัวเก่งจากกระเป๋าเข้า ตัวอ่อนออก ━━")
+do
+\tlocal player, data = freshPlayer("EquipBest1")
+\ttable.clear(data.mothersInPen)
+\ttable.clear(data.mothersInBag)
+\tlocal penCap = Config.getPenCapacity(data.penLevel)
+\tfor i = 1, penCap do
+\t\ttable.insert(data.mothersInPen, makeMother(`pen-weak-{i}`, "monkey", 100, { lastProducedAt = os.time() }))
+\tend
+\ttable.insert(data.mothersInBag, makeMother("bag-strong-1", "monkey", 1000000))
+\ttable.insert(data.mothersInBag, makeMother("bag-strong-2", "pig", 50000))
+\ttable.insert(data.mothersInBag, makeMother("bag-weakest", "fish", 50))
+\tlocal total = #data.mothersInPen + #data.mothersInBag
+
+\tlocal ok, reason, summary = EggService.autoFillPen(player)
+\tcheck("สำเร็จ", ok)
+\tcheck("  สลับเข้า 2 ตัว", summary and summary.movedIn, 2)
+\tcheck("  สลับออก 2 ตัว", summary and summary.movedOut, 2)
+\tcheck("คอกยังเต็มพอดี", #data.mothersInPen, penCap)
+\tlocal pen = uidSet(data.mothersInPen)
+\tcheck("  ตัวเก่งสุดเข้าคอก", pen["bag-strong-1"], 1)
+\tcheck("  ตัวเก่งอันดับสองเข้าคอก", pen["bag-strong-2"], 1)
+\tcheck("  ตัวอ่อนสุดในกระเป๋าไม่ถูกดึงเข้า", pen["bag-weakest"] == nil, true)
+\tlocal bag = uidSet(data.mothersInBag)
+\tcheck(`  ตัวอ่อนในคอก 2 ตัวท้าย (เรียง uid) ออกไปกระเป๋า`, bag[`pen-weak-{penCap}`] == 1 and bag[`pen-weak-{penCap - 1}`] == 1, true)
+\tcheck("ไม่มีแม่หาย (จำนวนรวมเท่าเดิม)", #data.mothersInPen + #data.mothersInBag, total)
+\tcheck("ไม่มีแม่ซ้ำ", allUnique(data), true)
+\tcheck("แม่ที่ออกจากคอกไม่มีเวลาผลิตค้าง (settle แล้ว)", data.mothersInBag[#data.mothersInBag].lastProducedAt == nil, true)
+\tlocal strong = nil
+\tfor _, m in data.mothersInPen do
+\t\tif m.uid == "bag-strong-1" then
+\t\t\tstrong = m
+\t\tend
+\tend
+\tcheck("แม่ที่เข้าคอกเริ่มนับเวลาผลิต", strong ~= nil and type(strong.lastProducedAt) == "number", true)
+\tlocal result = firedTo(player, ACTION_RESULT)
+\tcheck("ActionResult ไม่ได้ยิงจากการเรียกตรง (ยิงเฉพาะผ่าน remote)", result == nil or result[2] ~= nil, true)
+
+\tlocal ok2, _, summary2 = EggService.autoFillPen(player)
+\tcheck("กดซ้ำรอบสอง → สำเร็จแต่ไม่มีอะไรเปลี่ยน", ok2 and summary2 and summary2.movedIn == 0 and summary2.movedOut == 0, true)
+\tcheck("  คอกชุดเดิม", uidSet(data.mothersInPen)["bag-strong-1"], 1)
+\tpcall(autoFillPenHandler, player)
+\tcheck("  ผ่าน remote: ตอบว่าไม่มีอะไรเปลี่ยน", firedTo(player, ACTION_RESULT)[2], "คอกมีแม่ที่ดีที่สุดครบแล้ว ไม่มีอะไรเปลี่ยน")
+end
+
+print("\\n━━ สวมใส่ที่ดีที่สุด: กระเป๋าเต็มพอดี → สลับได้ กระเป๋าไม่ล้น ━━")
+do
+\tlocal player, data = freshPlayer("EquipBest2")
+\tlocal penCap, bagCap = fillPenAndBag(data)
+\tfor i = 1, 3 do
+\t\tdata.mothersInBag[i] = makeMother(`full-bag-strong-{i}`, "wukong", 100000 * i)
+\tend
+\tlocal total = #data.mothersInPen + #data.mothersInBag
+
+\tlocal ok, _, summary = EggService.autoFillPen(player)
+\tcheck("สำเร็จ", ok)
+\tcheck("  สลับเข้า 3 ตัว", summary and summary.movedIn, 3)
+\tcheck("กระเป๋ายังเท่าความจุพอดี (ไม่ล้น)", #data.mothersInBag, bagCap)
+\tcheck("คอกเต็มพอดี", #data.mothersInPen, penCap)
+\tlocal pen = uidSet(data.mothersInPen)
+\tcheck("  ตัวเก่งทั้ง 3 อยู่ในคอก", pen["full-bag-strong-1"] == 1 and pen["full-bag-strong-2"] == 1 and pen["full-bag-strong-3"] == 1, true)
+\tcheck("ไม่มีแม่หาย", #data.mothersInPen + #data.mothersInBag, total)
+\tcheck("ไม่มีแม่ซ้ำ", allUnique(data), true)
+end
+
+print("\\n━━ สวมใส่ที่ดีที่สุด: แม่ที่ล็อกถูกสลับได้ · แม่ใน roster ไม่ถูกแตะ ━━")
+do
+\tlocal player, data = freshPlayer("EquipBest3")
+\ttable.clear(data.mothersInPen)
+\ttable.clear(data.mothersInBag)
+\ttable.clear(data.battleRoster)
+\tlocal penCap = Config.getPenCapacity(data.penLevel)
+\tfor i = 1, penCap do
+\t\ttable.insert(data.mothersInPen, makeMother(`locked-weak-{i}`, "monkey", 100, { lastProducedAt = os.time(), locked = true }))
+\tend
+\ttable.insert(data.mothersInBag, makeMother("unlocked-strong", "monkey", 900000))
+\ttable.insert(data.battleRoster, makeMother("roster-giant", "yulai", 100000000))
+
+\tlocal ok, _, summary = EggService.autoFillPen(player)
+\tcheck("สำเร็จ", ok)
+\tcheck("  สลับ 1 คู่", summary and summary.movedIn == 1 and summary.movedOut == 1, true)
+\tcheck("ตัวที่ออกไปยังล็อกอยู่ (ล็อกไม่กันการย้าย แต่ติดตัวไปด้วย)", data.mothersInBag[1].locked, true)
+\tcheck("แม่ใน roster ยังอยู่ใน roster", #data.battleRoster, 1)
+\tcheck("  ไม่ถูกดึงเข้าคอก", uidSet(data.mothersInPen)["roster-giant"] == nil, true)
+\tcheck("ไม่มีแม่ซ้ำ", allUnique(data), true)
+end
+
+print("\\n━━ สวมใส่ที่ดีที่สุด: ไม่มีแม่เลย → ปฏิเสธ ━━")
+do
+\tlocal player, data = freshPlayer("EquipBest4")
+\ttable.clear(data.mothersInPen)
+\ttable.clear(data.mothersInBag)
+\tlocal ok, reason = EggService.autoFillPen(player)
+\tcheck("ปฏิเสธ", ok, false)
+\tcheck("  เหตุผล", reason, "ไม่มีแม่ให้จัด")
+end
+
 print(string.format("\\n=== ผ่าน %d / ตก %d ===", passCount, failCount))
 if failCount > 0 then
 \terror(`มีเทสต์ตก {failCount} เคส`, 0)

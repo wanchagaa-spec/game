@@ -416,7 +416,9 @@ Height = 50          -- สูงกว่าที่กระโดดข้�
 - คอกไหนเป็นของใคร: `PenService` ตั้ง Attribute `PenIndex` บนตัว Player ตอนจอง (`Config.PEN_INDEX_ATTRIBUTE`)
   · ป้ายคอกคนอื่นไม่มีจุดกด และโชว์ "กดได้ที่คอกของตัวเอง" แทนตัวเลข
 - ร้านขายแม่: จุดกด E ที่ `Counter` ของแผง 1 → หน้าต่างขาย (`SellWindow.lua`) · เดินออกห่างกึ่งกลางแผงเกิน
-  `MapSign.SellCloseDistance` (20) หน้าต่างปิดเอง
+  `MapSign.SellCloseDistance` (20) หน้าต่างปิดเอง · ขายเป็นชุดด้วย `SellMothersBatchRequest` (ข้อความสรุปครั้งเดียว)
+- ⚠️ **จุดกด E ทุกอันสร้างผ่าน `UiKit.prompt()`** → `Exclusivity = OnePerButton` ป้ายใกล้กันขึ้นเฉพาะอันที่ใกล้สุด
+  (ป้ายค่าวิ่งคอก 3 กับป้ายดาเมจห่างกัน ~11 studs) · `tools/check-prompt-exclusivity.py` ตรวจ · ใช้กับแท่นอัญเชิญ UI-3 ด้วย
 
 ตำแหน่งทุกอันมาจาก Config: `getPenGateLine` · `getPenNameSignSpot` · `getPenUpgradeSignSpot` · `getDamageSignSpot` ·
 `getSellShopSpot` — `validate()` บังคับว่าป้ายไม่ขวางประตู ไม่ทับป้ายชื่อ ไม่ล้ำนอกแนวคอก และป้ายดาเมจไม่ล้ำเข้าเลน/แนวคอก

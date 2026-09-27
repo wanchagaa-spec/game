@@ -142,14 +142,13 @@ end
 local function syncPrompt(sign: Sign)
 	local wanted = isOwn(sign) and sign.board ~= nil
 	if wanted and not sign.prompt then
-		local prompt = Instance.new("ProximityPrompt")
-		prompt.Name = "UpgradePrompt"
-		prompt.ActionText = "อัปเกรด"
-		prompt.ObjectText = TITLES[sign.kind]
-		-- กดครั้งเดียวซื้อ 1 ขั้น · กดซ้ำได้ต่อเนื่อง (ไม่ต้องกดค้าง)
-		prompt.HoldDuration = 0
-		prompt.MaxActivationDistance = Config.MapDimensions.MapSign.PromptDistance
-		prompt.RequiresLineOfSight = false
+		-- กดครั้งเดียวซื้อ 1 ขั้น · กดซ้ำได้ต่อเนื่อง (ไม่ต้องกดค้าง) · ใกล้ป้ายอื่นขึ้นเฉพาะอันที่ใกล้สุด (UiKit.prompt)
+		local prompt = UiKit.prompt({
+			Name = "UpgradePrompt",
+			ActionText = "อัปเกรด",
+			ObjectText = TITLES[sign.kind],
+			MaxActivationDistance = Config.MapDimensions.MapSign.PromptDistance,
+		})
 		prompt.Triggered:Connect(function()
 			actions.buy(sign.kind)
 		end)
@@ -255,13 +254,12 @@ local function attachSellShop()
 		if not (counter and counter:IsA("BasePart")) then
 			return
 		end
-		local prompt = Instance.new("ProximityPrompt")
-		prompt.Name = "SellShopPrompt"
-		prompt.ActionText = "เปิดร้าน"
-		prompt.ObjectText = "ร้านขายแม่"
-		prompt.HoldDuration = 0
-		prompt.MaxActivationDistance = Config.MapDimensions.MapSign.SellPromptDistance
-		prompt.RequiresLineOfSight = false
+		local prompt = UiKit.prompt({
+			Name = "SellShopPrompt",
+			ActionText = "เปิดร้าน",
+			ObjectText = "ร้านขายแม่",
+			MaxActivationDistance = Config.MapDimensions.MapSign.SellPromptDistance,
+		})
 		prompt.Triggered:Connect(function()
 			actions.openSellShop()
 		end)

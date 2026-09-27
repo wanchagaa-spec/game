@@ -197,6 +197,8 @@ Core loop:
   ป้ายดาเมจ 1 จุดที่ปากเลนฝั่งลาน · ป้ายค่าวิ่ง (ซ้ายมือ) + อัปคอก (ขวามือ) ข้างประตู**ทุกคอก** กดได้เฉพาะคอกตัวเอง
   · ซ้าย/ขวา = ยืนบนทางเดินหันหน้าเข้าประตู · ตัวป้าย server สร้าง · **ข้อความ + จุดกด client ติดเอง** (เห็นค่าของตัวเอง)
   · พิกัดจาก `Config.getPenUpgradeSignSpot` / `getDamageSignSpot` / `getSellShopSpot` — `docs/map-layout.md` §6.1
+  ⚠️ **ProximityPrompt ทุกอันสร้างผ่าน `UiKit.prompt()` เท่านั้น** → `Exclusivity = OnePerButton` (ใกล้กันขึ้นเฉพาะอันที่ใกล้สุด)
+  รวมถึงแท่นอัญเชิญ UI-3 · ตรวจด้วย `tools/check-prompt-exclusivity.py`
 - **ผู้เล่นวิ่ง 32 studs/วิ** (×2 จากค่าปกติ) ตั้งที่ `StarterPlayer.CharacterWalkSpeed`
   ⚠️ **กระโดดสูง 7.2** — ตั้ง `CharacterUseJumpPower = false` + `CharacterJumpHeight = 7.2`
   Roblox มีสองโหมด ถ้า `UseJumpPower` ยังเป็น true ค่า `JumpHeight` จะ**ถูกเพิกเฉยทั้งค่า**
@@ -487,7 +489,8 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
     "สวมใส่ที่ดีที่สุด" แบบสลับตัว · ของเดิมที่รอแทนที่อยู่ในแผง 🛠 TEMP
   - **UI-2** ✅ เขียนแล้ว **ยังไม่ได้ทดสอบใน Studio** — ป้ายอัปดาเมจ (ปากเลน) · ป้ายค่าวิ่ง/อัปคอก (ข้างประตูทุกคอก) กด E ·
     ร้านขายแม่ (แผง 1 · ติ๊กหลายตัว) · ลบปุ่มอัปเกรด 3 ปุ่มออกจากแผง TEMP + ปุ่มขาย (TEMP) ออกจากหน้ารายละเอียดแม่ ·
-    ไม่แตะ schema · sync เพิ่ม `sellPrice` ต่อแม่ · ข้อเสนอ remote ขายเป็นชุดยังไม่ทำ (`docs/ui-overhaul-plan.md` §5)
+    ไม่แตะ schema · sync เพิ่ม `sellPrice` ต่อแม่ · **ขายเป็นชุดด้วย `SellMothersBatchRequest`** (ข้อความสรุปครั้งเดียว) ·
+    prompt ทุกอัน `OnePerButton` ผ่าน `UiKit.prompt`
   - UI-3 (แท่นอัญเชิญ) · UI-4 (ดัชนี · schema v4) · UI-5 (ร้าน Robux) — ยังไม่เริ่ม
 - **Phase 4** — ระบบรบด้วยตัวเอง: อาวุธ · ตี · ตาย · เกิดใหม่ (จำกัดในพื้นที่บอส)
 - **Phase 5** — บอส + รีเกิด 5 นาที + ไข่ 5 ฟอง + กติกาแย่งไข่ (กดค้าง 3 วิ) + ร้านอาวุธ
@@ -603,7 +606,10 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   (`PEN_ROWS × PEN_PER_ROW == MAX_PENS` และ `MAX_PENS == PLAYERS_PER_SERVER`)
 - **RemoteEvent / RemoteFunction** — ชื่อและ signature ที่ client-server ตกลงกัน
   (รวม `StageClearedNotify(stage, eggCount, deathCount)` server → client — Phase 4A ยิง 2 ค่า · **4B เพิ่ม `deathCount`**
-  และ `ToggleMotherLockRequest(motherUid)` client → server ของ Phase 4B)
+  · `ToggleMotherLockRequest(motherUid)` client → server ของ Phase 4B
+  · **`SellMothersBatchRequest(motherUids)`** client → server ของ UI-2 — array ของ uid ≤ ความจุกระเป๋า
+  ไม่ใช่ array/มีสมาชิกไม่ใช่ string = ปฏิเสธทั้งชุด · ตัวที่ขายไม่ได้/ซ้ำข้ามไป · sync + ข้อความสรุปครั้งเดียว
+  · `SellMotherRequest` ทีละตัวยังอยู่ · ดู `docs/data-schema.md` §5.5)
 - โครงโฟลเดอร์ `src/server|client|shared` และการแตก/รวมไฟล์
 - อะไรก็ตามที่ทำให้ข้อมูลผู้เล่นเดิมอ่านไม่ออก
 
@@ -656,7 +662,7 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 **UI-2 (ป้ายบนแมพ + ร้านขายแม่) เขียนเสร็จแล้ว** — **ยังไม่ได้ทดสอบใน Studio** · อัปเกรด 3 อย่างย้ายจากแผง TEMP ไปป้ายกด E ·
 ขายแม่ย้ายจากหน้ารายละเอียดไปร้านขายแม่ (แผง 1)
 
-ชุดเทสต์ `luau tests/run.luau` ผ่านทั้งหมด **1214 เคส** (Config · PlayerData/DataService · Production · Combat ·
+ชุดเทสต์ `luau tests/run.luau` ผ่านทั้งหมด **1222 เคส** (Config · PlayerData/DataService · Production · Combat ·
 Upgrades) + สคริปต์ตรวจใน `tools/` — รันรวมด้วย `python3 tools/check-all.py` · ฝั่ง Config ครอบคลุม (สุ่มน้ำหนัก 5 ล้านครั้ง · สุ่มตัวละคร 300,000 ครั้งต่อไข่ · ไข่รายด่าน 60,000 ครั้งต่อด่าน ·
 stack key · uid · บัฟสถานะ · แหล่งที่มาไข่ · Developer Product · ตารางด่าน · อัตราปล่อย ·
 อัตราผลิตตามน้ำหนัก · cap คลัง · ด่าน 1 ไม่มีกำแพง · turret · ตัวคูณคลาส ·

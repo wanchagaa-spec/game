@@ -112,6 +112,18 @@ function UiKit.maxTextSize(parent: TextLabel | TextButton | TextBox, maxSize: nu
 	constraint.Parent = parent
 end
 
+-- ══ ProximityPrompt ══ ⚠️ **ทุก prompt ในเกมต้องสร้างผ่านฟังก์ชันนี้** (tools/check-prompt-exclusivity.py ตรวจ)
+-- Exclusivity = OnePerButton: ป้าย/จุดกดที่อยู่ใกล้กันขึ้นเฉพาะอันที่ใกล้ที่สุดต่อปุ่ม (UI-2 ตัดสิน · ใช้กับแท่นอัญเชิญ UI-3 ด้วย)
+-- ค่าตั้งต้น: กดครั้งเดียว (HoldDuration 0) · ไม่ต้องมองเห็นตรง ๆ (เสาป้ายบังได้) · props ทับค่าอื่นได้ ยกเว้น Exclusivity
+function UiKit.prompt(props: { [string]: any }?): ProximityPrompt
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.HoldDuration = 0
+	prompt.RequiresLineOfSight = false
+	apply(prompt, props)
+	prompt.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
+	return prompt
+end
+
 function UiKit.padding(parent: GuiObject, scale: number)
 	local padding = Instance.new("UIPadding")
 	padding.PaddingTop = UDim.new(scale, 0)

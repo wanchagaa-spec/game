@@ -1206,6 +1206,95 @@ end
 
 '''
 
+# UI-4: ดัชนี (discovered) — ทุกทางที่สร้างแม่ผ่าน PlayerData.createMother · ขาย/ตายไม่ลบ
+CHECK_INDEX = r'''
+--------------------------------------------------------------------------------
+-- 2.8) ดัชนี (UI-4 · discovered)
+--------------------------------------------------------------------------------
+
+local function discoveredOf(player)
+	local payload = firedTo(player, Config.RemoteNames.FARM_STATE_SYNC)[1]
+	return table.concat(payload.discovered or {}, ",")
+end
+
+print("\n━━ ดัชนี: ฟักไข่ได้ตัวใหม่ → บันทึก (ทางที่ 1: hatch) ━━")
+do
+	local player, data = freshPlayer("IndexHatch")
+	table.clear(data.discovered)
+	table.clear(data.mothersInPen)
+	data.hatching[1] = {
+		eggId = "egg_stage1",
+		weight = 300,
+		charId = "fish",
+		startedAt = os.time() - 100,
+		hatchAt = os.time() - 10,
+	}
+	DataService.saveAsync(player.UserId, false)
+	check("เข้าเกมใหม่ (กระตุ้นฟักไข่ที่ครบเวลา)", EggService.onPlayerAdded(player))
+	data = DataService.getCached(player.UserId)
+	check("ไข่ฟักแล้ว", data.hatching[1], false)
+	check("ฟักได้ปลา → discovered.fish", data.discovered.fish, true)
+	EggService.sync(player)
+	check("sync ส่ง discovered (array ของ charId)", discoveredOf(player), "fish")
+end
+
+print("\n━━ ดัชนี: debugGrantMother → บันทึก (ทางที่ 2) · ขาย/ส่งรบ/ตาย ไม่ลบ ━━")
+do
+	local player, data = freshPlayer("IndexDebug")
+	table.clear(data.discovered)
+	table.clear(data.mothersInBag)
+	local ok = EggService.debugGrantMother(player, 1500, "tang", "bag")
+	check("debugGrantMother สำเร็จ", ok, true)
+	check("  discovered.tang", data.discovered.tang, true)
+	EggService.debugGrantMother(player, 800, "guanyin", "bag")
+	EggService.debugGrantMother(player, 900, "bajie", "bag")
+
+	-- ขาย → ไม่ลบ
+	local tangUid = nil
+	for _, m in data.mothersInBag do
+		if m.charId == "tang" then
+			tangUid = m.uid
+		end
+	end
+	pcall(sellMotherHandler, player, tangUid)
+	local stillTang = false
+	for _, m in data.mothersInBag do
+		if m.charId == "tang" then
+			stillTang = true
+		end
+	end
+	check("ขายพระถังไปแล้ว (ไม่มีในกระเป๋า)", stillTang, false)
+	check("  ยังอยู่ในดัชนี", data.discovered.tang, true)
+
+	-- ส่งไปรบแล้วตายตอนด่านพัง → ไม่ลบ
+	data.stageProgress[1] = { defendersRemaining = 0, wallHpRemaining = 0 }
+	CombatService.ensureStageStarted(data, 2)
+	local guanyinUid = nil
+	for _, m in data.mothersInBag do
+		if m.charId == "guanyin" then
+			guanyinUid = m.uid
+		end
+	end
+	pcall(sendBatchHandler, player, { guanyinUid })
+	check("ส่งกวนอิมไปรบ", #data.battleRoster, 1)
+	check("  อยู่ในดัชนีตอนอยู่ในสนาม", data.discovered.guanyin, true)
+	local lost = CombatService.killRoster(data, 2)
+	check("ด่านพัง → แม่ในสนามตาย", lost, 1)
+	check("  ตายแล้วยังอยู่ในดัชนี", data.discovered.guanyin, true)
+	EggService.sync(player)
+	check("sync เรียงชื่อ · มีทั้งตัวที่ขาย/ตายไปแล้ว", discoveredOf(player), "bajie,guanyin,tang")
+
+	-- charId แปลกในข้อมูล (ตัวละครถูกลบจาก Config) → sync ไม่พัง ส่งไปให้ client ข้ามเอง
+	data.discovered.ghost_char = true
+	check("charId แปลกใน discovered → sync ไม่พัง", pcall(EggService.sync, player))
+
+	-- debugResetAll ล้างดัชนีด้วย
+	EggService.debugResetAll(player)
+	check("debugResetAll ล้าง discovered", next(data.discovered) == nil, true)
+end
+
+'''
+
 FOOTER = '''
 print(string.format("\\n=== ผ่าน %d / ตก %d ===", passCount, failCount))
 if failCount > 0 then
@@ -1247,7 +1336,7 @@ def build_harness() -> str:
     src = src.replace('--!strict', '--!nocheck' + PRELUDE)
 
     escaped = src.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
-    check = (CHECK + CHECK_BATCH + CHECK_SEND_BATCH + FOOTER).replace('__EGGSERVICE_SOURCE', f'"{escaped}"')
+    check = (CHECK + CHECK_BATCH + CHECK_SEND_BATCH + CHECK_INDEX + FOOTER).replace('__EGGSERVICE_SOURCE', f'"{escaped}"')
     return STUB + check
 
 

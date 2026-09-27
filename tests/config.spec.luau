@@ -1575,6 +1575,33 @@ return function(t, Config)
 		check("parseUidList key ไม่ใช่ตัวเลข", select(2, Config.parseUidList({ "a", x = "b" }, 10)), "not_array")
 	end
 
+	print("── ดัชนี (UI-4): ลำดับคลาส/ตัวละคร ──")
+	check("schema v4", Config.SCHEMA_VERSION, 4)
+	check("คลาสเรียงธรรมดา → หายากสุด", table.concat(Config.getIndexClasses(), ","), "C,B,A,S,SS")
+	local indexCounts = {}
+	local indexTotal = 0
+	for _, classId in Config.getIndexClasses() do
+		local list = Config.getIndexCharacters(classId)
+		table.insert(indexCounts, `{classId}{#list}`)
+		indexTotal += #list
+	end
+	check("จำนวนตัวละครต่อคลาส C4 B3 A2 S2 SS1", table.concat(indexCounts, " "), "C4 B3 A2 S2 SS1")
+	check("รวม 12 ตัว = ทุกตัวละคร", indexTotal, 12)
+	check("ในกลุ่มเรียงตามลำดับใน Config (C: ลิง หมู ม้า ปลา)", table.concat(Config.getIndexCharacters("C"), ","), "monkey,pig,horse,fish")
+	check("B: ตือโป๊ยก่าย ซัวเจ๋ง ม้าขาวมังกร", table.concat(Config.getIndexCharacters("B"), ","), "bajie,wujing,dragon_horse")
+	local order = Config.CharacterOrder
+	local savedLast = order[#order]
+	check("CharacterOrder ขาดตัวละคร → ยามจับได้", balanceGuardCatches(
+		function() table.remove(order) end,
+		function() table.insert(order, savedLast) end), true)
+	check("CharacterOrder มีตัวซ้ำ → ยามจับได้", balanceGuardCatches(
+		function() table.insert(order, "monkey") end,
+		function() table.remove(order) end), true)
+	check("CharacterOrder มีชื่อแปลก → ยามจับได้", balanceGuardCatches(
+		function() table.insert(order, "ghost_char") end,
+		function() table.remove(order) end), true)
+	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
+
 	print("── ป้ายบนแมพ (UI-2) ──")
 	local signDim = Config.MapDimensions
 	local signHalf = signDim.MapSign.BoardSize.X / 2

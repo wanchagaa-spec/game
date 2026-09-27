@@ -106,6 +106,10 @@ export type Data = {
 	-- กองที่หมด (count เป็น 0/ไม่มีใน children) ยังค้างอยู่ในนี้ ไม่ถูกลบ (เผื่อผลิตเพิ่มมาเติมทีหลัง)
 	-- ห้ามเขียนตรง ๆ ที่อื่นนอกจาก CombatService.handleSetReleaseOrder
 	releaseOrder: { string },
+	-- ⚠️ ดัชนี (UI-4 · schema v4) — ตัวละครที่ผู้เล่น**เคยได้**อย่างน้อย 1 ตัว { [charId] = true }
+	-- ติดเฉพาะใน PlayerData.createMother (จุดเดียวที่สร้างแม่ใหม่) · **ไม่ลบเมื่อแม่ถูกขาย/ตาย**
+	-- charId ที่ไม่มีใน Config แล้วค้างอยู่ได้ (ดัชนีข้ามไปเอง) ไม่ต้องลบ · ยังไม่แยกตามสถานะ gold/silver
+	discovered: { [string]: boolean },
 	stats: { [string]: any },
 	sessionLock: SessionLock?,
 	lastSaveAt: number,
@@ -164,6 +168,7 @@ function PlayerData.createNew(): Data
 		summonEnabled = Config.Balance.Combat.SUMMON_DEFAULT_ON,
 		combatAutoPaused = false,
 		releaseOrder = {},
+		discovered = {},
 
 		stats = {
 			eggsHatched = 0,
@@ -222,6 +227,39 @@ function PlayerData.removeHeldEgg(heldEggs: HeldEggs, id: number): HeldEgg?
 end
 
 --------------------------------------------------------------------------------
+-- สร้างแม่ใหม่ — จุดเดียวในเกม (UI-4)
+--------------------------------------------------------------------------------
+
+-- บันทึกว่าเคยได้ตัวละครนี้แล้ว (ดัชนี) · ⚠️ เพิ่มอย่างเดียว ไม่มีฟังก์ชันลบ
+function PlayerData.markDiscovered(data: Data, charId: string)
+	data.discovered[charId] = true
+end
+
+-- ⚠️ **ทุกทางที่ให้แม่ตัวใหม่ต้องผ่านฟังก์ชันนี้** (ฟักไข่ · debugGrantMother · ไข่ตำนาน/เทรดในอนาคต)
+-- แจก uid global จาก nextUid (เดินหน้าอย่างเดียว ห้าม reuse) + บันทึกดัชนีในที่เดียว
+-- ไม่วางแม่ลงคอก/กระเป๋าให้ — ผู้เรียกเช็คที่ว่างก่อนเรียก (กันเปลือง uid) แล้ววางเอง
+-- tools/check-mother-creation.py ตรวจว่าไม่มีใครแจก uid เองนอกไฟล์นี้
+function PlayerData.createMother(
+	data: Data,
+	ownerUserId: number,
+	charId: string,
+	weight: number,
+	obtainedAt: number
+): Mother
+	local mother: Mother = {
+		uid = Config.makeUid(ownerUserId, data.nextUid),
+		charId = charId,
+		weight = weight,
+		statuses = {},
+		obtainedAt = obtainedAt,
+		locked = false,
+	}
+	data.nextUid += 1
+	PlayerData.markDiscovered(data, charId)
+	return mother
+end
+
+--------------------------------------------------------------------------------
 -- session lock
 --------------------------------------------------------------------------------
 
@@ -265,6 +303,27 @@ MIGRATIONS[2] = function(data: Data): Data
 			flags[index] = false
 		end
 		raw.stageClearBonusGranted = flags
+	end
+	return data
+end
+
+-- v3 → v4 (UI-4 · ดัชนี): เพิ่ม discovered แล้วเติมจากแม่ที่มีอยู่ตอนนี้ทุกที่ (คอก + กระเป๋า + battleRoster)
+-- ⚠️ แม่ที่ขาย/ตายไปก่อนอัปเดตไม่ถูกนับ — ผู้ใช้ยอมรับแล้ว (เกมยังไม่เปิดให้เล่น)
+-- idempotent: เพิ่มอย่างเดียว ไม่ลบของเดิม รันซ้ำได้ผลเดิม · ไม่อ่าน Config (charId แปลกก็เก็บไว้เฉย ๆ)
+MIGRATIONS[3] = function(data: Data): Data
+	local raw = data :: any
+	if type(raw.discovered) ~= "table" then
+		raw.discovered = {}
+	end
+	for _, field in { "mothersInPen", "mothersInBag", "battleRoster" } do
+		local list = raw[field]
+		if type(list) == "table" then
+			for _, mother in list do
+				if type(mother) == "table" and type(mother.charId) == "string" then
+					raw.discovered[mother.charId] = true
+				end
+			end
+		end
 	end
 	return data
 end
@@ -555,6 +614,11 @@ function PlayerData.buildWorstCase(): Data
 	for index = 1, Config.Balance.Stage.COUNT do
 		data.stageProgress[index] = { defendersRemaining = 1000000000, wallHpRemaining = 999999999999 }
 		data.stageClearBonusGranted[index] = true
+	end
+
+	-- ดัชนีเต็มทุกตัวละคร (UI-4)
+	for charId in Config.Characters do
+		data.discovered[charId] = true
 	end
 
 	data.sessionLock = { jobId = string.rep("0", 36), placeId = 9999999999, at = 9999999999 }

@@ -288,6 +288,14 @@ local function buildSyncPayload(data: Data)
 		table.insert(children, describeStack(key, count, data.damageLevel))
 	end
 
+	local discoveredList: { string } = {}
+	for charId, value in data.discovered do
+		if value == true then
+			table.insert(discoveredList, charId)
+		end
+	end
+	table.sort(discoveredList)
+
 	-- UI-3: กองที่ติ๊กไว้ใน releaseOrder แต่ตอนนี้หมด (ปล่อยออกไปหมดแล้ว) **และแม่ในคอกยังผลิตเติมอยู่**
 	-- → หน้าต่างอัญเชิญโชว์เป็นการ์ด "0 ตัว · รอผลิต" ที่ยังติ๊กอยู่ตามลำดับเดิม ไม่หายไปเฉย ๆ
 	-- (กองที่หมดและไม่มีแม่ผลิตเติมแล้ว — ขาย/ย้าย/ตาย — ไม่ส่ง · ติ๊กชุดใหม่แล้วหลุดจากลำดับเอง)
@@ -341,6 +349,9 @@ local function buildSyncPayload(data: Data)
 		speedUpgradeCost = Config.getSpeedUpgradeCost(data.speedLevel), -- nil = เต็มเพดานแล้ว
 		children = children,
 		waitingStacks = waitingStacks, -- UI-3: กองที่ติ๊กไว้แต่หมดชั่วคราว (count 0 · แม่ในคอกผลิตเติมอยู่)
+		-- UI-4: ตัวละครที่เคยได้ (ดัชนี) — array ของ charId เรียงแล้ว (ข้อมูลเล็ก ≤ จำนวนตัวละคร)
+		-- ⚠️ ส่งทั้งที่ไม่มีใน Config แล้วก็ได้ — client ข้ามเอง · "ตอนนี้มี N ตัว" client นับจากคอก+กระเป๋า+roster
+		discovered = discoveredList,
 		-- ⚠️ ข้อ D: จำนวนแม่ที่ฟักเสร็จแล้วแต่ยังค้างในสวนฟักเพราะคอก+กระเป๋าเต็มพร้อมกัน
 		-- client ใช้ค่านี้โชว์ข้อความ "กระเป๋าแม่เต็ม ขายแม่บางตัวเพื่อรับแม่ที่ฟักเสร็จแล้ว" (ยังไม่ทำ UI เฟสนี้)
 		stuckHatchCount = stuckHatchCount,
@@ -412,23 +423,17 @@ local function hatch(player: Player, data: Data, slotIndex: number, slot: HatchS
 	data.hatching[slotIndex] = false
 	PenService.hideEgg(player, slotIndex)
 
-	local mother: Mother = {
-		uid = Config.makeUid(player.UserId, data.nextUid),
-		charId = charId,
-		weight = slot.weight, -- ← น้ำหนักเดิมของไข่ เป๊ะ
-		statuses = {},
-		-- ⚠️ ใช้ slot.hatchAt ไม่ใช่ os.time() — เวลาที่ "ควรฟักเสร็จจริง" ไม่ใช่เวลาที่โค้ดมาเช็คเจอ
-		-- ต่างกันได้ถึง 8 ชั่วโมงตอนผู้เล่นล็อกอินกลับมาแล้วเช็คไข่ที่ค้างจากตอนออฟไลน์
-		-- (docs/data-schema.md §5.3) ถ้าใช้ os.time() แม่ตัวนี้จะไม่ได้เครดิตผลิตย้อนหลังเลย
-		-- ทั้งที่ควรได้ตั้งแต่วินาทีที่ไข่ครบเวลาจริง ไม่ใช่วินาทีที่ผู้เล่นเข้าเกม
-		--
-		-- ⚠️ ข้อ D: ถ้าแม่ตัวนี้เพิ่งค้างมาก่อน (เต็มตอนฟักเสร็จรอบแรก) ก็ยังใช้ hatchAt เดิมนี้
-		-- ไม่ใช่เวลาที่วางสำเร็จจริง — เพดานออฟไลน์ 8 ชม. ของ ProductionService ครอบไว้อยู่แล้ว
-		-- จึงไม่มีทางได้เครดิตเกินจริงแม้จะค้างอยู่นานกว่านั้น
-		obtainedAt = slot.hatchAt,
-		locked = false,
-	}
-	data.nextUid += 1
+	-- ⚠️ สร้างผ่านจุดกลาง PlayerData.createMother เท่านั้น (uid + บันทึกดัชนี · UI-4)
+	-- น้ำหนัก = น้ำหนักเดิมของไข่เป๊ะ
+	-- ⚠️ obtainedAt ใช้ slot.hatchAt ไม่ใช่ os.time() — เวลาที่ "ควรฟักเสร็จจริง" ไม่ใช่เวลาที่โค้ดมาเช็คเจอ
+	-- ต่างกันได้ถึง 8 ชั่วโมงตอนผู้เล่นล็อกอินกลับมาแล้วเช็คไข่ที่ค้างจากตอนออฟไลน์
+	-- (docs/data-schema.md §5.3) ถ้าใช้ os.time() แม่ตัวนี้จะไม่ได้เครดิตผลิตย้อนหลังเลย
+	-- ทั้งที่ควรได้ตั้งแต่วินาทีที่ไข่ครบเวลาจริง ไม่ใช่วินาทีที่ผู้เล่นเข้าเกม
+	--
+	-- ⚠️ ข้อ D: ถ้าแม่ตัวนี้เพิ่งค้างมาก่อน (เต็มตอนฟักเสร็จรอบแรก) ก็ยังใช้ hatchAt เดิมนี้
+	-- ไม่ใช่เวลาที่วางสำเร็จจริง — เพดานออฟไลน์ 8 ชม. ของ ProductionService ครอบไว้อยู่แล้ว
+	-- จึงไม่มีทางได้เครดิตเกินจริงแม้จะค้างอยู่นานกว่านั้น
+	local mother: Mother = PlayerData.createMother(data, player.UserId, charId, slot.weight, slot.hatchAt)
 
 	local placedIn: string
 	if not penFull then
@@ -1266,6 +1271,7 @@ function EggService.debugResetAll(player: Player)
 	table.clear(data.mothersInBag)
 	table.clear(data.battleRoster) -- แม่ในสนามรบก็เป็นแม่ รีเซ็ตทั้งหมด = ล้างด้วย
 	table.clear(data.heldEggs.items)
+	table.clear(data.discovered) -- ดัชนี (UI-4) — รีเซ็ตแล้วทดสอบ "ได้ตัวใหม่ครั้งแรก" ซ้ำได้
 
 	-- ⚠️ ล้าง stageProgress ทุกด่านกลับเป็น false (รูปแบบเดียวกับ PlayerData.createNew()) แล้วดัน
 	-- wallProgress กลับไปที่ค่าเริ่มต้นของผู้เล่นใหม่ — ไม่ใช่ 1 ดิบ ๆ เพราะ Config.Balance.NewPlayer
@@ -1397,15 +1403,8 @@ function EggService.debugGrantMother(
 		return false, "กระเป๋าเต็มแล้ว"
 	end
 
-	local mother: Mother = {
-		uid = Config.makeUid(player.UserId, data.nextUid),
-		charId = resolvedCharId,
-		weight = flooredWeight,
-		statuses = {},
-		obtainedAt = os.time(),
-		locked = false,
-	}
-	data.nextUid += 1
+	-- ⚠️ ผ่านจุดกลางเดียวกับฟักไข่ (uid + บันทึกดัชนี · UI-4)
+	local mother: Mother = PlayerData.createMother(data, player.UserId, resolvedCharId, flooredWeight, os.time())
 
 	if destination == "pen" then
 		mother.lastProducedAt = os.time()

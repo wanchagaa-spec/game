@@ -15,7 +15,8 @@ local Config = {}
 -- รายละเอียดใน docs/data-schema.md
 -- v2 (Phase 3C-1): เพิ่ม battleRoster (แม่ที่ส่งไปรบ) — migration อยู่ที่ PlayerData.MIGRATIONS[1]
 -- v3 (Phase 4A): เพิ่ม stageClearBonusGranted (ธงรางวัลผ่านด่าน 9 ช่อง) — PlayerData.MIGRATIONS[2]
-Config.SCHEMA_VERSION = 3
+-- v4 (UI-4): เพิ่ม discovered (ตัวละครที่เคยได้ · ดัชนี) — PlayerData.MIGRATIONS[3]
+Config.SCHEMA_VERSION = 4
 
 --------------------------------------------------------------------------------
 -- ทำให้ไฟล์นี้โหลดได้นอก Roblox ด้วย (สำหรับชุดเทสต์ใน tests/)
@@ -1135,6 +1136,24 @@ local Characters: { [string]: Character } = {
 }
 
 Config.Characters = Characters
+
+-- ลำดับตัวละครในดัชนี (UI-4) — ตาราง Characters เป็น dictionary ไม่มีลำดับ จึงเขียนลำดับไว้ที่นี่
+-- = ลำดับที่เขียนในตารางข้างบน · ดัชนีจัดกลุ่มตามคลาสก่อน แล้วเรียงในกลุ่มตามลำดับนี้
+-- ⚠️ validate() บังคับว่ามีตัวละครครบทุกตัว ตัวละครละครั้งเดียว (เพิ่มตัวละครใหม่ต้องเติมที่นี่ด้วย)
+Config.CharacterOrder = {
+	"yulai",
+	"guanyin",
+	"jade_emperor",
+	"tang",
+	"wukong",
+	"bajie",
+	"wujing",
+	"dragon_horse",
+	"monkey",
+	"pig",
+	"horse",
+	"fish",
+} :: { string }
 
 --------------------------------------------------------------------------------
 -- ไข่ชนิดไหนออกตัวละครคลาสไหนได้
@@ -2320,6 +2339,33 @@ end
 
 function Config.getCharacterClass(classId: string): CharacterClass?
 	return CharacterClasses[classId]
+end
+
+-- ══ ดัชนี (UI-4) ══
+-- คลาสเรียงจากธรรมดา → หายากสุด (C → SS) = order มาก → น้อย · ทุกคลาสแสดงแม้ยังไม่ได้สักตัว
+function Config.getIndexClasses(): { string }
+	local classes: { string } = {}
+	for classId in CharacterClasses do
+		table.insert(classes, classId)
+	end
+	table.sort(classes, function(a: string, b: string): boolean
+		return CharacterClasses[a].order > CharacterClasses[b].order
+	end)
+	return classes
+end
+
+-- ตัวละครที่เปิดใช้ในคลาสนั้น ตามลำดับ Config.CharacterOrder (1 ช่องดัชนี = 1 ตัวละคร)
+-- ⚠️ ตัวละครที่ enabled = false ไม่นับในดัชนี (ได้ไม่ได้อยู่แล้ว) — ถ้าวันหนึ่งปิดตัวที่มีคนเคยได้ไปแล้ว
+--   ช่องนั้นหายจากดัชนี แต่ข้อมูลใน discovered ไม่ถูกลบ (เปิดกลับมาก็กลับมาครบ)
+function Config.getIndexCharacters(classId: string): { string }
+	local list: { string } = {}
+	for _, charId in Config.CharacterOrder do
+		local character = Characters[charId]
+		if character and character.enabled and character.class == classId then
+			table.insert(list, charId)
+		end
+	end
+	return list
 end
 
 -- ตัวคูณ damage/HP ของตัวละคร คืน 1 ถ้าหาไม่เจอ (ปลอดภัยกว่าพัง)
@@ -4050,6 +4096,17 @@ function Config.validate()
 		assert(class.multiplier > 0, `Config: คลาส "{classId}" มีตัวคูณ <= 0`)
 		assert(not seenClassOrder[class.order], `Config: คลาส "{classId}" มี order ซ้ำ`)
 		seenClassOrder[class.order] = true
+	end
+
+	-- ดัชนี (UI-4): ลำดับตัวละครต้องครบทุกตัว ตัวละครละครั้งเดียว ไม่มีชื่อแปลกปลอม
+	local ordered: { [string]: boolean } = {}
+	for _, charId in Config.CharacterOrder do
+		assert(Characters[charId] ~= nil, `Config: CharacterOrder มี "{charId}" ที่ไม่มีใน Characters`)
+		assert(not ordered[charId], `Config: CharacterOrder มี "{charId}" ซ้ำ`)
+		ordered[charId] = true
+	end
+	for charId in Characters do
+		assert(ordered[charId], `Config: ตัวละคร "{charId}" ไม่อยู่ใน CharacterOrder — ดัชนีจะไม่แสดงตัวนี้`)
 	end
 
 	local classHasCharacter: { [string]: boolean } = {}

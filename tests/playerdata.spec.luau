@@ -271,7 +271,7 @@ return function(t, Config)
 	savedV2.stageClearBonusGranted = nil
 	local v3, v3Err = PlayerData.migrate(savedV2)
 	check("v2 → v3 สำเร็จ", v3Err, nil)
-	check("  schemaVersion = 3", v3 and v3.schemaVersion, 3)
+	check("  schemaVersion ขึ้นเป็นปัจจุบัน (ผ่าน v3 → v4 ต่อ)", v3 and v3.schemaVersion, Config.SCHEMA_VERSION)
 	local allFalse = true
 	for index = 1, 9 do
 		if v3 and v3.stageClearBonusGranted[index] ~= false then
@@ -287,6 +287,80 @@ return function(t, Config)
 	local keptFlags = PlayerData.migrate(alreadyHasFlags)
 	check("migration ไม่ทับธงที่มีอยู่แล้ว", keptFlags and keptFlags.stageClearBonusGranted[2], true)
 	check("migration v2→v3 รันซ้ำตรง ๆ ได้ผลเดิม", PlayerData.MIGRATIONS[2](keptFlags).stageClearBonusGranted[2], true)
+
+	-- v3 → v4 (UI-4 · ดัชนี): เติม discovered จากแม่ที่มีอยู่ตอนนี้ทั้ง 3 ที่ (คอก + กระเป๋า + roster)
+	print("── migration v3 → v4: discovered จากแม่ที่มีอยู่ทุกที่ ──")
+	local function oldMother(uid, charId)
+		return { uid = uid, charId = charId, weight = 100, statuses = {}, obtainedAt = 0, locked = false }
+	end
+	local savedV3 = PlayerData.createNew()
+	savedV3.schemaVersion = 3
+	savedV3.discovered = nil
+	table.insert(savedV3.mothersInPen, oldMother("1-1", "wukong"))
+	table.insert(savedV3.mothersInBag, oldMother("1-2", "pig"))
+	table.insert(savedV3.mothersInBag, oldMother("1-3", "pig")) -- ซ้ำตัวละคร = นับครั้งเดียว
+	table.insert(savedV3.battleRoster, oldMother("1-4", "guanyin"))
+	table.insert(savedV3.battleRoster, oldMother("1-5", "ghost_char")) -- ตัวละครที่ถูกลบจาก Config ไปแล้ว
+	local v4, v4Err = PlayerData.migrate(savedV3)
+	check("v3 → v4 สำเร็จ (charId แปลกไม่พัง)", v4Err, nil)
+	check("  schemaVersion = 4", v4 and v4.schemaVersion, 4)
+	local function discoveredList(data)
+		local list = {}
+		for charId, value in data.discovered do
+			if value == true then
+				table.insert(list, charId)
+			end
+		end
+		table.sort(list)
+		return table.concat(list, ",")
+	end
+	check("  เติมจากคอก + กระเป๋า + roster ครบ · ตัวซ้ำนับครั้งเดียว", v4 and discoveredList(v4), "ghost_char,guanyin,pig,wukong")
+	check("  charId ที่ไม่มีใน Config เก็บไว้เฉย ๆ ไม่ลบ", v4 and v4.discovered.ghost_char, true)
+	check("  ตัวที่ไม่มีอยู่ตอนนี้ไม่ถูกนับ (ขาย/ตายไปก่อนอัปเดต — ยอมรับแล้ว)", v4 and v4.discovered.monkey, nil)
+	-- รันซ้ำได้ผลเดิม · ไม่ลบของเดิมที่ไม่มีแม่แล้ว
+	local again = PlayerData.MIGRATIONS[3](v4)
+	check("migration v3→v4 รันซ้ำได้ผลเดิม", discoveredList(again), "ghost_char,guanyin,pig,wukong")
+	table.clear(again.mothersInBag)
+	PlayerData.MIGRATIONS[3](again)
+	check("  แม่หายไปแล้วรันซ้ำ → ไม่ถูกลบจาก discovered", again.discovered.pig, true)
+	local brokenLists = PlayerData.createNew()
+	brokenLists.schemaVersion = 3
+	brokenLists.discovered = nil
+	brokenLists.battleRoster = nil
+	table.insert(brokenLists.mothersInBag, { uid = "1-9" }) -- แม่ไม่มี charId
+	check("ข้อมูลแม่เพี้ยน / ไม่มี roster → ไม่พัง", (PlayerData.migrate(brokenLists)) ~= nil, true)
+	check("  discovered ว่าง (ไม่มี charId ให้นับ)", discoveredList(brokenLists), "")
+	-- discovered หายจากข้อมูล v4 (เพี้ยน) → normalize เติมเป็นตารางว่าง
+	local missingDiscovered = PlayerData.createNew()
+	missingDiscovered.discovered = nil
+	PlayerData.normalize(missingDiscovered)
+	check("normalize เติม discovered ที่หาย", type(missingDiscovered.discovered), "table")
+	-- encode/decode
+	local backV4 = Json.decode(PlayerData.encode(v4))
+	check("discovered ผ่าน encode/decode", discoveredList(backV4), "ghost_char,guanyin,pig,wukong")
+	check("  ผ่านกฎเซฟ (sanitizeForSave)", pcall(PlayerData.sanitizeForSave, v4), true)
+
+	print("── createMother: จุดเดียวที่สร้างแม่ใหม่ (uid + ดัชนี) ──")
+	local fresh4 = PlayerData.createNew()
+	check("ผู้เล่นใหม่ discovered ว่าง", discoveredList(fresh4), "")
+	local mom = PlayerData.createMother(fresh4, 12345, "monkey", 300, 77)
+	check("  uid = <UserId>-<nextUid>", mom.uid, "12345-1")
+	check("  nextUid เดินหน้า", fresh4.nextUid, 2)
+	check("  น้ำหนัก/ตัวละคร/เวลาได้มา ตรงที่ส่ง", `{mom.charId}/{mom.weight}/{mom.obtainedAt}`, "monkey/300/77")
+	check("  statuses ว่าง · ไม่ล็อก", #mom.statuses == 0 and mom.locked == false, true)
+	check("  บันทึกดัชนีทันที", fresh4.discovered.monkey, true)
+	check("  ไม่วางลงคอก/กระเป๋าเอง (ผู้เรียกวาง)", #fresh4.mothersInPen + #fresh4.mothersInBag, 0)
+	local mom2 = PlayerData.createMother(fresh4, 12345, "monkey", 100, 78)
+	check("  ตัวที่สอง uid ไม่ซ้ำ", mom2.uid, "12345-2")
+	check("worst case มี discovered ครบทุกตัวละคร", (function()
+		local worst = PlayerData.buildWorstCase()
+		for charId in Config.Characters do
+			if worst.discovered[charId] ~= true then
+				return false
+			end
+		end
+		return true
+	end)(), true)
 
 	-- normalize เติมช่องที่ขาดให้ครบ 9 เป็น false
 	local shortFlags = PlayerData.createNew()

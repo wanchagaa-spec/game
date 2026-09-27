@@ -369,6 +369,7 @@ python3 tools/check-all.py   # เทสต์หลัก + สคริปต�
 src/
   server/   → ServerScriptService (logic ฟักไข่, คอก/กระเป๋า, combat, DataStore)
     Main.server.lua      → ServerScriptService.Main (entry point, ต่อสายอย่างเดียว)
+                            + สะพาน debug `ServerStorage.EggServiceDebug` (BindableFunction · **Studio เท่านั้น**)
     MapBuilder.lua       → ⚠️ โครงหลัก: สร้างแมพทั้งใบด้วยโค้ด (ลานคอก/เลนรบ/รังบอส/ร้านค้า)
     PenService.lua       → จอง/คืนคอก + วาดแม่ที่เดินได้และไข่ลงในคอก
     EggService.lua       → สร้างไข่ (พร้อมน้ำหนัก) จับเวลา ฟักเป็นตัวแม่ คอก/กระเป๋า
@@ -404,6 +405,8 @@ docs/
   hotbar-design.md     → ดีไซน์ Hotbar 10 ช่อง (Phase 5.5 · ยังไม่ได้เขียนโค้ด)
   phase-1.5-rework.md  → บันทึกการรื้อโค้ด Phase 1 ให้ตรงดีไซน์ใหม่ (ทำครบแล้ว) + เช็คลิสต์ที่ต้องทดสอบใน Studio
   debug-commands.md    → คำสั่ง debug ทั้งหมดที่เรียกผ่าน command bar ใน Studio (ไม่ใช่ฟีเจอร์ในเกม)
+                          ⚠️ เรียกด้วย `game.ServerStorage.EggServiceDebug:Invoke("debugX", player, ...)` เท่านั้น
+                          `require(...EggService)` จาก Command Bar ได้โมดูลอีกชุดที่ไม่มีข้อมูลผู้เล่น (เจอจริงตอนทดสอบ 4B)
   phase-3c-report.md   → รายงานสรุป Phase 3C-1 + 3C-2 (ส่งแม่ไปรบ + ตายถาวร) + ผลทดสอบ Studio
   phase-4a-report.md   → รายงานสรุป Phase 4A (รางวัลผ่านด่าน) + ภาพรวมงานรอบเดียวกัน + ผลทดสอบ Studio
 default.project.json   → mapping ของ Rojo
@@ -452,7 +455,7 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
   ด่าน 1 = 0 (ไม่มีกำแพง) · 2–3 = 1 · 4–6 = 2 · 7–9 = 3 · ไข่ = `egg_stageN` ผ่าน `grantEgg`
   · แจ้งด้วย `StageClearedNotify` (server → client ครั้งเดียว ไม่อยู่ใน sync) · รายละเอียด `docs/data-schema.md` §7.12
   📄 รายงานสรุป (ตัดสินอะไร · ผลทดสอบ Studio · ที่ยังขาด) อยู่ใน `docs/phase-4a-report.md`
-- **Phase 4B** — **ปุ่มล็อกแม่ + แจ้งแม่ตายรวมกับ popup ผ่านด่าน** ✅ เขียนโค้ด+เทสต์แล้ว **ยังไม่ได้ทดสอบใน Studio**
+- **Phase 4B** — **ปุ่มล็อกแม่ + แจ้งแม่ตายรวมกับ popup ผ่านด่าน** ✅ ทดสอบใน Studio แล้ว ผ่านครบ
   · `ToggleMotherLockRequest(uid)` ใหม่ · ล็อกกันขาย (ใหม่) + กันส่งไปรบ (มีตั้งแต่ 3C-1) · ป้าย 🔒 บนการ์ด
   · `StageClearedNotify(stage, eggCount, deathCount)` · ยิงเมื่อมีไข่**หรือ**แม่ตาย (`CombatService.shouldNotifyStageCleared`)
   · ข้อความทุกกรณีอยู่ที่ `Config.formatStageClearedMessage` · รายละเอียด `docs/data-schema.md` §5.6 + §7.12
@@ -619,7 +622,8 @@ entry script ใช้ชื่อ `Main.server.lua` / `Main.client.lua` เท�
 **ทั้ง 3C-1 และ 3C-2 ทดสอบใน Studio แล้ว ผ่านครบ** (📄 `docs/phase-3c-report.md`)
 **Phase 4A (รางวัลผ่านด่าน) เสร็จและทดสอบใน Studio แล้ว** — schema v3 · ไข่ฟรีครั้งเดียวต่อด่าน + popup ·
 ผ่านครบ: ผู้เล่นเก่าธง false ทั้งหมดไม่ได้ไข่ย้อนหลัง · ด่าน 2 ได้ 1 ฟอง · พังซ้ำไม่ได้ · popup ไม่โผล่ซ้ำ · ด่าน 4/7 ได้ 2/3 ฟอง
-**Phase 4B (ล็อกแม่ + แม่ตายใน popup ผ่านด่าน) เขียนโค้ด+เทสต์เสร็จแล้ว** — ไม่แตะ schema · **ยังไม่ได้ทดสอบใน Studio**
+**Phase 4B (ล็อกแม่ + แม่ตายใน popup ผ่านด่าน) เสร็จและทดสอบใน Studio แล้ว** — ไม่แตะ schema ·
+ผ่านครบ: ล็อกแล้วขาย/ส่งไปรบไม่ได้ ปลดล็อกแล้วทำได้ · popup "ได้ไข่ + แม่ตาย" · "แม่ตายอย่างเดียว" · ด่านพังโดยไม่มีทั้งคู่ = ไม่มี popup
 
 ชุดเทสต์ `luau tests/run.luau` ผ่านทั้งหมด **1160 เคส** (Config · PlayerData/DataService · Production · Combat ·
 Upgrades) + สคริปต์ตรวจใน `tools/` — รันรวมด้วย `python3 tools/check-all.py` · ฝั่ง Config ครอบคลุม (สุ่มน้ำหนัก 5 ล้านครั้ง · สุ่มตัวละคร 300,000 ครั้งต่อไข่ · ไข่รายด่าน 60,000 ครั้งต่อด่าน ·

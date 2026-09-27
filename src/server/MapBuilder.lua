@@ -698,6 +698,111 @@ function MapBuilder.buildBossRooms(parent: Folder)
 end
 
 --------------------------------------------------------------------------------
+-- โซน 4b — ลานบอสกลาง (Phase 5A) · บอสตัวเดียวของเซิร์ฟ + กำแพงกั้นกลางคืน
+--------------------------------------------------------------------------------
+-- ⚠️ อยู่ในห้องบอสของด่าน BossArena.Stage (ด่าน 1 — ด่านเดียวที่ไม่มีกำแพง ทุกคนเดินถึง · validate() บังคับ)
+-- ที่นี่สร้าง "ของ" อย่างเดียว · เปิด/ปิดกำแพงกั้น · ซ่อน/โชว์บอส · อัปเดตแถบ HP = BossService
+-- กำแพงกั้น **ชิ้นเดียวของ server** ชนได้เฉพาะกลางคืน (BossService ตั้ง CanCollide) — ทหารไม่โดนเพราะทหารเป็นภาพ
+--   ฝั่ง client (Anchored + CanCollide = false ขยับด้วย PivotTo) และการรบคิดเป็นตัวเลข ไม่มีอะไรในเลนที่ใช้ฟิสิกส์
+--   นอกจากตัวผู้เล่น → ใช้ CanCollide ธรรมดาก็ "กันเฉพาะผู้เล่น" แล้ว ไม่ต้องมี CollisionGroup
+-- ⚠️ Persistent: client ติดตัวเลขนับถอยหลังไว้ที่ผิวกำแพงกั้น (เหตุผลเดียวกับแท่นอัญเชิญ/ป้ายบนแมพ)
+local BOSS_ARENA_COLORS = {
+	barrier = Color3.fromRGB(255, 90, 70),
+	bossBody = Color3.fromRGB(92, 58, 120),
+	bossHead = Color3.fromRGB(120, 76, 150),
+	bossEye = Color3.fromRGB(255, 220, 90),
+	hpBack = Color3.fromRGB(30, 30, 30),
+	hpFill = Color3.fromRGB(215, 60, 60),
+}
+
+function MapBuilder.buildBossArena(parent: Folder)
+	local arenaDim = MAP.BossArena
+	local model = Instance.new("Model")
+	model.Name = Config.BOSS_ARENA_NAME
+	model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
+	model.Parent = parent
+
+	-- กำแพงกั้นกลางคืน — เริ่มแบบกลางวัน (มองไม่เห็น · ไม่ชน) BossService สลับเองตาม phase
+	local barrierSize = Config.getBossBarrierSize()
+	local barrier = makePart(
+		Config.BOSS_BARRIER_NAME,
+		barrierSize,
+		Vector3.new(Config.getBossBarrierX(), 0, 0),
+		BOSS_ARENA_COLORS.barrier,
+		model
+	)
+	barrier.Material = Enum.Material.ForceField
+	barrier.Transparency = 1
+	barrier.CanCollide = false
+	barrier.CanQuery = false
+	barrier.CastShadow = false
+
+	-- ตัวบอส (blockout กล่อง ไม่ใช้ Humanoid) — BossService ถอดออกจากโลกตอนไม่มีชีวิต
+	local boss = Instance.new("Model")
+	boss.Name = Config.BOSS_MODEL_NAME
+	boss.Parent = model
+	local center = Config.getBossArenaCenter()
+	local size = arenaDim.BossSize
+	local bodyHeight = size.Y * 0.7
+	local body = makePart("Body", Vector3.new(size.X, bodyHeight, size.Z), center, BOSS_ARENA_COLORS.bossBody, boss)
+	body.Material = Enum.Material.Slate
+	local headSize = size.Y - bodyHeight
+	local head = makePart(
+		"Head",
+		Vector3.new(size.X * 0.7, headSize, size.Z * 0.7),
+		Vector3.new(center.X, bodyHeight, center.Z),
+		BOSS_ARENA_COLORS.bossHead,
+		boss
+	)
+	head.Material = Enum.Material.Slate
+	-- ตา 2 ข้างหันไปทางกำแพงกั้น (−X) ให้รู้ว่าบอสหันหน้าไปทางไหน
+	for _, side in { -1, 1 } do
+		local eye = makePart(
+			"Eye",
+			Vector3.new(0.4, headSize * 0.25, headSize * 0.25),
+			Vector3.new(center.X - size.X * 0.35 - 0.2, bodyHeight + headSize * 0.45, center.Z + side * size.Z * 0.18),
+			BOSS_ARENA_COLORS.bossEye,
+			boss
+		)
+		eye.Material = Enum.Material.Neon
+		eye.CanCollide = false
+	end
+	boss.PrimaryPart = body
+
+	-- แถบ HP เหนือหัว — ของ server ทุกคนเห็นค่าเดียวกัน (BossService อัปเดต HpFill/HpText)
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "HpBar"
+	gui.Size = UDim2.fromOffset(260, 46)
+	gui.StudsOffsetWorldSpace = Vector3.new(0, headSize + 3, 0)
+	gui.MaxDistance = 300
+	gui.Adornee = head
+	gui.Parent = head
+	local back = Instance.new("Frame")
+	back.Name = "HpBack"
+	back.Size = UDim2.fromScale(1, 0.45)
+	back.Position = UDim2.fromScale(0, 0.55)
+	back.BackgroundColor3 = BOSS_ARENA_COLORS.hpBack
+	back.BorderSizePixel = 0
+	back.Parent = gui
+	local fill = Instance.new("Frame")
+	fill.Name = "HpFill"
+	fill.Size = UDim2.fromScale(1, 1)
+	fill.BackgroundColor3 = BOSS_ARENA_COLORS.hpFill
+	fill.BorderSizePixel = 0
+	fill.Parent = back
+	local text = Instance.new("TextLabel")
+	text.Name = "HpText"
+	text.Size = UDim2.fromScale(1, 0.55)
+	text.BackgroundTransparency = 1
+	text.Text = "บอส"
+	text.TextScaled = true
+	text.Font = Enum.Font.GothamBold
+	text.TextColor3 = Color3.fromRGB(255, 255, 255)
+	text.TextStrokeTransparency = 0.3
+	text.Parent = gui
+end
+
+--------------------------------------------------------------------------------
 -- โซน 5 — กำแพงใสกันตกขอบแมพ
 --------------------------------------------------------------------------------
 
@@ -904,6 +1009,7 @@ function MapBuilder.build()
 	MapBuilder.buildShop(folder)
 	MapBuilder.buildBattleLane(folder)
 	MapBuilder.buildBossRooms(folder)
+	MapBuilder.buildBossArena(folder)
 	MapBuilder.buildBoundary(folder)
 	MapBuilder.buildMapSigns(folder)
 

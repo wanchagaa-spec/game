@@ -91,6 +91,17 @@ local actionResult: RemoteEvent
 local stageClearedNotify: RemoteEvent
 local toggleMotherLockRequest: RemoteEvent
 
+-- Phase 5A: ผู้เล่นติดล็อกอัญเชิญเพราะบอสไหม — BossService เป็นเจ้าของสถานะ (Main.server.lua ต่อสายผ่าน
+-- setBossLockProvider) · inject แทน require ตรง ๆ ให้ harness ใน tools/ ที่โหลดไฟล์นี้ไม่ต้องรู้จัก BossService
+-- ค่าเริ่มต้น = ไม่มีใครถูกล็อก (ก่อนต่อสาย / ในเทสต์)
+local isBossLocked: (userId: number) -> boolean = function(_userId)
+	return false
+end
+
+function EggService.setBossLockProvider(provider: (userId: number) -> boolean)
+	isBossLocked = provider
+end
+
 -- ⚠️ ส่งผลลัพธ์ (สำเร็จ/ล้มเหลว + เหตุผล) ของคำขอกลับไปหาผู้เล่นคนที่ยิงคำขอมาเท่านั้น
 -- ก่อนหน้านี้ผลลัพธ์ไปโผล่แค่ print ใน server console เท่านั้น ผู้เล่นไม่เห็นอะไรเลย
 local function reportResult(player: Player, ok: boolean, message: string)
@@ -222,7 +233,7 @@ end
 -- ส่งเท่าที่ UI แสดงจริง + จำนวนรวม ที่เหลือรอจนกว่า UI จะทำ virtualize (Phase 5.5)
 local HELD_EGGS_PER_SYNC = 50
 
-local function buildSyncPayload(data: Data)
+local function buildSyncPayload(data: Data, bossLocked: boolean?)
 	local now = os.time()
 
 	local heldItems = data.heldEggs.items
@@ -314,7 +325,7 @@ local function buildSyncPayload(data: Data)
 	-- ⚠️ Phase 3A: ฟิลด์การรบ (stageProgress/summonEnabled/releaseOrder/...) มาจาก
 	-- CombatService.buildSyncFields() ล้วน ๆ ไม่คำนวณซ้ำที่นี่ — แค่ merge เข้า payload เดียวกัน
 	-- ให้ 3B ใช้ต่อได้โดยไม่ต้องมี RemoteEvent แยก
-	local combat = CombatService.buildSyncFields(data)
+	local combat = CombatService.buildSyncFields(data, bossLocked)
 
 	-- ⚠️ เพดานที่ซื้อได้ผูกกับ wallProgress (off-by-one: ด่าน 1 = 8 ขั้น ไม่ใช่ 0 — ดู
 	-- docs/data-schema.md §8.6) ต้องเช็คเพดานนี้ก่อนถามราคา ไม่งั้น damageUpgradeCost จะไม่ nil
@@ -371,6 +382,9 @@ local function buildSyncPayload(data: Data)
 		-- (เพดาน = Config.Balance.Combat.MAX_BATTLE_MOTHERS)
 		battleRoster = combat.battleRoster,
 		sendStageBlockReason = combat.sendStageBlockReason, -- UI-3: nil = ส่งแม่ไปรบได้
+		-- Phase 5A: ล็อกอัญเชิญเพราะบอส — nil = เปิดอัญเชิญได้ · หน้าต่างอัญเชิญปิดปุ่มส่ง + โชว์ข้อความนี้
+		summonBlockReason = combat.summonBlockReason,
+		bossLocked = combat.bossLocked,
 	}
 end
 
@@ -379,7 +393,7 @@ function EggService.sync(player: Player)
 	if not data then
 		return
 	end
-	farmStateSync:FireClient(player, buildSyncPayload(data))
+	farmStateSync:FireClient(player, buildSyncPayload(data, isBossLocked(player.UserId)))
 end
 
 --------------------------------------------------------------------------------
@@ -1013,7 +1027,7 @@ function EggService.sendMotherToBattle(player: Player, rawUid: unknown): (boolea
 		return false, "ยังไม่มีข้อมูลผู้เล่น"
 	end
 
-	local ok, message = CombatService.handleSendMotherToBattle(data, rawUid)
+	local ok, message = CombatService.handleSendMotherToBattle(data, rawUid, isBossLocked(player.UserId))
 	if ok then
 		-- ส่งไปรบแล้วกระเป๋าว่างขึ้นหนึ่งช่อง — รับแม่ที่ค้างในสวนฟักเข้ามาทันที (ข้อ D เหมือนตอนขาย)
 		processReadyHatchSlots(player, data, os.time())
@@ -1034,7 +1048,7 @@ function EggService.sendMothersToBattleBatch(
 		return false, "ยังไม่มีข้อมูลผู้เล่น", nil
 	end
 
-	local ok, reason, summary = CombatService.handleSendMothersToBattleBatch(data, rawUids)
+	local ok, reason, summary = CombatService.handleSendMothersToBattleBatch(data, rawUids, isBossLocked(player.UserId))
 	if not summary then
 		return false, reason, nil -- ปฏิเสธทั้งชุด ไม่มีอะไรเปลี่ยน ไม่ต้อง sync
 	end

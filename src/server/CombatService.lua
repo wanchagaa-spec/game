@@ -165,7 +165,9 @@ end
 
 -- ด่านที่กำลังตีรับแม่ได้ไหม · คืนเหตุผลภาษาไทยถ้าไม่ได้ (nil = ส่งได้)
 -- ⚠️ ใช้ร่วมกันทั้งส่งทีละตัวและส่งเป็นชุด (UI-3) — client ใช้ข้อความเดียวกันนี้ (ผ่าน sync) บอกว่าทำไมติ๊กแม่ไม่ได้
-function CombatService.getSendStageBlockReason(data: Data): string?
+-- Phase 5A: `bossLocked` = ผู้เล่นคนนี้ติดล็อกอัญเชิญเพราะบอส (BossService) → ส่งแม่ไม่ได้ด้วย (แม่จะไปยืนรอเปล่า ๆ)
+--   เช็คท้ายสุด — "ผ่านครบทุกด่าน" บอกความจริงได้ตรงกว่าถ้าเกิดพร้อมกัน · ไม่ส่ง = ค่าเดิมทุกอย่าง (เทสต์เก่าไม่เปลี่ยน)
+function CombatService.getSendStageBlockReason(data: Data, bossLocked: boolean?): string?
 	local stage = CombatService.getActiveStage(data)
 	if not stage then
 		return "ผ่านครบทุกด่านแล้ว ไม่มีด่านให้ส่งแม่ไปรบ"
@@ -174,12 +176,42 @@ function CombatService.getSendStageBlockReason(data: Data): string?
 	if Config.getStageTotalHp(stage) <= 0 then
 		return `ด่าน {stage} ไม่มีศัตรูให้ตี — เปิดอัญเชิญให้ผ่านด่านนี้ไปก่อน`
 	end
+	if bossLocked then
+		return Config.BOSS_LOCK_MESSAGE
+	end
+	return nil
+end
+
+--------------------------------------------------------------------------------
+-- Phase 5A — ล็อกอัญเชิญเพราะบอส (สถานะล็อกเก็บที่ BossService · ตรงนี้แค่กติกาฝั่งการรบ)
+--------------------------------------------------------------------------------
+-- ⚠️ **ไม่แตะ** การนับผ่านด่าน / รางวัลผ่านด่าน (4A) / แม่ตายตอนด่านพัง — ทั้งหมดเกิดใน tick ไปแล้ว
+--   ก่อนล็อกจะถูกตั้ง (CombatService.start ตัดสินล็อกจาก TickResult หลัง tick จบ) ล็อกแค่ "ห้ามเริ่มปล่อยต่อ"
+-- ⚠️ รวมกับ auto-pause (ไม่แทนที่): auto-pause ยังตั้ง/ล้างธงของมันเหมือนเดิม · ล็อกบอสบล็อกการเปิดอัญเชิญซ้ำอีกชั้น
+
+-- ด่านที่เพิ่งพังตานี้ควรทำให้ผู้เล่นติดล็อกไหม — เฉพาะด่านที่ **มีกำแพงจริง** + บอสยังมีชีวิต
+-- ⚠️ ด่าน 1 ไม่มีกำแพง "พัง" ตั้งแต่ทหารตัวแรก → ไม่ยกเว้น = ผู้เล่นใหม่ติดล็อกตั้งแต่วินาทีแรก
+function CombatService.shouldBossLock(clearedStage: number?, bossAlive: boolean): boolean
+	return clearedStage ~= nil and bossAlive and Config.getWallX(clearedStage) ~= nil
+end
+
+-- ติดล็อก = ปิดอัญเชิญ (ผู้ใช้เลือก: บอสตายแล้วต้องกด "ส่งไปรบ" ใหม่เอง ไม่เดินต่อเอง)
+-- ไม่แตะ combatAutoPaused — คำเตือน auto-pause (ถ้ามี) ยังค้างให้เห็นคู่กัน
+function CombatService.applyBossLock(data: Data)
+	data.summonEnabled = false
+end
+
+-- เหตุผลที่เปิดอัญเชิญไม่ได้ตอนนี้ (nil = เปิดได้) · client โชว์ในหน้าต่างอัญเชิญ + ปิดปุ่มส่งไปรบ
+function CombatService.getSummonBlockReason(bossLocked: boolean?): string?
+	if bossLocked then
+		return Config.BOSS_LOCK_MESSAGE
+	end
 	return nil
 end
 
 -- คืน (ok, message) — message เป็นภาษาไทยพร้อมโชว์ผู้เล่นทาง ActionResult ทั้งกรณีสำเร็จ/ล้มเหลว
 -- ⚠️ ด่านสุดท้ายของการตรวจ — client ตรวจ roster เต็มก่อนเองก็จริง แต่ห้ามเชื่อ client
-function CombatService.handleSendMotherToBattle(data: Data, rawUid: unknown): (boolean, string)
+function CombatService.handleSendMotherToBattle(data: Data, rawUid: unknown, bossLocked: boolean?): (boolean, string)
 	if type(rawUid) ~= "string" then
 		return false, "ข้อมูลแม่ไม่ถูกต้อง"
 	end
@@ -204,7 +236,7 @@ function CombatService.handleSendMotherToBattle(data: Data, rawUid: unknown): (b
 		return false, `roster เต็มแล้ว ({#data.battleRoster}/{maxMothers})`
 	end
 
-	local stageBlock = CombatService.getSendStageBlockReason(data)
+	local stageBlock = CombatService.getSendStageBlockReason(data, bossLocked)
 	if stageBlock then
 		return false, stageBlock
 	end
@@ -227,7 +259,11 @@ export type SendBatchSummary = {
 --   ตัวที่ส่งไม่ได้ (ล็อก / ไม่ใช่ของตัวเอง / อยู่ในคอก / roster เต็ม / uid ซ้ำในชุด) ข้าม ส่งตัวถัดไปต่อ
 --   → roster ไม่มีวันเกิน MAX_BATTLE_MOTHERS (แกนเดิมเช็คทุกตัว) · ลำดับใน roster = ลำดับที่ส่งมา
 -- คืน (ok, reason?, summary?) · summary = nil เฉพาะตอนปฏิเสธทั้งชุด · ไม่ sync (ผู้เรียกทำครั้งเดียว)
-function CombatService.handleSendMothersToBattleBatch(data: Data, rawUids: unknown): (boolean, string?, SendBatchSummary?)
+function CombatService.handleSendMothersToBattleBatch(
+	data: Data,
+	rawUids: unknown,
+	bossLocked: boolean?
+): (boolean, string?, SendBatchSummary?)
 	local maxMothers = Config.Balance.Combat.MAX_BATTLE_MOTHERS
 	local uids, listError = Config.parseUidList(rawUids, maxMothers)
 	if not uids then
@@ -241,7 +277,7 @@ function CombatService.handleSendMothersToBattleBatch(data: Data, rawUids: unkno
 		return false, "รายการแม่ที่จะส่งไปรบต้องเป็น array", nil
 	end
 
-	local stageBlock = CombatService.getSendStageBlockReason(data)
+	local stageBlock = CombatService.getSendStageBlockReason(data, bossLocked)
 	if stageBlock then
 		return false, stageBlock, nil
 	end
@@ -254,7 +290,7 @@ function CombatService.handleSendMothersToBattleBatch(data: Data, rawUids: unkno
 			summary.skipped += 1
 		else
 			seen[uid] = true
-			local ok = CombatService.handleSendMotherToBattle(data, uid)
+			local ok = CombatService.handleSendMotherToBattle(data, uid, bossLocked)
 			if ok then
 				summary.sent += 1
 			else
@@ -584,8 +620,13 @@ function CombatService.handleSetReleaseOrder(data: Data, rawOrder: unknown): boo
 	return true
 end
 
-function CombatService.handleSetSummonEnabled(data: Data, meta: CombatMeta, rawEnabled: unknown): boolean
+-- Phase 5A: `bossLocked` = ติดล็อกอัญเชิญเพราะบอส → ขอ **เปิด** ถูกปฏิเสธ (ไม่แตะธง auto-pause ด้วย เพราะไม่ได้เปิดจริง)
+-- ขอ **ปิด** ยังได้เสมอ (ปิดซ้ำไม่เสียหาย)
+function CombatService.handleSetSummonEnabled(data: Data, meta: CombatMeta, rawEnabled: unknown, bossLocked: boolean?): boolean
 	if type(rawEnabled) ~= "boolean" then
+		return false
+	end
+	if rawEnabled and bossLocked then
 		return false
 	end
 	data.summonEnabled = rawEnabled
@@ -612,7 +653,8 @@ type StageProgressView = {
 	cleared: boolean?,
 }
 
-function CombatService.buildSyncFields(data: Data)
+-- `bossLocked` (Phase 5A) มาจาก BossService ผ่านผู้เรียก (EggService.sync) — ไม่ส่ง = ไม่ล็อก
+function CombatService.buildSyncFields(data: Data, bossLocked: boolean?)
 	local stageProgress: { StageProgressView } = table.create(Config.Balance.Stage.COUNT)
 	for stage = 1, Config.Balance.Stage.COUNT do
 		local progress = data.stageProgress[stage]
@@ -655,7 +697,11 @@ function CombatService.buildSyncFields(data: Data)
 		battleRoster = battleRoster,
 		-- UI-3: เหตุผลที่ส่งแม่ไปรบไม่ได้ตอนนี้ (nil = ส่งได้) — ข้อความเดียวกับที่ server ใช้ปฏิเสธจริง
 		-- client ใช้โชว์ในแท็บแม่ + ปิดการติ๊ก · ⚠️ แค่ช่วยแสดงผล server ยังตรวจซ้ำทุกคำขอ
-		sendStageBlockReason = CombatService.getSendStageBlockReason(data),
+		sendStageBlockReason = CombatService.getSendStageBlockReason(data, bossLocked),
+		-- Phase 5A: เปิดอัญเชิญไม่ได้เพราะอะไร (nil = ได้) — client ปิดปุ่ม "ส่งไปรบ" + โชว์ข้อความนี้
+		-- ⚠️ แค่ช่วยแสดงผล server ปฏิเสธคำขอเปิดเองอยู่แล้ว (handleSetSummonEnabled)
+		summonBlockReason = CombatService.getSummonBlockReason(bossLocked),
+		bossLocked = bossLocked == true,
 	}
 end
 
@@ -668,7 +714,15 @@ end
 -- `onStageCleared(player, stage, eggCount, deathCount)` = EggService.grantStageClearBonus (Main.server.lua ส่งเข้ามา)
 -- ⚠️ inject แทน require EggService ตรง ๆ กัน circular require (EggService require ไฟล์นี้อยู่แล้ว)
 -- แบบเดียวกับ ProductionService.start(EggService.sync)
-function CombatService.start(onStageCleared: (Player, number, number, number) -> ())
+-- Phase 5A: `bossGate` = BossService.getGate() (inject กัน CombatService ผูกกับ BossService ตรง ๆ)
+--   ใช้ตัดสินล็อกหลัง tick · ปฏิเสธเปิดอัญเชิญตอนติดล็อก
+type BossGate = {
+	isBossAlive: () -> boolean,
+	isUserLocked: (userId: number) -> boolean,
+	lockUser: (userId: number) -> boolean,
+}
+
+function CombatService.start(onStageCleared: (Player, number, number, number) -> (), bossGate: BossGate)
 	local Players = game:GetService("Players")
 	local ReplicatedStorage = game:GetService("ReplicatedStorage")
 	local ServerScriptService = game:GetService("ServerScriptService")
@@ -688,7 +742,12 @@ function CombatService.start(onStageCleared: (Player, number, number, number) ->
 	setSummonEnabledRequest.OnServerEvent:Connect(function(player: Player, rawEnabled: unknown)
 		local data = DataService.getCached(player.UserId)
 		if data then
-			CombatService.handleSetSummonEnabled(data, CombatService.getOrCreateMeta(player.UserId), rawEnabled)
+			CombatService.handleSetSummonEnabled(
+				data,
+				CombatService.getOrCreateMeta(player.UserId),
+				rawEnabled,
+				bossGate.isUserLocked(player.UserId)
+			)
 		end
 	end)
 
@@ -712,8 +771,19 @@ function CombatService.start(onStageCleared: (Player, number, number, number) ->
 						then nowClock - meta.lastTickClock
 						else Config.World.SYNC_INTERVAL
 					meta.lastTickClock = nowClock
+					-- ⚠️ ตาข่ายชั้นสอง: ติดล็อกอยู่แต่อัญเชิญยังเปิด (ไม่ควรเกิด — เปิดใหม่ถูกปฏิเสธ) = ปิดก่อน tick
+					if data.summonEnabled and bossGate.isUserLocked(player.UserId) then
+						CombatService.applyBossLock(data)
+					end
 					local result = CombatService.tick(data, meta, elapsed)
 					local clearedStage = result.clearedStage
+					-- Phase 5A: พังกำแพงด่านตัวเองเสร็จขณะบอสยังอยู่ → ล็อก + หยุดอัญเชิญ
+					-- ⚠️ หลัง tick จบ = ผ่านด่าน/รางวัล 4A/แม่ตาย เกิดครบไปแล้วตามเดิม ล็อกแค่ห้ามปล่อยต่อ
+					if CombatService.shouldBossLock(clearedStage, bossGate.isBossAlive()) then
+						bossGate.lockUser(player.UserId)
+						CombatService.applyBossLock(data)
+						print(`[CombatService] {player.Name} พังกำแพงด่าน {clearedStage} ขณะบอสยังอยู่ → ล็อกอัญเชิญจนกว่าบอสตาย`)
+					end
 					if clearedStage and CombatService.shouldNotifyStageCleared(result) then
 						-- ⚠️ pcall: แจกไข่พังเมื่อไหร่ต้องไม่ลากลูปรบของทั้งเซิร์ฟตายไปด้วย (ธงติดไปแล้ว — log ไว้ตามแก้)
 						local bonusEggs, mothersLost = result.bonusEggs, result.mothersLost

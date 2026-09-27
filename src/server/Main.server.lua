@@ -26,6 +26,7 @@ local PenService = require(ServerScriptService.PenService)
 local EggService = require(ServerScriptService.EggService)
 local ProductionService = require(ServerScriptService.ProductionService)
 local CombatService = require(ServerScriptService.CombatService)
+local BossService = require(ServerScriptService.BossService)
 
 -- ⚠️ กันตัวละครเกิดก่อนแมพสร้างเสร็จ
 -- แมพทั้งใบ generate ตอน server start ดังนั้น**ก่อนหน้านั้นโลกว่างเปล่า ไม่มีพื้นเลย**
@@ -161,8 +162,14 @@ ProductionService.start(EggService.sync)
 -- EggService (อ่าน docs/data-schema.md §7) ต่อ RemoteEvent ของตัวเอง (SetReleaseOrderRequest /
 -- SetSummonEnabledRequest) และเซฟผ่าน DataService path เดิม (stageProgress/currency ก็คือ
 -- PlayerData fields ธรรมดา ไม่มีระบบเซฟแยก)
+-- ⚠️ Phase 5A: วงจรกลางวัน/กลางคืน + บอสตัวเดียวของเซิร์ฟ — ต้องหลัง MapBuilder.build (ใช้กำแพงกั้น/ตัวบอสที่สร้างไว้)
+-- และก่อน CombatService.start (ส่ง gate ของล็อกอัญเชิญเข้าไป) · EggService อ่านสถานะล็อกผ่าน provider ที่ inject
+BossService.start()
+EggService.setBossLockProvider(BossService.isLocked)
+
 -- ⚠️ Phase 4A: inject ตัวแจกไข่รางวัลผ่านด่านเข้าไป (กัน circular require แบบเดียวกับ ProductionService)
-CombatService.start(EggService.grantStageClearBonus)
+-- ⚠️ Phase 5A: + gate ของบอส (ล็อกอัญเชิญเมื่อพังกำแพงขณะบอสยังอยู่ · ปฏิเสธเปิดอัญเชิญตอนติดล็อก)
+CombatService.start(EggService.grantStageClearBonus, BossService.getGate())
 
 -- ⚠️ DEBUG (Studio เท่านั้น): สะพานให้ Command Bar เรียก `EggService.debug*` ของเกมที่รันอยู่จริง
 -- `require(game.ServerScriptService.EggService)` จาก Command Bar ได้โมดูล**อีกชุดหนึ่ง** (แคช require
@@ -175,11 +182,16 @@ if RunService:IsStudio() then
 	debugBridge.Name = "EggServiceDebug"
 	debugBridge.OnInvoke = function(name: unknown, ...: any): ...any
 		if type(name) ~= "string" or string.sub(name, 1, 5) ~= "debug" then
-			error(`EggServiceDebug: เรียกได้เฉพาะ EggService.debug* — ได้ {tostring(name)}`)
+			error(`EggServiceDebug: เรียกได้เฉพาะ EggService.debug* / BossService.debug* — ได้ {tostring(name)}`)
 		end
+		-- Phase 5A: คำสั่งบอส (debugBossNight/debugBossDay/debugDamageBoss/debugKillBoss/debugBossStatus)
+		-- อยู่ที่ BossService — สะพานเดียวกัน ชื่อไม่ชนกับของ EggService
 		local fn = (EggService :: any)[name]
 		if type(fn) ~= "function" then
-			error(`EggServiceDebug: ไม่มีฟังก์ชัน EggService.{name}`)
+			fn = (BossService :: any)[name]
+		end
+		if type(fn) ~= "function" then
+			error(`EggServiceDebug: ไม่มีฟังก์ชัน EggService.{name} / BossService.{name}`)
 		end
 		return fn(...)
 	end

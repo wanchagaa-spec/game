@@ -79,6 +79,7 @@ local placeEggRequest: RemoteEvent
 local moveMotherRequest: RemoteEvent
 local upgradePenRequest: RemoteEvent
 local sellMotherRequest: RemoteEvent
+local sellMothersBatchRequest: RemoteEvent
 local sendMotherToBattleRequest: RemoteEvent
 local autoFillPenRequest: RemoteEvent
 local buyDamageUpgradeRequest: RemoteEvent
@@ -794,12 +795,11 @@ end
 
 -- ⚠️ ขายได้เฉพาะแม่ใน mothersInBag เท่านั้น (เหมือนกฎเดิม "ส่งรบได้แค่จากกระเป๋า")
 -- กันขายพลาดตัวที่กำลังผลิตอยู่ในคอกโดยไม่ได้ตั้งใจ — อยากขายแม่ในคอกต้องย้ายออกมาก่อน
-function EggService.sellMother(player: Player, rawUid: unknown): (boolean, string?)
-	local data = dataOf(player)
-	if not data then
-		return false, "ยังไม่มีข้อมูลผู้เล่น"
-	end
-
+--
+-- ⚠️ แกนของการขาย 1 ตัว — ใช้ร่วมกันทั้งขายทีละตัว (sellMother) และขายเป็นชุด (sellMothersBatch)
+-- **ไม่ sync และไม่ย้ายแม่ที่ค้างในสวนฟัก** — ผู้เรียกทำเองหลังขายเสร็จ (ชุดละครั้งเดียว)
+-- คืน (ok, reason?, ราคาที่ได้?)
+local function sellOneMother(player: Player, data: Data, rawUid: unknown): (boolean, string?, number?)
 	if type(rawUid) ~= "string" then
 		return false, "uid ไม่ใช่ string"
 	end
@@ -829,13 +829,117 @@ function EggService.sellMother(player: Player, rawUid: unknown): (boolean, strin
 	data.currency.coins += price
 	data.stats.totalCoinsEarned += price
 
+	print(`[EggService] {player.Name} ขายแม่ {mother.uid} ({Config.formatWeight(mother.weight)}) ได้ {price} coins`)
+	return true, nil, price
+end
+
+function EggService.sellMother(player: Player, rawUid: unknown): (boolean, string?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น"
+	end
+
+	local ok, reason = sellOneMother(player, data, rawUid)
+	if not ok then
+		return false, reason
+	end
+
 	-- ⚠️ ขายแล้วเปิดที่ว่างในกระเป๋า ลองย้ายแม่ที่ค้างในสวนฟักมาเข้าทันที (ข้อ D)
 	processReadyHatchSlots(player, data, os.time())
 
 	EggService.sync(player)
-
-	print(`[EggService] {player.Name} ขายแม่ {mother.uid} ({Config.formatWeight(mother.weight)}) ได้ {price} coins`)
 	return true, nil
+end
+
+export type SellBatchSummary = {
+	sold: number,
+	skipped: number,
+	coins: number,
+}
+
+-- อ่านรายการ uid จาก client · คืน (รายการ, nil) หรือ (nil, เหตุผลที่ปฏิเสธทั้งชุด)
+-- ⚠️ ต้องเป็น array จริง (key = 1..n ครบไม่มีรู ไม่มี key อื่น) · สมาชิกเป็น string ทุกตัว · 1..limit ตัว
+local function readUidArray(raw: unknown, limit: number): ({ string }?, string?)
+	if type(raw) ~= "table" then
+		return nil, "รายการแม่ที่จะขายต้องเป็น array"
+	end
+	local count = 0
+	for key, value in raw :: { [any]: any } do
+		if type(key) ~= "number" or key % 1 ~= 0 or key < 1 then
+			return nil, "รายการแม่ที่จะขายต้องเป็น array"
+		end
+		if type(value) ~= "string" then
+			return nil, "uid ในรายการต้องเป็น string"
+		end
+		count += 1
+		-- ⚠️ หยุดนับทันทีที่เกิน — ไม่ไล่ตาราง "ขยะ" ขนาดใหญ่จนจบ
+		if count > limit then
+			return nil, `ขายได้ครั้งละไม่เกิน {limit} ตัว (ความจุกระเป๋า)`
+		end
+	end
+	if count == 0 then
+		return nil, "ยังไม่ได้เลือกแม่ที่จะขาย"
+	end
+	local list: { string } = table.create(count)
+	for index = 1, count do
+		local value = (raw :: { any })[index]
+		if value == nil then
+			return nil, "รายการแม่ที่จะขายต้องเป็น array" -- มีรู (key ไม่ต่อเนื่อง)
+		end
+		list[index] = value
+	end
+	return list, nil
+end
+
+-- ขายแม่เป็นชุด (UI-2 · SellMothersBatchRequest) — ร้านขายแม่ยิงครั้งเดียวแทนทีละตัว
+-- ⚠️ ตรวจรูปร่างทั้งชุดก่อน (readUidArray) ไม่ผ่าน = ปฏิเสธทั้งชุด ไม่ขายสักตัว
+--   เพดาน = ความจุกระเป๋า — ขายได้เฉพาะแม่ในกระเป๋า ส่งมาเกินนั้นไม่ใช่คำขอจาก UI จริง
+-- ⚠️ แต่ละตัวผ่าน sellOneMother ตัวเดียวกับขายทีละตัว (ราคา · ล็อก · เฉพาะกระเป๋า เหมือนเดิมทุกอย่าง)
+--   ตัวที่ขายไม่ได้ (ล็อก / ไม่ใช่ของตัวเอง / อยู่ในคอก / uid ซ้ำในชุด) ข้าม แล้วขายตัวอื่นต่อ
+-- sync + ย้ายแม่ที่ค้างในสวนฟักครั้งเดียวหลังจบชุด
+-- คืน (ok, reason?, summary?) · summary = nil เฉพาะตอนปฏิเสธทั้งชุด
+function EggService.sellMothersBatch(player: Player, rawUids: unknown): (boolean, string?, SellBatchSummary?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น", nil
+	end
+
+	local uids, rejectReason = readUidArray(rawUids, Config.Balance.Bag.CAPACITY)
+	if not uids then
+		return false, rejectReason, nil
+	end
+
+	local summary: SellBatchSummary = { sold = 0, skipped = 0, coins = 0 }
+	local seen: { [string]: boolean } = {}
+	for _, uid in uids do
+		-- ⚠️ uid ซ้ำในชุด = ข้าม (ตัวแรกขายไปแล้ว ตัวที่สองต้องไม่ได้เงินซ้ำ)
+		if seen[uid] then
+			summary.skipped += 1
+		else
+			seen[uid] = true
+			local ok, _, price = sellOneMother(player, data, uid)
+			if ok then
+				summary.sold += 1
+				summary.coins += price or 0
+			else
+				summary.skipped += 1
+			end
+		end
+	end
+
+	if summary.sold > 0 then
+		-- ⚠️ ขายแล้วเปิดที่ว่างในกระเป๋า ลองย้ายแม่ที่ค้างในสวนฟักมาเข้าทันที (ข้อ D)
+		processReadyHatchSlots(player, data, os.time())
+	end
+	EggService.sync(player)
+
+	print(
+		`[EggService] {player.Name} ขายแม่เป็นชุด: ขาย {summary.sold} · ข้าม {summary.skipped} · ได้ {summary.coins} coins`
+	)
+	if summary.sold == 0 then
+		return false, "ไม่มีแม่ตัวไหนขายได้", summary
+	end
+	return true, nil, summary
 end
 
 --------------------------------------------------------------------------------
@@ -1564,6 +1668,7 @@ function EggService.start()
 	moveMotherRequest = Remotes.waitFor(Config.RemoteNames.MOVE_MOTHER_REQUEST)
 	upgradePenRequest = Remotes.waitFor(Config.RemoteNames.UPGRADE_PEN_REQUEST)
 	sellMotherRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHER_REQUEST)
+	sellMothersBatchRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHERS_BATCH_REQUEST)
 	sendMotherToBattleRequest = Remotes.waitFor(Config.RemoteNames.SEND_MOTHER_TO_BATTLE_REQUEST)
 	autoFillPenRequest = Remotes.waitFor(Config.RemoteNames.AUTO_FILL_PEN_REQUEST)
 	buyDamageUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_DAMAGE_UPGRADE_REQUEST)
@@ -1618,6 +1723,17 @@ function EggService.start()
 		else
 			local coinsAfter = if data then data.currency.coins else coinsBefore
 			reportResult(player, true, `ขายแม่สำเร็จ +{coinsAfter - coinsBefore} coins`)
+		end
+	end)
+
+	-- UI-2: ร้านขายแม่ขายเป็นชุด — ข้อความสรุปครั้งเดียวต่อชุด (ไม่ใช่ทีละตัว)
+	sellMothersBatchRequest.OnServerEvent:Connect(function(player, rawUids)
+		local ok, reason, summary = EggService.sellMothersBatch(player, rawUids)
+		if summary then
+			reportResult(player, ok, Config.formatSellBatchMessage(summary.sold, summary.coins, summary.skipped))
+		else
+			print(`[EggService] ปฏิเสธคำขอขายแม่เป็นชุดของ {player.Name}: {reason}`)
+			reportResult(player, false, reason or "ขายแม่ไม่สำเร็จ")
 		end
 	end)
 

@@ -596,6 +596,14 @@ Config.RemoteNames = {
 	-- ล็อกแล้วกันได้ 2 อย่าง: ขาย (EggService.sellMother) · ส่งไปรบ (CombatService.handleSendMotherToBattle)
 	-- ⚠️ ไม่กันการย้ายคอก↔กระเป๋า (ย้ายไม่ได้ทำให้แม่หาย)
 	TOGGLE_MOTHER_LOCK_REQUEST = "ToggleMotherLockRequest",
+
+	-- client → server : FireServer(motherUids: { string }) — ขายแม่เป็นชุด (UI-2 · ร้านขายแม่)
+	-- ⚠️ ไม่ใช่ array / สมาชิกไม่ใช่ string / ว่าง / ยาวเกินความจุกระเป๋า → ปฏิเสธทั้งชุด
+	-- แต่ละตัวผ่านแกนขายเดียวกับ SELL_MOTHER_REQUEST (ราคาคิดที่ server · เฉพาะกระเป๋า · ล็อกขายไม่ได้)
+	-- ตัวที่ขายไม่ได้ (ล็อก / ไม่ใช่ของตัวเอง / อยู่ในคอก / uid ซ้ำในชุด) ข้ามไป ขายตัวอื่นต่อ
+	-- sync ครั้งเดียวท้ายชุด · ผลสรุปครั้งเดียวทาง ACTION_RESULT (Config.formatSellBatchMessage)
+	-- · SELL_MOTHER_REQUEST (ทีละตัว) ยังอยู่ ไม่ได้ลบ
+	SELL_MOTHERS_BATCH_REQUEST = "SellMothersBatchRequest",
 }
 
 --------------------------------------------------------------------------------
@@ -2448,6 +2456,24 @@ function Config.formatStageClearedMessage(stage: number, eggCount: number, death
 		return title, "กระเป๋าไข่เต็ม — ไม่ได้รับไข่ฟรีของด่านนี้"
 	end
 	return title, table.concat(parts, " • ")
+end
+
+-- จำนวนเต็มคั่นหลักพัน: 1234567 → "1,234,567" (เงินเป็นจำนวนเต็มเสมอ)
+function Config.formatCoins(value: number): string
+	local sign = if value < 0 then "-" else ""
+	local digits = string.format("%d", math.abs(math.floor(value)))
+	local grouped = string.reverse((string.gsub(string.reverse(digits), "(%d%d%d)", "%1,")))
+	return sign .. (string.gsub(grouped, "^,", ""))
+end
+
+-- ข้อความสรุปผลขายแม่เป็นชุด (UI-2 · SellMothersBatchRequest) — ขึ้นครั้งเดียวต่อชุด
+-- ⚠️ อยู่ใน Config (ไม่ใช่ใน EggService) เพื่อให้เทสต์ทุกกรณีได้นอก Studio
+function Config.formatSellBatchMessage(sold: number, coins: number, skipped: number): string
+	local skippedText = if skipped > 0 then ` · ข้าม {skipped} ตัว (ล็อก / ไม่อยู่ในกระเป๋า / ซ้ำ)` else ""
+	if sold <= 0 then
+		return `ขายไม่ได้สักตัว{skippedText}`
+	end
+	return `ขายแม่ {sold} ตัว ได้ ฿{Config.formatCoins(coins)}{skippedText}`
 end
 
 -- อัตราปล่อยทหารของด่านนั้น (ตัว/วินาที)

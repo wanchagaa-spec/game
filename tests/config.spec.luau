@@ -1501,6 +1501,18 @@ return function(t, Config)
 		function() classMultTable.SS = savedSS end), true)
 	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
 
+	print("── ข้อความขายแม่เป็นชุด (UI-2) ──")
+	check("formatCoins 1234567", Config.formatCoins(1234567), "1,234,567")
+	check("formatCoins 950", Config.formatCoins(950), "950")
+	check("formatCoins 1000", Config.formatCoins(1000), "1,000")
+	check("ขายครบ ไม่มีข้าม", Config.formatSellBatchMessage(4, 12345, 0), "ขายแม่ 4 ตัว ได้ ฿12,345")
+	check("ขายได้บางตัว บอกจำนวนที่ข้าม", Config.formatSellBatchMessage(2, 180, 3),
+		"ขายแม่ 2 ตัว ได้ ฿180 · ข้าม 3 ตัว (ล็อก / ไม่อยู่ในกระเป๋า / ซ้ำ)")
+	check("ขายไม่ได้สักตัว", Config.formatSellBatchMessage(0, 0, 2),
+		"ขายไม่ได้สักตัว · ข้าม 2 ตัว (ล็อก / ไม่อยู่ในกระเป๋า / ซ้ำ)")
+	check("remote ขายเป็นชุดมีชื่อ", Config.RemoteNames.SELL_MOTHERS_BATCH_REQUEST, "SellMothersBatchRequest")
+	check("remote ขายทีละตัวยังอยู่", Config.RemoteNames.SELL_MOTHER_REQUEST, "SellMotherRequest")
+
 	print("── ป้ายบนแมพ (UI-2) ──")
 	local signDim = Config.MapDimensions
 	local signHalf = signDim.MapSign.BoardSize.X / 2

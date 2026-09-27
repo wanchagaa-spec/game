@@ -47,7 +47,8 @@ local playerGui = player:WaitForChild("PlayerGui")
 local placeEggRequest = Remotes.waitFor(Config.RemoteNames.PLACE_EGG_IN_HATCHERY_REQUEST)
 local moveMotherRequest = Remotes.waitFor(Config.RemoteNames.MOVE_MOTHER_REQUEST)
 local upgradePenRequest = Remotes.waitFor(Config.RemoteNames.UPGRADE_PEN_REQUEST)
-local sellMotherRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHER_REQUEST)
+-- ⚠️ UI-2: ร้านขายแม่ขายเป็นชุดด้วย remote เดียว · SellMotherRequest (ทีละตัว) ยังอยู่ฝั่ง server แต่ client ไม่ใช้แล้ว
+local sellMothersBatchRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHERS_BATCH_REQUEST)
 local autoFillPenRequest = Remotes.waitFor(Config.RemoteNames.AUTO_FILL_PEN_REQUEST)
 local eggHatched = Remotes.waitFor(Config.RemoteNames.EGG_HATCHED)
 local farmStateSync = Remotes.waitFor(Config.RemoteNames.FARM_STATE_SYNC)
@@ -1034,10 +1035,10 @@ SidePanels.create(hud, {
 -- UI-2: ร้านขายแม่ + ป้ายอัปเกรดบนแมพ
 --------------------------------------------------------------------------------
 
--- ⚠️ ขายทีละ uid ด้วย remote เดิม (server ตรวจกระเป๋า/ล็อก/คิดราคาเองทุกตัว · ผลกลับทาง toast)
+-- ⚠️ ขายเป็นชุดครั้งเดียว (server ตรวจกระเป๋า/ล็อก/คิดราคาเองทุกตัว · ข้อความสรุปกลับทาง toast ครั้งเดียว)
 SellWindow.create(hud, {
-	sellMother = function(uid: string)
-		sellMotherRequest:FireServer(uid)
+	sellMothers = function(uids: { string })
+		sellMothersBatchRequest:FireServer(uids)
 	end,
 	notify = showToast,
 })

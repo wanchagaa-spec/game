@@ -659,7 +659,7 @@ print("\n━━ SellWindow: ร้านขายแม่ (UI-2) ━━")
 do
 	local SellWindow = loaded.SellWindow
 	local shopPayload = makePayload()
-	SellWindow.create(gui, { sellMother = record("sellMother"), notify = record("notify") })
+	SellWindow.create(gui, { sellMothers = record("sellMothers"), notify = record("notify") })
 	check("setPayload ตอนหน้าต่างปิดไม่ error", pcall(SellWindow.setPayload, shopPayload))
 	check("เปิดหน้าต่างไม่ error", pcall(SellWindow.open))
 	check("isOpen", SellWindow.isOpen())
@@ -678,14 +678,15 @@ do
 		end
 		return list
 	end
+	-- ⚠️ UI-2: ขายเป็นชุด — คืนรายการ "ชุด" ที่ยิง (แต่ละชุด = array ของ uid)
 	local function sellCalls(fromIndex)
-		local uids = {}
+		local batches = {}
 		for index = fromIndex + 1, #calls do
-			if calls[index].name == "sellMother" then
-				table.insert(uids, calls[index].args[1])
+			if calls[index].name == "sellMothers" then
+				table.insert(batches, calls[index].args[1])
 			end
 		end
-		return uids
+		return batches
 	end
 
 	-- ขายได้เฉพาะแม่ในกระเป๋า — แม่ในคอก (ซุนหงอคง/ม้า) ไม่ขึ้นเลย
@@ -740,11 +741,13 @@ do
 	check("  ยกเลิก → กล่องปิด ไม่ยิง remote", confirm.Visible == false and #sellCalls(before) == 0, true)
 	check("  ยกเลิกแล้วที่ติ๊กไว้ยังอยู่", (SellWindow.getSelection()), 2)
 
-	-- ยืนยัน → ยิง remote ขายด้วย uid ที่เลือกเท่านั้น (ทีละตัว)
+	-- ยืนยัน → ยิง remote ขายเป็นชุดครั้งเดียว ด้วย uid ที่เลือกเท่านั้น
 	sellButton.Activated:Fire()
 	findDescendant(confirm, "ConfirmSell").Activated:Fire()
-	local sold = sellCalls(before)
-	check("ยืนยัน → ยิงขาย 2 ครั้ง", #sold, 2)
+	local batches = sellCalls(before)
+	check("ยืนยัน → ยิงขายเป็นชุดครั้งเดียว", #batches, 1)
+	local sold = batches[1] or {}
+	check("  ชุดมี 2 uid", #sold, 2)
 	check("  uid ตรงกับที่เลือกเท่านั้น", sold[1] == "1-102" and sold[2] == "1-104", true)
 	check("  ขายแล้วล้างที่เลือก", (SellWindow.getSelection()), 0)
 
@@ -897,6 +900,7 @@ do
 	local prompt = promptOn(Config.getMapSignName("speed", 2))
 	check("  กดครั้งเดียวซื้อ (ไม่ต้องกดค้าง)", prompt.HoldDuration, 0)
 	check("  ข้อความปุ่ม \"อัปเกรด\"", prompt.ActionText, "อัปเกรด")
+	check("  ขึ้นเฉพาะอันที่ใกล้สุด (OnePerButton)", prompt.Exclusivity, "Enum.ProximityPromptExclusivity.OnePerButton")
 	prompt.Triggered:Fire(localPlayer)
 	check("  กด E → buy(speed)", lastCall().name == "buy" and lastCall().args[1] == "speed", true)
 	promptOn(Config.getMapSignName("damage")).Triggered:Fire(localPlayer)
@@ -917,6 +921,11 @@ do
 
 	local sellPrompt = findDescendant(counter, "SellShopPrompt")
 	check("แผงร้านขายแม่มีจุดกด E", sellPrompt ~= nil)
+	check("  ขึ้นเฉพาะอันที่ใกล้สุด (OnePerButton)", sellPrompt.Exclusivity, "Enum.ProximityPromptExclusivity.OnePerButton")
+	-- UiKit.prompt: props ส่ง Exclusivity อื่นมาก็ทับไม่ได้
+	local forced = UiKit.prompt({ Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow, ActionText = "ทดสอบ" })
+	check("UiKit.prompt: props ทับ Exclusivity ไม่ได้", forced.Exclusivity, "Enum.ProximityPromptExclusivity.OnePerButton")
+	check("  props อื่นยังใช้ได้", forced.ActionText, "ทดสอบ")
 	sellPrompt.Triggered:Fire(localPlayer)
 	check("  กด E → เปิดร้าน", shopOpen, true)
 end

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Smoke test ของ UI ฝั่ง client (UI-1 · UI-2 · UI-3 · UI-4): Hotbar · BagWindow · SidePanels · UiKit · SellWindow · MapSigns
-· SummonWindow · IndexWindow
+"""Smoke test ของ UI ฝั่ง client (UI-1 · UI-2 · UI-3 · UI-4 · UI-5): Hotbar · BagWindow · SidePanels · UiKit · SellWindow · MapSigns
+· SummonWindow · IndexWindow · RobuxShopWindow
 
     python3 tools/check-ui-smoke.py
 
@@ -18,7 +18,7 @@ LUAU = os.environ.get('LUAU') or shutil.which('luau')
 if not LUAU:
     sys.exit('หา luau CLI ไม่เจอ — ติดตั้งแล้วใส่ใน PATH หรือสั่ง LUAU=/path/to/luau python3 ...')
 
-MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns', 'SummonWindow', 'IndexWindow']
+MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns', 'SummonWindow', 'IndexWindow', 'RobuxShopWindow']
 
 MOCK = r'''--!nocheck
 local Config = require("./src/shared/Config")
@@ -286,6 +286,12 @@ local services = {
 	Workspace = workspaceMock,
 	ReplicatedStorage = newInstance("ReplicatedStorage"),
 	Players = { LocalPlayer = localPlayer },
+	-- UI-5: RobuxShopWindow ดึงราคาแสดงผลผ่านตัวนี้ (ไม่ได้ยิงซื้อจริงจากในโมดูล — นั่นอยู่ที่ actions.buyProduct)
+	MarketplaceService = {
+		GetProductInfo = function(_, productId, infoType)
+			return { PriceInRobux = 1 }
+		end,
+	},
 }
 local sharedFolder = newInstance("Folder")
 sharedFolder.Name = "Shared"
@@ -620,7 +626,7 @@ end
 
 print("\n━━ SidePanels: ปุ่มขวา + แผงไข่ ━━")
 do
-	SidePanels.create(gui, { unequip = record("unequip"), equipBest = record("equipBest") })
+	SidePanels.create(gui, { unequip = record("unequip"), equipBest = record("equipBest"), rushHatching = record("rushHatching") })
 	local ok = pcall(SidePanels.setPayload, payload)
 	check("setPayload ไม่ error", ok)
 	local badge = findDescendant(findDescendant(gui, "EggButton"), "Badge")
@@ -646,6 +652,26 @@ do
 	end
 	check("  ฟองที่ค้าง → \"เสร็จ — รอที่ว่าง\"", texts["เสร็จ — รอที่ว่าง"] == true)
 	check("  ฟองที่กำลังฟัก → เวลาเหลือ 1h 0m", texts["1h 0m"] == true)
+
+	-- UI-5: ปุ่ม "เติบโตทั้งหมด" — มีไข่กำลังฟัง (2 ฟอง) → เปิดใช้งาน กดแล้วเรียก rushHatching
+	local growAllButton = findDescendant(eggPanel, "HeaderButton")
+	check("มีไข่กำลังฟัก → ปุ่ม \"เติบโตทั้งหมด\" เปิดใช้งาน", growAllButton.AutoButtonColor, true)
+	growAllButton.Activated:Fire()
+	check("กด \"เติบโตทั้งหมด\" → เรียก rushHatching", lastCall().name, "rushHatching")
+
+	-- ไม่มีไข่กำลังฟักเลย → ปุ่มถูกปิด กดแล้วไม่เรียกอะไร
+	payload.hatching[3] = { occupied = false }
+	payload.hatching[7] = { occupied = false }
+	SidePanels.setPayload(payload)
+	check("ไม่มีไข่กำลังฟักเลย → ปุ่มถูกปิด", growAllButton.AutoButtonColor, false)
+	local beforeRush = #calls
+	growAllButton.Activated:Fire()
+	check("  กดปุ่มที่ปิดแล้ว → ไม่เรียก rushHatching ซ้ำ", #calls, beforeRush)
+	-- คืนสภาพให้เทสต์ถัดไปที่อ้าง hatchingCount=2 ยังใช้ payload เดิมได้
+	payload.hatching[3] = { occupied = true, eggId = "egg_stage2", eggName = "ไข่ด่าน 2", weight = 500, weightText = "500", remaining = 3600, total = 7200, stuck = false }
+	payload.hatching[7] = { occupied = true, eggId = "egg_stage1", eggName = "ไข่ด่าน 1", weight = 100, weightText = "100", remaining = 0, total = 60, stuck = true }
+	SidePanels.setPayload(payload)
+
 	findDescendant(eggPanel, "CloseTab").Activated:Fire()
 	check("กด \">\" → ปิดแผง ปุ่มกลับมา", eggPanel.Visible == false and findDescendant(gui, "SideButtons").Visible == true, true)
 end
@@ -1446,6 +1472,86 @@ do
 	check("ได้ลิงแล้ว → วาดใหม่เป็นรูปสี (ไม่ทาดำ)", portrait and portrait.ImageColor3 ~= UiKit.BLACK, true)
 	check("  ชื่อ ลิง", findDescendant(monkeyCard, "NameLabel").Text, "ลิง")
 	IndexWindow.close()
+end
+
+print("\n━━ RobuxShopWindow: ร้านค้า Robux (UI-5) ━━")
+do
+	local RobuxShopWindow = loaded.RobuxShopWindow
+	local bought = {}
+	local shopActions = {
+		buyProduct = function(productId)
+			table.insert(bought, productId)
+		end,
+	}
+
+	-- fetchPrice() ยิง task.spawn (no-op โดย default ในฮาร์เนสนี้) — บังคับให้รันจริงตอน create()
+	-- เพื่อทดสอบว่าราคาที่ดึงจาก GetProductInfo จำลอง (1 Robux) ไปโผล่ในป้ายราคาจริง
+	local realSpawn = __env.task.spawn
+	__env.task.spawn = function(fn, ...)
+		pcall(fn, ...)
+	end
+	RobuxShopWindow.create(gui, shopActions)
+	__env.task.spawn = realSpawn
+
+	local win = findDescendant(gui, "RobuxShopWindow")
+	check("สร้างหน้าต่างได้", win ~= nil)
+
+	local sp = makePayload()
+	sp.robuxDamageBonus = 3
+	sp.robuxSpeedBonus = 1
+	sp.walkSpeed = 140
+	sp.robuxSpeedHardCap = 150
+	sp.hatchingCount = 2
+	check("setPayload ตอนหน้าต่างปิดไม่ error", pcall(RobuxShopWindow.setPayload, sp))
+	check("เปิดหน้าต่างไม่ error", pcall(RobuxShopWindow.open))
+
+	local eggCard = findDescendant(win, "Card1")
+	local dmgCard = findDescendant(win, "Card2")
+	local spdCard = findDescendant(win, "Card3")
+	local rushCard = findDescendant(win, "Card4")
+	check("มีการ์ดครบ 4 ใบ (ไข่ตำนาน · ดาเมจ · ความเร็ว · เร่งฟัก)",
+		eggCard ~= nil and dmgCard ~= nil and spdCard ~= nil and rushCard ~= nil, true)
+
+	check("ราคาไข่ตำนานดึงจาก GetProductInfo จำลอง (1 Robux)", findDescendant(eggCard, "Price").Text, "💎 1")
+	findDescendant(eggCard, "Buy").Activated:Fire()
+	check("กดซื้อไข่ตำนาน → เรียก buyProduct(productId ของ legendary_egg)",
+		bought[#bought], Config.getDeveloperProduct("legendary_egg").productId)
+
+	check("การ์ดดาเมจ: โชว์ Lv. Robux ปัจจุบัน + ไม่มีเพดาน", findDescendant(dmgCard, "Status").Text, "Lv. Robux 3 — ไม่มีเพดาน")
+	findDescendant(dmgCard, "Buy").Activated:Fire()
+	check("กดซื้อดาเมจ → เรียก buyProduct(productId ของ robux_damage_step)",
+		bought[#bought], Config.getRobuxProduct("robux_damage_step").productId)
+
+	check("การ์ดความเร็ว: ยังไม่ถึงเพดาน → โชว์ความเร็วจริง", findDescendant(spdCard, "Status").Text, "Lv. Robux 1 (ความเร็วจริง 140)")
+	check("  ปุ่มซื้อยังเปิดอยู่", findDescendant(spdCard, "Buy").AutoButtonColor, true)
+	findDescendant(spdCard, "Buy").Activated:Fire()
+	check("  กดซื้อความเร็ว → เรียก buyProduct(productId ของ robux_speed_step)",
+		bought[#bought], Config.getRobuxProduct("robux_speed_step").productId)
+
+	-- ถึงเพดานความปลอดภัยของแมพแล้ว (walkSpeed >= robuxSpeedHardCap) → ปิดปุ่ม กันเสีย Robux ฟรี
+	sp.walkSpeed = 150
+	RobuxShopWindow.setPayload(sp)
+	check("ถึงเพดานความปลอดภัยแล้ว → ข้อความเตือน", findDescendant(spdCard, "Status").Text, "Lv. Robux 1 — ถึงเพดานความปลอดภัยของแมพแล้ว")
+	check("  ปุ่มซื้อถูกปิด", findDescendant(spdCard, "Buy").AutoButtonColor, false)
+	local boughtBefore = #bought
+	findDescendant(spdCard, "Buy").Activated:Fire()
+	check("  กดปุ่มที่ปิดแล้ว → ไม่เรียก buyProduct ซ้ำ", #bought, boughtBefore)
+
+	check("การ์ดเร่งฟัก: มีไข่กำลังฟัก 2 ฟอง → เปิดใช้งาน", findDescendant(rushCard, "Buy").AutoButtonColor, true)
+	findDescendant(rushCard, "Buy").Activated:Fire()
+	check("กดเร่งฟัก → เรียก buyProduct(productId ของ robux_hatch_rush)",
+		bought[#bought], Config.getRobuxProduct("robux_hatch_rush").productId)
+
+	-- ไม่มีไข่กำลังฟักเลย → ปิดปุ่มเร่งฟัก กันซื้อไปแล้วไม่มีผลอะไรเลย
+	sp.hatchingCount = 0
+	RobuxShopWindow.setPayload(sp)
+	check("ไม่มีไข่กำลังฟักเลย → ปุ่มเร่งฟักถูกปิด", findDescendant(rushCard, "Buy").AutoButtonColor, false)
+	boughtBefore = #bought
+	findDescendant(rushCard, "Buy").Activated:Fire()
+	check("  กดปุ่มที่ปิดแล้ว → ไม่เรียก buyProduct ซ้ำ", #bought, boughtBefore)
+
+	RobuxShopWindow.close()
+	check("ปิดหน้าต่าง", RobuxShopWindow.isOpen(), false)
 end
 
 print(string.format("\n=== ผ่าน %d / ตก %d ===", passCount, failCount))

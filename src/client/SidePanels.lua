@@ -18,6 +18,9 @@ local SidePanels = {}
 export type Actions = {
 	unequip: (uid: string) -> (),
 	equipBest: () -> (),
+	-- UI-5: ปุ่มหัวแผงไข่ "เติบโตทั้งหมด" — พรอมต์ซื้อ Robux แล้วเร่งไข่ที่กำลังฟัก**ทุกฟอง**ให้เสร็จทันที
+	-- (เลือก "เร่งทั้งหมด" แทน "เร่งฟองที่เลือก" — ดูเหตุผลที่ EggService.rushAllHatching)
+	rushHatching: () -> (),
 }
 
 type PanelName = "eggs" | "paw"
@@ -54,6 +57,7 @@ local panels: { [string]: Frame } = {}
 local lists: { [string]: ScrollingFrame } = {}
 local emptyLabels: { [string]: TextLabel } = {}
 local pawTitle: TextLabel
+local eggHeaderButton: TextButton
 local openPanel: PanelName? = nil
 
 local hatchRows: { [number]: HatchRow } = {}
@@ -263,18 +267,8 @@ local function getHatchRow(slotIndex: number): HatchRow
 	UiKit.textStroke(timeLabel, 1.5)
 	timeLabel.Parent = bar
 
-	-- ▶ เร่งฟักด้วย Robux — UI-5 · รอบนี้แสดงแต่กดไม่ได้
-	local speedUp = UiKit.button({
-		Name = "SpeedUp",
-		Position = UDim2.fromScale(0.81, 0.15),
-		Size = UDim2.fromScale(0.16, 0.7),
-		BackgroundColor3 = UiKit.DISABLED,
-		AutoButtonColor = false,
-		Text = "▶",
-	})
-	UiKit.corner(speedUp, UDim.new(0.2, 0))
-	UiKit.border(speedUp, UiKit.BLACK, 2)
-	speedUp.Parent = frame
+	-- ⚠️ UI-5: เร่งฟักเป็นปุ่มเดียวที่หัวแผง ("เติบโตทั้งหมด" — เร่ง**ทุกฟอง**พร้อมกัน)
+	-- ไม่มีปุ่มเร่งรายฟองแล้ว (ตัดสินใจแล้วว่า implement ง่ายกว่า — ดู EggService.rushAllHatching)
 
 	local row: HatchRow = { frame = frame, icon = icon, fill = fill, timeLabel = timeLabel }
 	hatchRows[slotIndex] = row
@@ -381,6 +375,11 @@ local function refreshEggs()
 	end
 	emptyLabels.eggs.Text = "ไม่มีไข่ที่กำลังฟัก — วางไข่จากกระเป๋า 🎒 แท็บไข่"
 	emptyLabels.eggs.Visible = #occupied == 0
+
+	-- UI-5: ปิดปุ่ม "เติบโตทั้งหมด" ตอนไม่มีไข่ให้เร่งเลย — กันเผลอซื้อ Robux ไปแล้วไม่มีผลอะไรเลย
+	local canRush = #occupied > 0
+	eggHeaderButton.BackgroundColor3 = if canRush then EQUIP_COLOR else UiKit.DISABLED
+	eggHeaderButton.AutoButtonColor = canRush
 	updateHatchTimers()
 end
 
@@ -473,8 +472,16 @@ function SidePanels.create(parent: ScreenGui, panelActions: Actions)
 		setOpenPanel("paw")
 	end)
 
-	local eggPanel, _, _ = makePanel("eggs", "ไข่ที่กำลังฟัก", "เติบโตทั้งหมด", EQUIP_COLOR, false)
+	-- UI-5: ปุ่มหัวแผงไข่ตอนนี้ทำงานจริง (พรอมต์ซื้อ Robux เร่งฟักทุกฟอง) — เริ่มเปิดไว้เสมอ
+	-- แล้วปิด/เปิดจริงตามว่ามีไข่กำลังฟักอยู่ไหมใน refreshEggs() (กันซื้อไปแล้วไม่มีผล)
+	local eggPanel
+	eggPanel, _, eggHeaderButton = makePanel("eggs", "ไข่ที่กำลังฟัก", "เติบโตทั้งหมด", EQUIP_COLOR, true)
 	eggPanel.Parent = parent
+	eggHeaderButton.Activated:Connect(function()
+		if eggHeaderButton.AutoButtonColor then
+			actions.rushHatching()
+		end
+	end)
 
 	local pawPanel, title, equipButton = makePanel("paw", "0/0 Active", "สวมใส่ที่ดีที่สุด", EQUIP_COLOR, true)
 	pawTitle = title

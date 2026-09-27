@@ -9,11 +9,16 @@
 --   SellWindow — UI-2: หน้าต่างร้านขายแม่ (ติ๊กหลายตัว + กล่องยืนยันครั้งเดียว)
 --   SummonWindow — UI-3: หน้าต่างแท่นอัญเชิญ (แท็บแม่/ลูก · ติ๊กเรียงลำดับ · ส่งไปรบ/หยุดอัญเชิญ)
 --   IndexWindow — UI-4: หน้าต่างดัชนี (แท็บคลาส · เคยได้ = รูป / ยังไม่ได้ = เงา · จุดแดงบนปุ่มเมื่อได้ตัวใหม่)
---   ที่เหลืออยู่ในไฟล์นี้: ปุ่มกระเป๋าแถบบน · ปุ่มร้านค้า ("เร็วๆ นี้") · ปุ่มดัชนี · เลเวลมุมล่างซ้าย ·
+--   RobuxShopWindow — UI-5: ร้านค้า Robux (ไข่ตำนาน · ทะลุเพดานดาเมจ/ความเร็ว · เร่งฟักไข่ทั้งหมด)
+--   ที่เหลืออยู่ในไฟล์นี้: ปุ่มกระเป๋าแถบบน · ปุ่มร้านค้า · ปุ่มดัชนี · เลเวลมุมล่างซ้าย ·
 --   ข้อความแจ้งผล (toast) · HUD การรบ · popup ผ่านด่าน
 --
 -- ⚠️ UI-3: แผง TEMP (อัญเชิญ + กองลูก) · กล่องยืนยันส่งแม่ทีละตัว · แผงจัดคิวปล่อยใกล้จุดปล่อย **ลบแล้ว**
 --   ทั้งหมดย้ายไปอยู่ในหน้าต่างแท่นอัญเชิญ (SummonWindow · เปิดด้วย E ค้างที่แท่นปากเลน)
+--
+-- ⚠️ UI-5: หน้าต่าง "เร็วๆ นี้" (placeholder ของปุ่มร้านค้า) **ลบแล้ว** แทนที่ด้วย RobuxShopWindow จริง
+-- การซื้อทุกอย่างในหน้าต่างนี้ยิง MarketplaceService:PromptProductPurchase ตรง ๆ (ไม่ใช่ FireServer) —
+-- server เข้ามาเกี่ยวตอน ProcessReceipt เท่านั้น (ดู EggService.processReceipt)
 --
 -- client ไม่ตัดสินอะไรเองเลย: กดปุ่ม = ส่งคำขอไป server แล้วรอฟังผลกลับมา
 -- ตัวเลขที่เห็นบนจอเป็นค่าที่ server ส่งมา (นับถอยหลังเวลาฟักเองระหว่างรอบ sync เท่านั้น)
@@ -46,6 +51,10 @@ local SellWindow = require(script.Parent:WaitForChild("SellWindow"))
 local SummonWindow = require(script.Parent:WaitForChild("SummonWindow"))
 -- UI-4
 local IndexWindow = require(script.Parent:WaitForChild("IndexWindow"))
+-- UI-5
+local RobuxShopWindow = require(script.Parent:WaitForChild("RobuxShopWindow"))
+
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -83,7 +92,6 @@ local toggleMotherLockRequest = Remotes.waitFor(Config.RemoteNames.TOGGLE_MOTHER
 
 local BG = Color3.fromRGB(28, 30, 36)
 local FG = Color3.fromRGB(240, 240, 240)
-local DIM = Color3.fromRGB(160, 165, 175)
 local ACCENT = Color3.fromRGB(90, 160, 235)
 local SUCCESS_COLOR = Color3.fromRGB(140, 220, 140)
 local ERROR_COLOR = Color3.fromRGB(235, 130, 130)
@@ -487,65 +495,11 @@ local function updateCombatHud()
 end
 
 --------------------------------------------------------------------------------
--- หน้าต่าง "เร็วๆ นี้" (ร้านค้า → UI-5) · ดัชนีเปิดหน้าต่างจริงแล้ว (UI-4 · IndexWindow)
---------------------------------------------------------------------------------
-
-local comingSoon = UiKit.frame({
-	Name = "ComingSoon",
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.fromScale(0.5, 0.5),
-	Size = UDim2.fromScale(0.36, 0.36),
-	BackgroundColor3 = BG,
-	BackgroundTransparency = 0.05,
-	Visible = false,
-})
-UiKit.corner(comingSoon, UDim.new(0.06, 0))
-UiKit.border(comingSoon, UiKit.BLACK, 3)
-comingSoon.Parent = hud
-
-local comingSoonTitle = UiKit.label({
-	Position = UDim2.fromScale(0.05, 0.06),
-	Size = UDim2.fromScale(0.75, 0.18),
-	TextXAlignment = Enum.TextXAlignment.Left,
-	FontFace = UiKit.FONT_HEAVY,
-})
-UiKit.textStroke(comingSoonTitle, 1.5)
-comingSoonTitle.Parent = comingSoon
-
-local comingSoonBody = UiKit.label({
-	Position = UDim2.fromScale(0.1, 0.36),
-	Size = UDim2.fromScale(0.8, 0.26),
-	Text = "เร็วๆ นี้",
-	FontFace = UiKit.FONT_HEAVY,
-	TextColor3 = Color3.fromRGB(255, 220, 90),
-})
-UiKit.textStroke(comingSoonBody, 2)
-comingSoonBody.Parent = comingSoon
-
-local comingSoonNote = UiKit.label({
-	Position = UDim2.fromScale(0.1, 0.68),
-	Size = UDim2.fromScale(0.8, 0.12),
-	TextColor3 = DIM,
-})
-comingSoonNote.Parent = comingSoon
-
-local comingSoonClose = UiKit.button({
-	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.fromScale(0.96, 0.06),
-	Size = UDim2.fromScale(0.12, 0.16),
-	BackgroundColor3 = BATTLE_RISK_COLOR,
-	Text = "✕",
-})
-UiKit.corner(comingSoonClose, UDim.new(0.25, 0))
-comingSoonClose.Parent = comingSoon
-
---------------------------------------------------------------------------------
--- จัดการหน้าต่างกลางจอ — เปิดได้ทีละอัน (กระเป๋า · ร้านค้า · ดัชนี · ร้านขายแม่ · แท่นอัญเชิญ)
+-- จัดการหน้าต่างกลางจอ — เปิดได้ทีละอัน (กระเป๋า · ร้านค้า Robux · ดัชนี · ร้านขายแม่ · แท่นอัญเชิญ)
+-- ⚠️ UI-5: หน้าต่าง "เร็วๆ นี้" (placeholder ของร้านค้า) ปิดไปแล้ว — แทนที่ด้วย RobuxShopWindow จริง
 --------------------------------------------------------------------------------
 
 type WindowName = "bag" | "shop" | "index" | "sell" | "summon"
-
-local comingSoonKind: WindowName? = nil
 
 local function isWindowOpen(name: WindowName): boolean
 	if name == "bag" then
@@ -556,8 +510,10 @@ local function isWindowOpen(name: WindowName): boolean
 		return SummonWindow.isOpen()
 	elseif name == "index" then
 		return IndexWindow.isOpen()
+	elseif name == "shop" then
+		return RobuxShopWindow.isOpen()
 	end
-	return comingSoon.Visible and comingSoonKind == name
+	return false
 end
 
 local function closeAllWindows()
@@ -565,8 +521,7 @@ local function closeAllWindows()
 	SellWindow.close()
 	SummonWindow.close()
 	IndexWindow.close()
-	comingSoon.Visible = false
-	comingSoonKind = nil
+	RobuxShopWindow.close()
 end
 
 -- กดปุ่มเดิมซ้ำ = ปิด · กดปุ่มอื่น = ปิดอันเก่าแล้วเปิดอันใหม่
@@ -584,15 +539,10 @@ local function toggleWindow(name: WindowName)
 		SummonWindow.open()
 	elseif name == "index" then
 		IndexWindow.open() -- ล้างจุดแดงบนปุ่มดัชนีด้วย
-	else
-		comingSoonKind = name
-		comingSoonTitle.Text = "🛒 ร้านค้า"
-		comingSoonNote.Text = "ร้านค้า Robux (ไข่ตำนาน · เร่งฟัก · ซื้อเลเวล) มาในรอบ UI-5"
-		comingSoon.Visible = true
+	elseif name == "shop" then
+		RobuxShopWindow.open()
 	end
 end
-
-comingSoonClose.Activated:Connect(closeAllWindows)
 
 --------------------------------------------------------------------------------
 -- ปุ่มซ้าย: ร้านค้า · ดัชนี
@@ -633,6 +583,16 @@ local indexButton = makeLeftButton("IndexButton", INDEX_BUTTON_Y, Color3.fromRGB
 -- UI-4: หน้าต่างดัชนี + จุดแดงบนปุ่มเมื่อได้ตัวละครใหม่ครั้งแรก (หายเมื่อเปิดดัชนี · จำใน client เท่านั้น)
 IndexWindow.create(hud)
 IndexWindow.attachBadge(indexButton)
+
+-- ⚠️ UI-5: จุดเดียวที่เรียก PromptProductPurchase — ไม่ใช่ FireServer (server ไม่เกี่ยวจนกว่าจะถึง
+-- ProcessReceipt) ใช้ closure เดียวกันทั้งจากหน้าต่างร้านค้าและปุ่ม "เติบโตทั้งหมด" ในแผงไข่ (SidePanels)
+local function buyRobuxProduct(productId: number)
+	MarketplaceService:PromptProductPurchase(player, productId)
+end
+
+RobuxShopWindow.create(hud, {
+	buyProduct = buyRobuxProduct,
+})
 
 shopButton.Activated:Connect(function()
 	toggleWindow("shop")
@@ -733,6 +693,13 @@ SidePanels.create(hud, {
 	end,
 	equipBest = function()
 		autoFillPenRequest:FireServer()
+	end,
+	-- UI-5: ปุ่ม "เติบโตทั้งหมด" — ทางลัดเดียวกับการ์ด "เร่งฟักไข่ทั้งหมด" ในร้านค้า Robux (productId เดียวกัน)
+	rushHatching = function()
+		local rushProduct = Config.getRobuxProduct("robux_hatch_rush")
+		if rushProduct then
+			buyRobuxProduct(rushProduct.productId)
+		end
 	end,
 })
 
@@ -938,6 +905,7 @@ farmStateSync.OnClientEvent:Connect(function(payload)
 	SellWindow.setPayload(payload)
 	SummonWindow.setPayload(payload)
 	IndexWindow.setPayload(payload)
+	RobuxShopWindow.setPayload(payload)
 	MapSigns.setPayload(payload)
 
 	-- ⚠️ Phase 3B-1: กำแพง (WallRenderer) กับโมเดลทหาร (TroopRenderer) อ่านจากของจริงที่ sync

@@ -110,6 +110,15 @@ export type Data = {
 	-- ติดเฉพาะใน PlayerData.createMother (จุดเดียวที่สร้างแม่ใหม่) · **ไม่ลบเมื่อแม่ถูกขาย/ตาย**
 	-- charId ที่ไม่มีใน Config แล้วค้างอยู่ได้ (ดัชนีข้ามไปเอง) ไม่ต้องลบ · ยังไม่แยกตามสถานะ gold/silver
 	discovered: { [string]: boolean },
+	-- ⚠️ UI-5 (schema v5) — โบนัส Robux ที่ทะลุเพดานเงินในเกม เก็บเป็น **จำนวนขั้น** ไม่ใช่ตัวคูณ
+	-- (ตัวคูณคำนวณสดผ่าน Config.getRobuxDamageMultiplier/getEffectiveWalkSpeed เสมอ ไม่แคชค่าคูณ)
+	-- แยกจาก damageLevel/speedLevel (แทร็กเงินในเกม) โดยสิ้นเชิง — ไม่ใช้สูตร/เพดานเดียวกัน
+	robuxDamageBonus: number,
+	robuxSpeedBonus: number,
+	-- ⚠️ กัน ProcessReceipt ให้ของซ้ำตอน Roblox retry เดิม (เช่น เซิร์ฟดับกลางคันหลังให้ของแต่ก่อนเซฟ)
+	-- อาเรย์ FIFO ยาวไม่เกิน Config.DataStore.PROCESSED_PURCHASE_LOG_CAP — เก่าสุดถูกตัดทิ้งก่อน
+	-- (ไม่ใช่ audit log ถาวร แค่กันซ้ำระยะสั้นที่ Roblox อาจ retry) ดู PlayerData.markPurchaseProcessed
+	processedPurchaseIds: { string },
 	stats: { [string]: any },
 	sessionLock: SessionLock?,
 	lastSaveAt: number,
@@ -169,6 +178,9 @@ function PlayerData.createNew(): Data
 		combatAutoPaused = false,
 		releaseOrder = {},
 		discovered = {},
+		robuxDamageBonus = 0,
+		robuxSpeedBonus = 0,
+		processedPurchaseIds = {},
 
 		stats = {
 			eggsHatched = 0,
@@ -260,6 +272,52 @@ function PlayerData.createMother(
 end
 
 --------------------------------------------------------------------------------
+-- ร้าน Robux (UI-5) — กันให้ของซ้ำ + โบนัสทะลุเพดาน
+--------------------------------------------------------------------------------
+
+-- เคยให้ของจาก PurchaseId นี้ไปแล้วหรือยัง — เรียกก่อนให้ของทุกครั้งใน ProcessReceipt
+function PlayerData.hasProcessedPurchase(data: Data, purchaseId: string): boolean
+	return table.find(data.processedPurchaseIds, purchaseId) ~= nil
+end
+
+-- ⚠️ เรียก**หลัง**ให้ของสำเร็จเท่านั้น (grant ก่อน ค่อยบันทึกว่าให้แล้ว)
+-- FIFO ยาวไม่เกิน Config.DataStore.PROCESSED_PURCHASE_LOG_CAP — ตัดตัวเก่าสุดทิ้งเมื่อเกิน
+function PlayerData.markPurchaseProcessed(data: Data, purchaseId: string)
+	if PlayerData.hasProcessedPurchase(data, purchaseId) then
+		return
+	end
+	table.insert(data.processedPurchaseIds, purchaseId)
+	local cap = Config.DataStore.PROCESSED_PURCHASE_LOG_CAP
+	while #data.processedPurchaseIds > cap do
+		table.remove(data.processedPurchaseIds, 1)
+	end
+end
+
+-- เพิ่มขั้นโบนัส damage/speed จาก Robux — ทั้งคู่เดินหน้าอย่างเดียว ไม่มีเพดาน (การ clamp
+-- ผลจริงทำที่ Config.getRobuxDamageMultiplier / Config.getEffectiveWalkSpeed ตอนใช้งาน ไม่ใช่ตรงนี้)
+function PlayerData.addRobuxDamageSteps(data: Data, steps: number)
+	data.robuxDamageBonus += steps
+end
+
+function PlayerData.addRobuxSpeedSteps(data: Data, steps: number)
+	data.robuxSpeedBonus += steps
+end
+
+-- เร่งไข่ที่กำลังฟักอยู่ **ทุกฟอง** ให้ครบเวลาทันที (ตั้ง hatchAt = now) — คืนจำนวนฟองที่เร่งจริง
+-- ⚠️ ฟังก์ชันนี้ **ไม่** สร้างตัวแม่ให้ — แค่ทำให้ nowValue >= hatchAt เป็นจริง แล้วให้ผู้เรียก
+-- (EggService.processReadyHatchSlots) เดินตรรกะฟักเดิมต่อ ไม่เขียน logic ฟักซ้ำที่นี่
+function PlayerData.rushAllHatchSlots(data: Data, now: number): number
+	local rushed = 0
+	for index, slot in data.hatching do
+		if type(slot) == "table" and slot.hatchAt > now then
+			slot.hatchAt = now
+			rushed += 1
+		end
+	end
+	return rushed
+end
+
+--------------------------------------------------------------------------------
 -- session lock
 --------------------------------------------------------------------------------
 
@@ -324,6 +382,22 @@ MIGRATIONS[3] = function(data: Data): Data
 				end
 			end
 		end
+	end
+	return data
+end
+
+-- v4 → v5 (UI-5 · ร้าน Robux): เพิ่ม robuxDamageBonus/robuxSpeedBonus (เริ่ม 0 — ยังไม่เคยซื้อ)
+-- และ processedPurchaseIds (เริ่มว่าง — ไม่มีธุรกรรมเก่าให้จำ) · idempotent: เติมเฉพาะที่ยังไม่มี
+MIGRATIONS[4] = function(data: Data): Data
+	local raw = data :: any
+	if type(raw.robuxDamageBonus) ~= "number" then
+		raw.robuxDamageBonus = 0
+	end
+	if type(raw.robuxSpeedBonus) ~= "number" then
+		raw.robuxSpeedBonus = 0
+	end
+	if type(raw.processedPurchaseIds) ~= "table" then
+		raw.processedPurchaseIds = {}
 	end
 	return data
 end
@@ -622,6 +696,14 @@ function PlayerData.buildWorstCase(): Data
 	end
 
 	data.sessionLock = { jobId = string.rep("0", 36), placeId = 9999999999, at = 9999999999 }
+
+	-- UI-5: โบนัส Robux ซื้อสะสมไปเยอะ ๆ (ตัวเลขล้วน ไม่มีเพดาน แต่ขนาด encode คงที่ไม่ว่าจะมากแค่ไหน)
+	-- + processedPurchaseIds เต็ม cap ด้วย PurchaseId ที่ยาวเท่า GUID จริง (36 ตัวอักษร)
+	data.robuxDamageBonus = 999999
+	data.robuxSpeedBonus = 999999
+	for index = 1, Config.DataStore.PROCESSED_PURCHASE_LOG_CAP do
+		table.insert(data.processedPurchaseIds, string.format("00000000-0000-0000-0000-%012d", index))
+	end
 
 	return data
 end

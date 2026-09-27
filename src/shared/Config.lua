@@ -16,7 +16,8 @@ local Config = {}
 -- v2 (Phase 3C-1): เพิ่ม battleRoster (แม่ที่ส่งไปรบ) — migration อยู่ที่ PlayerData.MIGRATIONS[1]
 -- v3 (Phase 4A): เพิ่ม stageClearBonusGranted (ธงรางวัลผ่านด่าน 9 ช่อง) — PlayerData.MIGRATIONS[2]
 -- v4 (UI-4): เพิ่ม discovered (ตัวละครที่เคยได้ · ดัชนี) — PlayerData.MIGRATIONS[3]
-Config.SCHEMA_VERSION = 4
+-- v5 (UI-5): เพิ่ม robuxDamageBonus / robuxSpeedBonus / processedPurchaseIds (ร้าน Robux) — PlayerData.MIGRATIONS[4]
+Config.SCHEMA_VERSION = 5
 
 --------------------------------------------------------------------------------
 -- ทำให้ไฟล์นี้โหลดได้นอก Roblox ด้วย (สำหรับชุดเทสต์ใน tests/)
@@ -191,6 +192,21 @@ export type DeveloperProduct = {
 	productId: number, -- เลขจาก Creator Dashboard (0 = ยังไม่ได้สร้าง)
 	grantEggId: string, -- ซื้อแล้วได้ไข่ชนิดไหน
 	grantAmount: number, -- ได้กี่ฟองต่อการซื้อ 1 ครั้ง
+	enabled: boolean,
+}
+
+-- ⚠️ UI-5: ของที่ซื้อด้วย Robux ที่ "ไม่ใช่ไข่" — คนละ shape จาก DeveloperProduct
+-- (ให้ของเป็นขั้น/การกระทำ ไม่ใช่ไข่) แยกตารางเพื่อไม่ต้องยัด field ที่ไม่เกี่ยวกันเข้า DeveloperProduct
+-- ทุกตัวเป็น Developer Product แบบซื้อซ้ำได้ (ไม่ใช่ Gamepass) — ProcessReceipt เดียวกันดูแลทั้งคู่
+export type RobuxProductKind = "damage_bonus" | "speed_bonus" | "hatch_rush"
+
+export type RobuxProduct = {
+	id: string,
+	name: string,
+	description: string,
+	productId: number, -- เลขจาก Creator Dashboard (0 = ยังไม่ได้สร้าง)
+	kind: RobuxProductKind,
+	amount: number, -- ต่อการซื้อ 1 ครั้ง: จำนวนขั้น (damage_bonus/speed_bonus) หรือ 1 เสมอ (hatch_rush)
 	enabled: boolean,
 }
 
@@ -683,6 +699,10 @@ Config.DataStore = {
 	-- เผื่อไว้เพราะตัวประเมินขนาดของเราไม่ใช่ตัว encode ตัวเดียวกับที่ Roblox ใช้จริง
 	-- `PlayerData.validate()` วัดข้อมูลที่เต็มทุกเพดานแล้วเทียบกับค่านี้ตอนบูต
 	MAX_PLAYER_DATA_BYTES = 3 * 1024 * 1024,
+
+	-- ⚠️ UI-5: จำนวน PurchaseId ล่าสุดที่จำไว้กันให้ของซ้ำ (data.processedPurchaseIds)
+	-- เก็บแบบ FIFO ต่อผู้เล่น — เกินแล้วตัดตัวเก่าสุดทิ้ง (ไม่ใช่ audit log ถาวร แค่กันซ้ำตอน retry)
+	PROCESSED_PURCHASE_LOG_CAP = 200,
 }
 
 --------------------------------------------------------------------------------
@@ -709,7 +729,7 @@ local BALANCE_GROUPS: { string } = {
 	"StageWeightTiers", "Weight", "Production", "Damage", "NewPlayer",
 	"Economy", "Pen", "Bag", "Hatchery", "Stages", "Stage", "Boss",
 	"DamageUpgrade", "SpeedUpgrade", "Combat", "BalanceCheck", "Weapon",
-	"VisualScale",
+	"VisualScale", "RobuxBoost",
 }
 
 --------------------------------------------------------------------------------
@@ -1603,6 +1623,25 @@ Balance.SpeedUpgrade = {
 	THICKNESS_SAFETY = 2,
 }
 
+--------------------------------------------------------------------------------
+-- Robux: ทะลุเพดานดาเมจ/ความเร็ว + เร่งฟักไข่ (UI-5)
+--------------------------------------------------------------------------------
+-- ⚠️ แยกจาก DamageUpgrade/SpeedUpgrade (เงินในเกม) โดยสิ้นเชิง — คนละฟิลด์ใน PlayerData
+-- (robuxDamageBonus / robuxSpeedBonus) คนละสูตร ไม่มี MAX_LEVEL แบบ DamageUpgrade
+--
+-- ดาเมจ: ไม่มีเพดานทางฟิสิกส์ผูกอยู่ (ต่างจากความเร็ว) จึงปล่อยทวีคูณไปได้ตรง ๆ ไม่ต้อง clamp
+-- ความเร็ว: **ต้องมี hard cap** เพราะความหนากำแพงทุกชนิดที่สร้างไปแล้ว (§ผังแมพ) คำนวณจาก
+-- ความเร็วสูงสุดของแทร็กปกติ (128) ไว้ล่วงหน้า ถ้าความเร็วจริงพุ่งเกินกว่าที่กำแพงรับไหว
+-- ผู้เล่นจะวิ่งทะลุกำแพงได้ — ดู Config.getRobuxSpeedHardCap() (คำนวณย้อนกลับจากความหนาที่สร้างจริง
+-- แทนที่จะเผื่อพื้นที่กำแพงใหม่ กันไม่ต้องแตะ MapDimensions ที่เป็นโครงหลักที่ล็อกไว้แล้ว)
+Balance.RobuxBoost = {
+	-- ตัวคูณ damage ต่อ 1 ขั้นที่ซื้อด้วย Robux — ไม่มีเพดานขั้น (ต่างจาก DamageUpgrade.MAX_LEVEL)
+	DAMAGE_MULTIPLIER_PER_STEP = 1.1,
+
+	-- ความเร็วที่เพิ่มต่อ 1 ขั้น (studs/วินาที) — ผลจริงถูก clamp ด้วย getRobuxSpeedHardCap() เสมอ
+	SPEED_PER_STEP = 4,
+}
+
 Balance.Combat = {
 	--------------------------------------------------------------------------
 	-- อาวุธป้องกันของกำแพง — เก็บเป็น "สัดส่วน" ไม่ใช่ตัวเลข damage
@@ -1736,21 +1775,64 @@ Balance.BalanceCheck = {
 -- ไม่ใช่ Gamepass) การให้ของต้องผ่าน ProcessReceipt ซึ่งต้องทน retry ได้
 -- รายละเอียดวิธีทำให้ปลอดภัยอยู่ใน docs/data-schema.md
 
+-- ⚠️ UI-5: **ตารางเดียวที่รวม placeholder productId ทุกตัวในเกม** (DeveloperProducts + RobuxProducts
+-- ข้างล่าง) — ห้ามมี productId ปลอมกระจายอยู่ที่อื่น validate() เช็ค unique ข้ามสองตารางนี้ด้วย
+-- ราคาจริงทั้งหมด = 1 Robux ชั่วคราว (ตั้งจริงที่เว็บ Roblox เอง) เลขที่ใส่ไว้เป็นเลขปลอม
+-- ต้องแทนที่ด้วย Product ID จริงจาก Creator Dashboard ก่อน publish (ดู docs/data-schema.md §8.7)
 local DeveloperProducts: { [string]: DeveloperProduct } = {
 	legendary_egg = {
 		id = "legendary_egg",
 		name = "ไข่ตำนาน",
 		description = "ไข่ที่ออกตัวละครระดับ S และ SS ได้ ซื้อด้วย Robux เท่านั้น",
-		productId = 0, -- ⚠️ ใส่เลขจริงจาก Creator Dashboard ก่อน publish
+		productId = 1000001, -- TODO: แทนที่ด้วย Product ID จริงจากเว็บ Roblox
 		grantEggId = "egg_legendary",
 		grantAmount = 1,
-		enabled = false, -- เปิดตอน Phase 6 หลังสร้าง product จริงแล้ว
+		enabled = true, -- UI-5: เปิดขายจริง (ราคาจริงตั้งที่เว็บ Roblox ก่อน publish)
 	},
 }
 
 Config.DeveloperProducts = DeveloperProducts
 
+-- ⚠️ UI-5: ของที่ซื้อด้วย Robux ที่ไม่ใช่ไข่ — ทะลุเพดานดาเมจ/ความเร็ว + เร่งฟักไข่
+-- ทุกตัวซื้อซ้ำได้ (Developer Product เดียวใช้ทุกครั้งที่ซื้อ ไม่ใช่ Gamepass/คนละ id ต่อขั้น)
+-- เพราะ ProcessReceipt ไม่ได้รับพารามิเตอร์ที่ผู้เล่นเลือกไว้ตอนกด (เช่น "ฟองไหน") มาด้วย —
+-- เก็บ "จะซื้อกี่ขั้น/เร่งกี่ฟอง" ไว้ในตัว amount ของสินค้าแทน ไม่ใช่ที่ตัวธุรกรรม
+local RobuxProducts: { [string]: RobuxProduct } = {
+	robux_damage_step = {
+		id = "robux_damage_step",
+		name = "พลังทะลุเพดาน",
+		description = "เพิ่มตัวคูณดาเมจแบบไม่มีเพดาน ซื้อได้เรื่อย ๆ",
+		productId = 1000002, -- TODO: แทนที่ด้วย Product ID จริงจากเว็บ Roblox
+		kind = "damage_bonus",
+		amount = 1,
+		enabled = true,
+	},
+	robux_speed_step = {
+		id = "robux_speed_step",
+		name = "ความเร็วทะลุเพดาน",
+		description = "เพิ่มความเร็ววิ่งเกินเพดานปกติ (ยังมีเพดานความปลอดภัยของแมพกันไว้) ซื้อได้เรื่อย ๆ",
+		productId = 1000003, -- TODO: แทนที่ด้วย Product ID จริงจากเว็บ Roblox
+		kind = "speed_bonus",
+		amount = 1,
+		enabled = true,
+	},
+	robux_hatch_rush = {
+		id = "robux_hatch_rush",
+		name = "เร่งฟักไข่ทั้งหมด",
+		description = "ทำให้ไข่ที่กำลังฟักอยู่ทุกฟองเสร็จทันที",
+		productId = 1000004, -- TODO: แทนที่ด้วย Product ID จริงจากเว็บ Roblox
+		kind = "hatch_rush",
+		amount = 1,
+		enabled = true,
+	},
+}
+
+Config.RobuxProducts = RobuxProducts
+
 -- คีย์ที่ใช้เก็บ log ธุรกรรมใน DataStore (แยกจาก PlayerData)
+-- ⚠️ UI-5: **ไม่ได้ใช้จริง** — เลือกเก็บ processedPurchaseIds ต่อผู้เล่นใน PlayerData แทน
+-- (อะตอมมิกไปกับการเซฟ PlayerData ก้อนเดียวกันโดยไม่ต้องเปิด DataStore ที่สอง) ตารางนี้แช่แข็งไว้
+-- เผื่อวันหนึ่งอยากทำ audit-trail แยกอายุจาก PlayerData จริง ๆ (ดู docs/data-schema.md §8.7)
 Config.PurchaseLog = {
 	STORE_NAME = "PurchaseLog_v1",
 	-- key = "receipt_<PurchaseId>" ใช้กันการให้ของซ้ำตอน Roblox retry
@@ -1999,6 +2081,21 @@ end
 -- หา Developer Product จากเลข productId ที่ Roblox ส่งมาใน ProcessReceipt
 function Config.findProductByRobloxId(productId: number): DeveloperProduct?
 	for _, product in DeveloperProducts do
+		if product.enabled and product.productId == productId then
+			return product
+		end
+	end
+	return nil
+end
+
+function Config.getRobuxProduct(productKey: string): RobuxProduct?
+	return RobuxProducts[productKey]
+end
+
+-- หาสินค้า Robux (ที่ไม่ใช่ไข่) จากเลข productId — ใช้คู่กับ findProductByRobloxId ใน ProcessReceipt
+-- (เช็คทั้งสองตาราง เพราะ Roblox ส่งมาแค่ productId เดียว ไม่บอกว่ามาจากตารางไหน)
+function Config.findRobuxProductByRobloxId(productId: number): RobuxProduct?
+	for _, product in RobuxProducts do
 		if product.enabled and product.productId == productId then
 			return product
 		end
@@ -2459,6 +2556,14 @@ function Config.getArmyDamageMultiplier(damageLevel: number): number
 	return Config.Balance.DamageUpgrade.STEP_MULTIPLIER ^ clamped
 end
 
+-- ⚠️ UI-5: ตัวคูณ damage จากขั้นที่ซื้อด้วย **Robux** — แยกจาก getArmyDamageMultiplier โดยสิ้นเชิง
+-- (คนละฟิลด์ใน PlayerData: robuxDamageBonus ไม่ใช่ damageLevel) **ไม่มีเพดาน** ต่างจากแทร็กเงินในเกม
+-- ที่ clamp ที่ MAX_LEVEL เพราะไม่มีค่าคงที่ทางฟิสิกส์ผูกกับ damage แบบที่ WalkSpeed ผูกกับความหนากำแพง
+function Config.getRobuxDamageMultiplier(robuxDamageSteps: number): number
+	local steps = math.max(0, math.floor(robuxDamageSteps or 0))
+	return Config.Balance.RobuxBoost.DAMAGE_MULTIPLIER_PER_STEP ^ steps
+end
+
 -- เพดานขั้นที่ซื้อได้ตอนนี้ — ⚠️ off-by-one อยู่ตรงนี้ ดูคำอธิบายข้างบน
 -- wallProgress = ด่านที่ผู้เล่นอยู่ (= กำแพงที่พังแล้ว + 1) → ด่าน 1 ได้ 8 ขั้น ไม่ใช่ 0
 function Config.getMaxDamageLevel(wallProgress: number): number
@@ -2546,6 +2651,28 @@ end
 function Config.getMinWallThickness(): number
 	local upgrade = Config.Balance.SpeedUpgrade
 	return Config.getMaxWalkSpeed() / upgrade.PHYSICS_FPS * upgrade.THICKNESS_SAFETY
+end
+
+-- ⚠️ UI-5: เพดานความเร็วจริงสูงสุดที่โบนัส Robux ดันไปได้ — คำนวณ **ย้อนกลับ** จากความหนากำแพง
+-- ที่สร้างไว้แล้วจริง (ตรงข้ามทิศทางกับ getMinWallThickness ที่คำนวณความหนาจากความเร็ว)
+-- เพื่อให้ Robux speed bonus ทะลุเพดานแทร็กปกติ (128) ได้ตามที่ออกแบบไว้ โดย**ไม่ต้องแตะ
+-- MapDimensions ที่เป็นโครงหลักที่ล็อกไว้แล้ว** — ความเร็วรวมจริงจะไม่มีทางเกินที่กำแพงที่มีอยู่รับไหว
+function Config.getRobuxSpeedHardCap(): number
+	local dim = Config.MapDimensions
+	local upgrade = Config.Balance.SpeedUpgrade
+	local builtThickness = math.min(dim.StageWall.Thickness, dim.Lane.WallThickness, dim.Boundary.Thickness)
+	return builtThickness / upgrade.THICKNESS_SAFETY * upgrade.PHYSICS_FPS
+end
+
+-- ความเร็ววิ่งจริงที่ใช้ (ปกติ + โบนัส Robux) — เรียกที่นี่ที่เดียว ห้ามคำนวณเองที่อื่น
+-- ⚠️ โบนัส Robux ทะลุเพดานแทร็กปกติ (getWalkSpeed สูงสุด 128) ได้ตามที่ออกแบบไว้ แต่ผลรวมจริง
+-- **clamp ที่ getRobuxSpeedHardCap() เสมอ** (กันวิ่งทะลุกำแพงที่สร้างไว้แล้ว) และไม่เกิน SPEED_CEILING
+function Config.getEffectiveWalkSpeed(speedLevel: number, robuxSpeedSteps: number): number
+	local base = Config.getWalkSpeed(speedLevel)
+	local steps = math.max(0, math.floor(robuxSpeedSteps or 0))
+	local bonus = steps * Config.Balance.RobuxBoost.SPEED_PER_STEP
+	local cap = math.min(Config.getRobuxSpeedHardCap(), Config.Balance.SpeedUpgrade.SPEED_CEILING)
+	return math.min(cap, base + bonus)
 end
 
 -- จำนวนไข่ฟรีตอนกำแพงด่านนั้นพังครั้งแรก (Phase 4A) — ด่านนอกช่วง = 0
@@ -2651,13 +2778,20 @@ end
 -- พลังจริงตอนเข้ารบ = พลังพื้นฐาน × ตัวคูณที่ซื้อไว้
 -- ⚠️ damageLevel เป็นของบัญชีผู้เล่น ไม่ใช่ของแม่รายตัว และคำนวณตอนเข้ารบทุกครั้ง
 -- ไม่เก็บตัวคูณติดไปกับกองลูก → ลูกที่สะสมไว้แต่ด่านต้นแรงขึ้นตามผู้เล่น ไม่มีกองตกยุค
+--
+-- ⚠️ UI-5: `robuxDamageSteps` เป็นพารามิเตอร์เสริม (nil/0 = พฤติกรรมเดิมเป๊ะ ไม่กระทบผู้เล่นที่ไม่จ่าย)
+-- คูณเพิ่มจาก getRobuxDamageMultiplier ซึ่งไม่มีเพดาน — สูตรเดิม (computePower × getArmyDamageMultiplier)
+-- ไม่ถูกแก้เลยสักตัวอักษร แค่มีตัวคูณอิสระอีกตัวคูณต่อท้าย
 function Config.computeBattlePower(
 	weight: number,
 	charId: string?,
 	statuses: { string }?,
-	damageLevel: number
+	damageLevel: number,
+	robuxDamageSteps: number?
 ): number
-	return Config.computePower(weight, charId, statuses) * Config.getArmyDamageMultiplier(damageLevel)
+	return Config.computePower(weight, charId, statuses)
+		* Config.getArmyDamageMultiplier(damageLevel)
+		* Config.getRobuxDamageMultiplier(robuxDamageSteps or 0)
 end
 
 --------------------------------------------------------------------------------
@@ -4383,6 +4517,41 @@ function Config.validate()
 		end
 	end
 
+	-- ⚠️ UI-5: RobuxProducts ใช้ productId namespace **เดียวกัน** กับ DeveloperProducts ข้างบน
+	-- (seenProductId ตัวเดียวกัน) เพราะ ProcessReceipt รับ productId มาเป็นเลขเดียว ไม่บอกว่ามาจาก
+	-- ตารางไหน — ถ้าเผลอตั้งเลขชนกันข้ามสองตาราง ProcessReceipt จะจับคู่สินค้าผิดชนิด
+	local validKinds = { damage_bonus = true, speed_bonus = true, hatch_rush = true }
+	for productKey, product in RobuxProducts do
+		assert(product.id == productKey, `Config: RobuxProducts["{productKey}"].id ไม่ตรงกับคีย์`)
+		assert(product.amount > 0, `Config: RobuxProducts["{productKey}"] มี amount <= 0`)
+		assert(validKinds[product.kind], `Config: RobuxProducts["{productKey}"].kind "{product.kind}" ไม่รู้จัก`)
+
+		if product.enabled then
+			assert(
+				product.productId > 0,
+				`Config: RobuxProducts["{productKey}"] เปิดขายแล้วแต่ productId ยังเป็น 0 — ต้องใส่เลขจาก Creator Dashboard ก่อน`
+			)
+			local owner = seenProductId[product.productId]
+			assert(
+				owner == nil,
+				`Config: productId {product.productId} ถูกใช้ทั้งใน "{owner}" และ "{productKey}"`
+			)
+			seenProductId[product.productId] = productKey
+		end
+	end
+
+	-- ⚠️ UI-5: โบนัสความเร็ว Robux ต้องมี "ที่ว่างจริง" เหนือเพดานแทร็กปกติ (128) ไม่งั้นซื้อไปก็ไม่ได้อะไร
+	-- และต้องไม่มีทางเกิน SPEED_CEILING (200) ที่เป็นเพดานทางฟิสิกส์ของทั้งเกม
+	local robuxSpeedCap = Config.getRobuxSpeedHardCap()
+	assert(
+		robuxSpeedCap > Config.getMaxWalkSpeed(),
+		`Config: getRobuxSpeedHardCap() ({robuxSpeedCap}) ต้องมากกว่าเพดานแทร็กปกติ ({Config.getMaxWalkSpeed()}) ไม่งั้นซื้อ robux_speed_step ไปก็ไม่มีผล`
+	)
+	assert(
+		robuxSpeedCap <= Config.Balance.SpeedUpgrade.SPEED_CEILING,
+		`Config: getRobuxSpeedHardCap() ({robuxSpeedCap}) เกิน SPEED_CEILING ({Config.Balance.SpeedUpgrade.SPEED_CEILING}) — วิ่งทะลุกำแพงได้`
+	)
+
 	-- ⚠️ ตัดขั้นบนของคอก/upgrade ผลิตแล้ว ต้องไม่ตัดจนผู้เล่นอ้างอิงใช้ไม่พอ
 	assert(
 		Config.Balance.Pen.MAX_LEVEL >= Config.Balance.Stage.COUNT,
@@ -4458,6 +4627,7 @@ function Config.validate()
 		"Config: BIND_TO_CLOSE_SECONDS ต้องน้อยกว่า 30 — Roblox ปิดเซิร์ฟทิ้งที่ 30 วินาที"
 	)
 	assert(store.MAX_PLAYER_DATA_BYTES < 4 * 1024 * 1024, "Config: MAX_PLAYER_DATA_BYTES ต้องต่ำกว่าลิมิตจริง 4 MB")
+	assert(store.PROCESSED_PURCHASE_LOG_CAP > 0, "Config: PROCESSED_PURCHASE_LOG_CAP ต้องมากกว่า 0")
 
 	-- ⚠️ เวลารอรอบเซฟก่อนหน้าต้องสั้นกว่างบตอนปิดเซิร์ฟ
 	-- ไม่งั้นเซฟรอบสุดท้ายจะหมดเวลาไปกับการรอ แล้วไม่ได้เขียนอะไรเลย

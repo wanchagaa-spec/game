@@ -219,11 +219,48 @@ return function(t, Config)
 	local prod = Config.getDeveloperProduct("legendary_egg")
 	check("มี product ไข่ตำนาน", prod ~= nil, true)
 	check("ให้ไข่ตำนาน", prod.grantEggId, "egg_legendary")
-	check("ยังปิดอยู่ (ยังไม่สร้างจริง)", prod.enabled, false)
-	check("productId ยังเป็น 0", prod.productId, 0)
+	check("เปิดขายแล้ว (UI-5)", prod.enabled, true)
+	check("productId ไม่ใช่ 0 แล้ว (UI-5 · placeholder)", prod.productId > 0, true)
 	check("ไม่เก็บราคา Robux ใน Config", (prod :: any).robuxPrice, nil)
-	check("หา product ที่ปิดอยู่ไม่เจอ", Config.findProductByRobloxId(0), nil)
+	check("หา product ด้วย productId จริงเจอ", Config.findProductByRobloxId(prod.productId), prod)
 	check("productId ที่ไม่มีจริงคืน nil", Config.findProductByRobloxId(999999), nil)
+
+	print("── UI-5: RobuxProducts (ทะลุเพดาน damage/speed + เร่งฟักไข่) ──")
+	local dmgProd = Config.getRobuxProduct("robux_damage_step")
+	local spdProd = Config.getRobuxProduct("robux_speed_step")
+	local rushProd = Config.getRobuxProduct("robux_hatch_rush")
+	check("มี product damage_bonus", dmgProd ~= nil and dmgProd.kind == "damage_bonus", true)
+	check("มี product speed_bonus", spdProd ~= nil and spdProd.kind == "speed_bonus", true)
+	check("มี product hatch_rush", rushProd ~= nil and rushProd.kind == "hatch_rush", true)
+	check("ทั้งสามเปิดขาย", dmgProd.enabled and spdProd.enabled and rushProd.enabled, true)
+	check("productId ไม่ชนกันเอง", dmgProd.productId ~= spdProd.productId and spdProd.productId ~= rushProd.productId, true)
+	check("productId ไม่ชนกับ legendary_egg", dmgProd.productId ~= prod.productId, true)
+	check("หา robux product ด้วย productId จริงเจอ", Config.findRobuxProductByRobloxId(dmgProd.productId), dmgProd)
+	check("productId ปลอมคืน nil", Config.findRobuxProductByRobloxId(999999), nil)
+
+	print("── UI-5: getRobuxDamageMultiplier — ไม่มีเพดาน ──")
+	check("0 ขั้น = ×1 (ไม่กระทบผู้เล่นที่ไม่จ่าย)", Config.getRobuxDamageMultiplier(0), 1)
+	check("nil = ×1 เหมือน 0", Config.getRobuxDamageMultiplier(nil :: any), 1)
+	local perStep = Config.Balance.RobuxBoost.DAMAGE_MULTIPLIER_PER_STEP
+	check("1 ขั้น = ตัวคูณต่อขั้น", Config.getRobuxDamageMultiplier(1), perStep)
+	check("ทะลุเพดานปกติได้จริง (ขั้นเยอะ ๆ เกิน MAX_LEVEL ของแทร็กเงินในเกม)",
+		Config.getRobuxDamageMultiplier(200) > Config.getArmyDamageMultiplier(Config.Balance.DamageUpgrade.MAX_LEVEL), true)
+
+	print("── UI-5: computeBattlePower รับ robuxDamageSteps เสริม (ไม่กระทบ call เดิม) ──")
+	local basePower = Config.computeBattlePower(1000, "wukong", nil, 0)
+	check("ไม่ส่ง robuxDamageSteps เลย = เหมือนเดิมเป๊ะ", Config.computeBattlePower(1000, "wukong", nil, 0, nil), basePower)
+	check("ส่ง 0 = เหมือนเดิมเป๊ะ", Config.computeBattlePower(1000, "wukong", nil, 0, 0), basePower)
+	check("ส่ง steps > 0 = แรงขึ้นจริง", Config.computeBattlePower(1000, "wukong", nil, 0, 5) > basePower, true)
+
+	print("── UI-5: getEffectiveWalkSpeed — ทะลุเพดานแทร็กปกติได้ แต่ไม่ทะลุกำแพงที่สร้างไว้จริง ──")
+	local normalMax = Config.getMaxWalkSpeed()
+	check("0 ขั้น = เท่าปกติเป๊ะ", Config.getEffectiveWalkSpeed(Config.Balance.SpeedUpgrade.MAX_LEVEL, 0), normalMax)
+	check("ซื้อ Robux speed ทะลุเพดานปกติได้จริง",
+		Config.getEffectiveWalkSpeed(Config.Balance.SpeedUpgrade.MAX_LEVEL, 3) > normalMax, true)
+	check("ซื้อเยอะแค่ไหนก็ไม่ทะลุ hard cap (กำแพงที่สร้างไว้จริงรับได้)",
+		Config.getEffectiveWalkSpeed(Config.Balance.SpeedUpgrade.MAX_LEVEL, 999999) <= Config.getRobuxSpeedHardCap(), true)
+	check("hard cap ไม่มีทางเกิน SPEED_CEILING", Config.getRobuxSpeedHardCap() <= Config.Balance.SpeedUpgrade.SPEED_CEILING, true)
+	check("hard cap ต้องมากกว่าเพดานแทร็กปกติ (ไม่งั้นซื้อไปก็ไม่มีผล)", Config.getRobuxSpeedHardCap() > normalMax, true)
 
 	print("── ตารางสุ่มน้ำหนักแยกตามด่าน ──")
 	check("ด่าน 1 มีตาราง", Config.Balance.StageWeightTiers[1] ~= nil, true)
@@ -1576,7 +1613,7 @@ return function(t, Config)
 	end
 
 	print("── ดัชนี (UI-4): ลำดับคลาส/ตัวละคร ──")
-	check("schema v4", Config.SCHEMA_VERSION, 4)
+	check("schema v5 (UI-5)", Config.SCHEMA_VERSION, 5)
 	check("คลาสเรียงธรรมดา → หายากสุด", table.concat(Config.getIndexClasses(), ","), "C,B,A,S,SS")
 	local indexCounts = {}
 	local indexTotal = 0

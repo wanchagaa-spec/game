@@ -303,7 +303,7 @@ return function(t, Config)
 	table.insert(savedV3.battleRoster, oldMother("1-5", "ghost_char")) -- ตัวละครที่ถูกลบจาก Config ไปแล้ว
 	local v4, v4Err = PlayerData.migrate(savedV3)
 	check("v3 → v4 สำเร็จ (charId แปลกไม่พัง)", v4Err, nil)
-	check("  schemaVersion = 4", v4 and v4.schemaVersion, 4)
+	check("  schemaVersion ขึ้นเป็นปัจจุบัน (ผ่าน v4 → v5 ต่อ)", v4 and v4.schemaVersion, Config.SCHEMA_VERSION)
 	local function discoveredList(data)
 		local list = {}
 		for charId, value in data.discovered do
@@ -379,6 +379,72 @@ return function(t, Config)
 	check("เติมฟิลด์ที่ขาดให้", type(partial.stats), "table")
 	check("เติม summonEnabled ให้", partial.summonEnabled, true)
 	check("ไม่ทับค่าที่ผู้เล่นมีอยู่", partial.currency.coins, 999)
+
+	----------------------------------------------------------------------------
+	-- UI-5: migration v4 → v5 (ร้าน Robux)
+	----------------------------------------------------------------------------
+	print("── migration v4 → v5: robuxDamageBonus/robuxSpeedBonus/processedPurchaseIds ──")
+	local savedV4 = PlayerData.createNew()
+	savedV4.schemaVersion = 4
+	savedV4.robuxDamageBonus = nil
+	savedV4.robuxSpeedBonus = nil
+	savedV4.processedPurchaseIds = nil
+	local v5, v5Err = PlayerData.migrate(savedV4)
+	check("v4 → v5 สำเร็จ", v5Err, nil)
+	check("  schemaVersion = 5", v5 and v5.schemaVersion, 5)
+	check("  robuxDamageBonus เริ่ม 0", v5 and v5.robuxDamageBonus, 0)
+	check("  robuxSpeedBonus เริ่ม 0", v5 and v5.robuxSpeedBonus, 0)
+	check("  processedPurchaseIds เริ่มว่าง", v5 and #v5.processedPurchaseIds, 0)
+	-- idempotent: มีค่าอยู่แล้ว (migrate ซ้ำ) ห้ามทับ
+	local alreadyHasRobux = PlayerData.createNew()
+	alreadyHasRobux.schemaVersion = 4
+	alreadyHasRobux.robuxDamageBonus = 7
+	alreadyHasRobux.processedPurchaseIds = { "abc" }
+	local keptRobux = PlayerData.migrate(alreadyHasRobux)
+	check("migration ไม่ทับ robuxDamageBonus ที่มีอยู่แล้ว", keptRobux and keptRobux.robuxDamageBonus, 7)
+	check("migration ไม่ทับ processedPurchaseIds ที่มีอยู่แล้ว", keptRobux and #keptRobux.processedPurchaseIds, 1)
+	check("ผ่านกฎเซฟ (sanitizeForSave)", pcall(PlayerData.sanitizeForSave, v5), true)
+
+	print("── UI-5: PlayerData.hasProcessedPurchase / markPurchaseProcessed (กัน ProcessReceipt ให้ของซ้ำ) ──")
+	local shop = PlayerData.createNew()
+	check("ยังไม่เคยเห็น PurchaseId นี้", PlayerData.hasProcessedPurchase(shop, "receipt-1"), false)
+	PlayerData.markPurchaseProcessed(shop, "receipt-1")
+	check("บันทึกแล้วเจอ", PlayerData.hasProcessedPurchase(shop, "receipt-1"), true)
+	check("PurchaseId อื่นยังไม่เจอ", PlayerData.hasProcessedPurchase(shop, "receipt-2"), false)
+	-- เรียกซ้ำ (จำลอง Roblox retry ProcessReceipt เดิม) ต้องไม่ใส่ซ้ำ
+	PlayerData.markPurchaseProcessed(shop, "receipt-1")
+	check("บันทึกซ้ำไม่เพิ่ม entry ซ้ำ", #shop.processedPurchaseIds, 1)
+	-- FIFO cap: ยัดเกิน cap แล้วต้องตัดตัวเก่าสุดทิ้ง
+	local cap = Config.DataStore.PROCESSED_PURCHASE_LOG_CAP
+	local capped = PlayerData.createNew()
+	for index = 1, cap + 5 do
+		PlayerData.markPurchaseProcessed(capped, `r{index}`)
+	end
+	check("ยาวไม่เกิน cap", #capped.processedPurchaseIds, cap)
+	check("ตัวเก่าสุดถูกตัดทิ้ง (r1..r5 หายไป)", PlayerData.hasProcessedPurchase(capped, "r1"), false)
+	check("ตัวล่าสุดยังอยู่", PlayerData.hasProcessedPurchase(capped, `r{cap + 5}`), true)
+
+	print("── UI-5: PlayerData.addRobuxDamageSteps / addRobuxSpeedSteps ──")
+	local boosted = PlayerData.createNew()
+	PlayerData.addRobuxDamageSteps(boosted, 3)
+	PlayerData.addRobuxDamageSteps(boosted, 2)
+	check("damage steps สะสม", boosted.robuxDamageBonus, 5)
+	PlayerData.addRobuxSpeedSteps(boosted, 1)
+	check("speed steps สะสม", boosted.robuxSpeedBonus, 1)
+
+	print("── UI-5: PlayerData.rushAllHatchSlots — เร่งไข่ทุกฟองที่กำลังฟักให้ครบเวลาทันที ──")
+	local rushData = PlayerData.createNew()
+	rushData.hatching[1] = { eggId = "egg_stage1", weight = 100, charId = "monkey", startedAt = 0, hatchAt = 99999 }
+	rushData.hatching[2] = { eggId = "egg_stage1", weight = 200, charId = "monkey", startedAt = 0, hatchAt = 88888 }
+	-- ช่องที่ครบเวลาไปแล้วต้องไม่ถูกแตะ (กันเผลอ "ย้อนเวลา" กรณีแปลก ๆ)
+	rushData.hatching[3] = { eggId = "egg_stage1", weight = 300, charId = "monkey", startedAt = 0, hatchAt = 1 }
+	local rushedCount = PlayerData.rushAllHatchSlots(rushData, 50000)
+	check("เร่งได้ 2 ฟอง (ช่อง 1,2 — ช่อง 3 ครบเวลาไปแล้วไม่นับ)", rushedCount, 2)
+	check("  ช่อง 1 hatchAt = now แล้ว", (rushData.hatching[1] :: any).hatchAt, 50000)
+	check("  ช่อง 2 hatchAt = now แล้ว", (rushData.hatching[2] :: any).hatchAt, 50000)
+	check("  ช่อง 3 ไม่ถูกแตะ (ครบเวลาไปแล้วก่อนเร่ง)", (rushData.hatching[3] :: any).hatchAt, 1)
+	check("  ช่องว่าง (false) ไม่พัง", pcall(PlayerData.rushAllHatchSlots, PlayerData.createNew(), 0), true)
+	check("ไม่มีไข่ฟักอยู่เลย → คืน 0 ไม่ error", PlayerData.rushAllHatchSlots(PlayerData.createNew(), 0), 0)
 
 	----------------------------------------------------------------------------
 	-- DataService: retry

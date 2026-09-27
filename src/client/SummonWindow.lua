@@ -4,6 +4,7 @@
 -- สองแท็บ แม่ / ลูก · ติ๊กได้หลายรายการ · เลขบนการ์ด = ลำดับที่ติ๊ก (เอาออกแล้วตัวหลังเลื่อนขึ้น) · ลำดับแยกกันต่อแท็บ
 --   ลูก: ติ๊กกอง = ปล่อยทั้งกอง · ลำดับปล่อย = ลำดับติ๊ก · **กองที่ไม่ติ๊กไม่ถูกปล่อย** (CombatService · UI-3)
 --        เปิดใหม่เห็นติ๊ก + ลำดับเดิมจาก releaseOrder ใน sync · กองที่หมดแต่แม่ในคอกผลิตเติมอยู่ = การ์ด "รอผลิต"
+--        releaseOrder ว่าง (ไม่เคยติ๊ก) → เปิดมา**ติ๊กทุกกองไว้ก่อน** เรียงพลังต่อตัวมาก → น้อย (ผู้เล่นเอาออกเองได้)
 --   แม่: เฉพาะแม่ในกระเป๋า (แม่ในคอกไม่แสดงเลย) · แม่ในสนามอยู่บนสุด ติดป้าย "ในสนาม" ติ๊กไม่ได้ · ล็อก = ติ๊กไม่ได้
 --        ติ๊กได้ไม่เกินที่ว่างใน roster (MAX_BATTLE_MOTHERS − ในสนาม) · ไม่มีด่านให้ส่ง = บอกเหตุผล + ติ๊กไม่ได้
 --        ที่ติ๊กแม่ไว้ไม่จำข้ามการเปิดหน้าต่าง (ส่งแม่ = ตายถาวร ห้ามมีของค้างติ๊กที่ลืมไปแล้ว)
@@ -864,12 +865,27 @@ function SummonWindow.isOpen(): boolean
 	return window.Visible
 end
 
--- เปิด = ติ๊กลูกตาม releaseOrder ล่าสุดจาก server (เห็นลำดับเดิม) · ติ๊กแม่เริ่มว่างเสมอ
+-- ค่าเริ่มต้นตอนยังไม่เคยติ๊กลูกเลย (releaseOrder ว่าง) = ทุกกองที่มีของ เรียงพลังต่อตัวมาก → น้อย
+-- (buildItems เรียงแบบนี้อยู่แล้ว) · ⚠️ แค่ติ๊กในหน้าต่าง ยังไม่ส่งอะไร จนกว่าผู้เล่นจะกด "ส่งไปรบ" เอง
+local function defaultChildTicks(): { string }
+	local keys: { string } = {}
+	for _, item in buildItems("children") do
+		if item.count > 0 then -- กอง "รอผลิต" มาจากลำดับเดิมเท่านั้น ลำดับว่างจึงไม่ควรมี (กันไว้อีกชั้น)
+			table.insert(keys, item.key)
+		end
+	end
+	return keys
+end
+
+-- เปิด = ติ๊กลูกตาม releaseOrder ล่าสุดจาก server (เห็นลำดับเดิม) · ว่าง = ติ๊กทุกกองไว้ก่อน · ติ๊กแม่เริ่มว่างเสมอ
+-- ⚠️ "ว่าง" รวมกรณีผู้เล่นเคยส่งลำดับว่างเอง (ส่งแม่อย่างเดียว) — แยกไม่ได้โดยไม่แตะ schema ·
+--   เปิดครั้งถัดไปจึงติ๊กทุกกองให้อีกรอบ (กล่องยืนยันบอกจำนวนกองที่จะปล่อยก่อนส่งเสมอ)
 function SummonWindow.open()
 	window.Visible = true
 	confirm.Visible = false
 	table.clear(ticks.mothers)
-	ticks.children = table.clone(if lastPayload then lastPayload.releaseOrder or {} else {})
+	local order = if lastPayload then lastPayload.releaseOrder or {} else {}
+	ticks.children = if #order > 0 then table.clone(order) else defaultChildTicks()
 	scroll.CanvasPosition = Vector2.zero
 	refreshAll() -- pruneTicks ตัดกองในลำดับที่ไม่ได้แสดง (หมดแล้วไม่มีแม่ผลิตเติม) ทิ้ง
 end

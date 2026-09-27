@@ -1221,15 +1221,37 @@ do
 	check("  กดแล้วแจ้งเหตุผล ไม่ติ๊ก", callNames(before) == "notify" and #SummonWindow.getTicks("mothers") == 0, true)
 	sp.sendStageBlockReason = nil
 
-	-- ไม่ติ๊กอะไรเลยทั้งสองแท็บ → ปุ่มส่งถูกปิด กดแล้วไม่ยิง
+	-- ลำดับปล่อยว่าง (ไม่เคยติ๊ก) → เปิดมาติ๊กทุกกองไว้ก่อน เรียงพลังต่อตัวมาก → น้อย
 	SummonWindow.close()
 	sp.releaseOrder = {}
+	sp.waitingStacks = {} -- server ส่งกองรอผลิตเฉพาะที่อยู่ในลำดับ — ลำดับว่างจึงไม่มี
+	SummonWindow.setPayload(sp)
+	SummonWindow.open()
+	findDescendant(win, "Tab_children").Activated:Fire()
+	check("ลำดับว่าง → ติ๊กทุกกองที่มีของ เรียงพลังมาก→น้อย (ซุนหงอคง 900 · หมู 30 · ลิง 1)",
+		joined(SummonWindow.getTicks("children")), joined({ sA.key, sC.key, sB.key }))
+	check("  ม้า (กองที่ไม่มีของ) ไม่อยู่ในค่าเริ่มต้น", table.find(SummonWindow.getTicks("children"), sW.key) == nil, true)
+	check("  เลขบนการ์ด 1 · 2 · 3", badge(cardFor(sA.charName)) .. badge(cardFor(sC.charName)) .. badge(cardFor(sB.charName)), "123")
+	before = #summonCalls
+	check("  ยังไม่ยิงอะไรจนกว่าจะกดส่ง", #summonCalls, before)
+	cardFor(sC.charName).Activated:Fire()
+	check("  เอาติ๊กออกเองได้ (หมูออก → ลิงเลื่อนเป็น 2)", badge(cardFor(sB.charName)), "2")
+	sendButton.Activated:Fire()
+	check("  กดส่ง = ส่งลำดับที่เหลือ", joined(summonCalls[before + 1].args[1]), joined({ sA.key, sB.key }))
+
+	-- ไม่มีอะไรให้ติ๊กเลย (ลำดับว่าง + ไม่มีกอง) → ปุ่มส่งถูกปิด กดแล้วไม่ยิง
+	SummonWindow.close()
+	local savedChildren = sp.children
+	sp.children = {}
+	sp.waitingStacks = {}
 	SummonWindow.setPayload(sp)
 	SummonWindow.open()
 	check("ไม่ติ๊กอะไร → ปุ่มส่งไปรบถูกปิด", sendButton.AutoButtonColor, false)
 	before = #summonCalls
 	sendButton.Activated:Fire()
 	check("  กดแล้วไม่ยิงอะไร", #summonCalls, before)
+	sp.children = savedChildren
+	sp.waitingStacks = { sW }
 
 	-- ปิดแล้วเปิดใหม่: ติ๊กแม่ไม่ค้าง · ติ๊กลูกกลับมาตาม releaseOrder
 	sp.releaseOrder = { sC.key, sA.key }

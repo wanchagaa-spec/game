@@ -189,10 +189,17 @@ local spawnCarry = 0
 local defenderModels: { Model } = {}
 local lastDefenderStage: number? = nil
 
-local function totalStockpile(payload: any): number
+-- ⚠️ UI-3: นับเฉพาะกองที่ติ๊กให้ปล่อย (releaseOrder) — กองที่ไม่ติ๊กไม่ถูกปล่อยจริง ภาพจึงห้ามเดินออกมาเอง
+local function releasableStock(payload: any): number
+	local ordered: { [string]: boolean } = {}
+	for _, key in payload.releaseOrder or {} do
+		ordered[key] = true
+	end
 	local total = 0
 	for _, stack in payload.children do
-		total += stack.count
+		if ordered[stack.key] then
+			total += stack.count
+		end
 	end
 	return total
 end
@@ -293,7 +300,7 @@ local function updateOurTroops()
 end
 
 -- อัตราสปอน ≈ อัตราปล่อยจริงของด่าน (ไม่ต้องเป๊ะ — ดูคอมเมนต์หัวไฟล์) หยุดสปอนถ้า:
--- ปิดปุ่มอัญเชิญ · ไม่มีด่านให้ตี (ผ่านครบแล้ว) · คลังว่างเปล่า · โมเดลชนเพดาน MAX_VISIBLE_UNITS
+-- ปิดปุ่มอัญเชิญ · ไม่มีด่านให้ตี (ผ่านครบแล้ว) · กองที่ติ๊กว่างหมด · โมเดลชนเพดาน MAX_VISIBLE_UNITS
 local function updateSpawning(payload: any?, delta: number)
 	if not payload then
 		return
@@ -305,7 +312,7 @@ local function updateSpawning(payload: any?, delta: number)
 	if not stage then
 		return
 	end
-	if totalStockpile(payload) <= 0 then
+	if releasableStock(payload) <= 0 then
 		return
 	end
 

@@ -162,7 +162,7 @@ ProductionService.start(EggService.sync)
 -- EggService (อ่าน docs/data-schema.md §7) ต่อ RemoteEvent ของตัวเอง (SetReleaseOrderRequest /
 -- SetSummonEnabledRequest) และเซฟผ่าน DataService path เดิม (stageProgress/currency ก็คือ
 -- PlayerData fields ธรรมดา ไม่มีระบบเซฟแยก)
--- ⚠️ Phase 5A: วงจรกลางวัน/กลางคืน + บอสตัวเดียวของเซิร์ฟ — ต้องหลัง MapBuilder.build (ใช้กำแพงกั้น/ตัวบอสที่สร้างไว้)
+-- ⚠️ Phase 5A: วงจรกลางวัน/กลางคืน + บอส (5B-2: ครบทุกห้อง) — ต้องหลัง MapBuilder.build (ใช้กำแพงกั้น/ตัวบอสที่สร้างไว้)
 -- และก่อน CombatService.start (ส่ง gate ของล็อกอัญเชิญเข้าไป) · EggService อ่านสถานะล็อกผ่าน provider ที่ inject
 -- ⚠️ Phase 5B: inject ทางเข้ากระเป๋าไข่ (EggService.grantBossEgg = ทางเพิ่มไข่เดิม) + sync (เงินบอส/ไข่ใหม่ขึ้นจอทันที)
 -- แทน require ตรง ๆ — กัน BossService ผูกกับ EggService (หลักเดียวกับ ProductionService.start(EggService.sync))
@@ -187,7 +187,7 @@ if RunService:IsStudio() then
 			error(`EggServiceDebug: เรียกได้เฉพาะ EggService.debug* / BossService.debug* — ได้ {tostring(name)}`)
 		end
 		-- Phase 5A/5B: คำสั่งบอส (debugBossNight/debugBossDay/debugDamageBoss/debugKillBoss/debugBossStatus/debugBossEggs)
-		-- อยู่ที่ BossService — สะพานเดียวกัน ชื่อไม่ชนกับของ EggService
+		-- อยู่ที่ BossService — สะพานเดียวกัน ชื่อไม่ชนกับของ EggService · 5B-2: คำสั่งที่เกี่ยวกับห้องรับเลขห้องต่อท้าย
 		local fn = (EggService :: any)[name]
 		if type(fn) ~= "function" then
 			fn = (BossService :: any)[name]

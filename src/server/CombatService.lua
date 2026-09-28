@@ -190,6 +190,7 @@ end
 -- ⚠️ รวมกับ auto-pause (ไม่แทนที่): auto-pause ยังตั้ง/ล้างธงของมันเหมือนเดิม · ล็อกบอสบล็อกการเปิดอัญเชิญซ้ำอีกชั้น
 
 -- ด่านที่เพิ่งพังตานี้ควรทำให้ผู้เล่นติดล็อกไหม — เฉพาะด่านที่ **มีกำแพงจริง** + บอสยังมีชีวิต
+-- 5B-2: bossAlive = บอส**ห้องของด่านนั้น** (ห้อง N หลังกำแพง N) ยังมีชีวิตไหม — ผู้เรียกถาม gate ด้วยเลขด่านเอง
 -- ⚠️ ด่าน 1 ไม่มีกำแพง "พัง" ตั้งแต่ทหารตัวแรก → ไม่ยกเว้น = ผู้เล่นใหม่ติดล็อกตั้งแต่วินาทีแรก
 function CombatService.shouldBossLock(clearedStage: number?, bossAlive: boolean): boolean
 	return clearedStage ~= nil and bossAlive and Config.getWallX(clearedStage) ~= nil
@@ -716,10 +717,11 @@ end
 -- แบบเดียวกับ ProductionService.start(EggService.sync)
 -- Phase 5A: `bossGate` = BossService.getGate() (inject กัน CombatService ผูกกับ BossService ตรง ๆ)
 --   ใช้ตัดสินล็อกหลัง tick · ปฏิเสธเปิดอัญเชิญตอนติดล็อก
+-- 5B-2 (ผู้ใช้ยืนยัน): ล็อก**ผูกห้อง** — พังกำแพงด่าน N ขณะบอสห้อง N ยังอยู่ → ล็อกจนบอสห้อง N ตาย (ห้องอื่นไม่เกี่ยว)
 type BossGate = {
-	isBossAlive: () -> boolean,
+	isBossAlive: (room: number) -> boolean,
 	isUserLocked: (userId: number) -> boolean,
-	lockUser: (userId: number) -> boolean,
+	lockUser: (userId: number, room: number) -> boolean,
 }
 
 function CombatService.start(onStageCleared: (Player, number, number, number) -> (), bossGate: BossGate)
@@ -778,11 +780,16 @@ function CombatService.start(onStageCleared: (Player, number, number, number) ->
 					local result = CombatService.tick(data, meta, elapsed)
 					local clearedStage = result.clearedStage
 					-- Phase 5A: พังกำแพงด่านตัวเองเสร็จขณะบอสยังอยู่ → ล็อก + หยุดอัญเชิญ
+					-- 5B-2: บอสที่ดูคือ **บอสห้องของด่านที่เพิ่งพัง** (ห้อง N หลังกำแพง N) · ปลดเมื่อบอสห้องนั้นตาย
 					-- ⚠️ หลัง tick จบ = ผ่านด่าน/รางวัล 4A/แม่ตาย เกิดครบไปแล้วตามเดิม ล็อกแค่ห้ามปล่อยต่อ
-					if CombatService.shouldBossLock(clearedStage, bossGate.isBossAlive()) then
-						bossGate.lockUser(player.UserId)
+					local bossAlive = clearedStage ~= nil and bossGate.isBossAlive(clearedStage)
+					if clearedStage and CombatService.shouldBossLock(clearedStage, bossAlive) then
+						bossGate.lockUser(player.UserId, clearedStage)
 						CombatService.applyBossLock(data)
-						print(`[CombatService] {player.Name} พังกำแพงด่าน {clearedStage} ขณะบอสยังอยู่ → ล็อกอัญเชิญจนกว่าบอสตาย`)
+						print(
+							`[CombatService] {player.Name} พังกำแพงด่าน {clearedStage} ขณะบอสห้อง {clearedStage} ยังอยู่`
+								.. ` → ล็อกอัญเชิญจนกว่าบอสห้องนั้นตาย`
+						)
 					end
 					if clearedStage and CombatService.shouldNotifyStageCleared(result) then
 						-- ⚠️ pcall: แจกไข่พังเมื่อไหร่ต้องไม่ลากลูปรบของทั้งเซิร์ฟตายไปด้วย (ธงติดไปแล้ว — log ไว้ตามแก้)

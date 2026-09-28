@@ -354,11 +354,12 @@ print("\\n━━ grantBossEgg (5B): น้ำหนักเดิมเป๊�
 do
 \tlocal player, data = freshPlayer("BossEgg1")
 \ttable.clear(data.heldEggs.items)
-\tlocal ok = EggService.grantBossEgg(player, Config.Balance.BossCycle.EGG_ID, 152300)
+\t-- 5B-2: ไข่บอสห้อง N = Config.getBossEggId(N) — ลองห้อง 7 (egg_stage7) ให้เห็นว่าไม่ผูกกับไข่ด่าน 1
+\tlocal ok = EggService.grantBossEgg(player, Config.getBossEggId(7), 152300)
 \tcheck("เข้ากระเป๋าสำเร็จ", ok, true)
 \tcheck("  ได้ 1 ฟอง", #data.heldEggs.items, 1)
 \tcheck("  น้ำหนักตรงเป๊ะ (ไม่สุ่มใหม่)", data.heldEggs.items[1] and data.heldEggs.items[1].weight, 152300)
-\tcheck("  ชนิดไข่ตรง", data.heldEggs.items[1] and data.heldEggs.items[1].eggId, Config.Balance.BossCycle.EGG_ID)
+\tcheck("  ชนิดไข่ตรง (ไข่ห้อง 7 = egg_stage7)", data.heldEggs.items[1] and data.heldEggs.items[1].eggId, "egg_stage7")
 \tfor _, bad in { 0, -5, 100.5, "100" } do
 \t\tlocal badOk = EggService.grantBossEgg(player, "egg_stage1", bad)
 \t\tcheck(`น้ำหนักแปลก ({tostring(bad)}) → ปฏิเสธ`, badOk, false)

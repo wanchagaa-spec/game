@@ -11,10 +11,14 @@
 --   ของ server ที่อยู่ตลอด (กลางวันแค่โปร่งใส/ไม่ชน) ตัวเลขจึงติดชิ้นเดิมได้เสมอ
 -- เลขคำนวณที่ Config.getBossCountdownValue ที่เดียว (เทสต์นอก Studio ได้)
 --
--- ══ 5B: จุดกด E ค้างที่ไข่บอส ══ ติดกับ Part ไข่ของ server (Workspace.Map.BossArena.BossEggs.BossEgg{i})
+-- ══ 5B: จุดกด E ค้างที่ไข่บอส ══ ติดกับ Part ไข่ของ server (Workspace.Map.BossArena.BossEggs.BossEgg{ห้อง}_{i})
 --   ⚠️ สร้างผ่าน UiKit.prompt() เท่านั้น (OnePerButton — ไข่วางชิดกัน ขึ้นเฉพาะฟองที่ใกล้สุด)
---   เปิดเฉพาะ: บอสตายแล้ว (Attribute BossAlive = false) + ฟองนั้น Status = "resting" + ตัวเองไม่ได้ถือไข่อยู่
---   (Attribute บน Player) · กดครบเวลาแล้วยิงแค่ "ฟองที่ i" — server ตัดสินทุกอย่างเอง (client ปิด prompt เพื่อ UX เท่านั้น)
+--   เปิดเฉพาะ: บอส**ห้องนั้น**ตายแล้ว (Attribute BossAlive{ห้อง} = false · 5B-2) + ฟองนั้น Status = "resting"
+--   + ตัวเองไม่ได้ถือไข่อยู่ (Attribute บน Player) · กดครบเวลาแล้วยิงแค่ "ฟองที่ i" — server ตัดสินทุกอย่างเอง
+--   (ห้องไหน server ดูจากตำแหน่งตัวละครเอง · client ปิด prompt เพื่อ UX เท่านั้น)
+-- ══ 5B-2: server จับเวลากดค้างเอง ══ prompt เป็นของ client → server ไม่เห็นการกดค้าง
+--   จึงยิง BossEggHoldRequest(i, true) ตอนเริ่มกด (PromptButtonHoldBegan) · (i, false) ตอนปล่อย (PromptButtonHoldEnded)
+--   server จดเวลาของตัวเองแล้วเทียบตอนหยิบ — ยิงหยิบตรง ๆ โดยไม่กดค้างครบ = ถูกปฏิเสธ
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -28,7 +32,8 @@ local BossHud = {}
 export type BossState = {
 	phase: string?,
 	phaseEndsAt: number?,
-	bossAlive: boolean?,
+	-- 5B-2: บอสแต่ละห้องยังอยู่ไหม (ห้อง → Attribute BossAlive{ห้อง}) · ไม่มีค่า = ยังไม่รู้ (ถือว่ายังหยิบไม่ได้)
+	bossAlive: { [number]: boolean? }?,
 }
 
 local RENDER_INTERVAL = 0.2
@@ -45,9 +50,10 @@ local state: BossState = {}
 local surface: SurfaceGui? = nil
 local countLabel: TextLabel? = nil
 
--- 5B: จุดกด E ที่ไข่บอส (index → Part ไข่ + prompt) · carrying = ตัวเองถือไข่บอสอยู่
-type EggPrompt = { part: BasePart, prompt: ProximityPrompt }
-local eggPrompts: { [number]: EggPrompt } = {}
+-- 5B: จุดกด E ที่ไข่บอส (Part ไข่ → ห้อง + prompt) · carrying = ตัวเองถือไข่บอสอยู่
+-- 5B-2: ไข่มีทุกห้อง (9 × 6) → key เป็น Part ไม่ใช่ index (index ซ้ำกันข้ามห้อง)
+type EggPrompt = { part: BasePart, room: number, prompt: ProximityPrompt }
+local eggPrompts: { [BasePart]: EggPrompt } = {}
 local carrying = false
 
 -- สร้างตัวเลขติดผิวหน้ากำแพงกั้น — เรียกครั้งเดียว (เทสต์เรียกตรงด้วยกำแพงปลอม)
@@ -88,11 +94,12 @@ function BossHud.attach(playerGui: Instance, barrier: BasePart)
 	countLabel = count
 end
 
--- 5B: เปิด/ปิดจุดกด E ของไข่ทุกฟองตามสถานะล่าสุด
+-- 5B: เปิด/ปิดจุดกด E ของไข่ทุกฟองตามสถานะล่าสุด · 5B-2: ดูบอส**ห้องของฟองนั้น**
 -- ⚠️ 5B-fix (ผู้ใช้สั่ง "ให้ผู้เล่นลุ้น"): ไม่โชว์น้ำหนักบน prompt — server ก็ไม่ส่งน้ำหนักมาแล้ว (เห็นแค่ขนาดไข่)
 function BossHud.refreshEggPrompts()
-	local bossDead = state.bossAlive == false
+	local alive = state.bossAlive or {}
 	for _, entry in eggPrompts do
+		local bossDead = alive[entry.room] == false
 		local status = entry.part:GetAttribute("Status")
 		entry.prompt.Enabled = bossDead and status == "resting" and not carrying
 	end
@@ -110,9 +117,15 @@ function BossHud.setCarrying(value: boolean)
 end
 
 -- 5B: ติดจุดกด E ค้างที่ไข่บอส 1 ฟอง · onPick(index) = ยิงคำขอหยิบ (Main ส่ง remote เข้ามา) · ติดซ้ำฟองเดิมไม่ได้
-function BossHud.attachEggPrompt(part: BasePart, onPick: (index: number) -> ())
+-- 5B-2: onHold(index, holding) = บอก server ว่าเริ่มกด/ปล่อย (server จับเวลาเอง) · Attribute Room บอกห้องของฟองนี้
+function BossHud.attachEggPrompt(
+	part: BasePart,
+	onPick: (index: number) -> (),
+	onHold: ((index: number, holding: boolean) -> ())?
+)
 	local index = part:GetAttribute("Index")
-	if type(index) ~= "number" or eggPrompts[index] ~= nil then
+	local room = part:GetAttribute("Room")
+	if type(index) ~= "number" or type(room) ~= "number" or eggPrompts[part] ~= nil then
 		return
 	end
 	local prompt = UiKit.prompt({
@@ -123,11 +136,19 @@ function BossHud.attachEggPrompt(part: BasePart, onPick: (index: number) -> ())
 		MaxActivationDistance = Config.MapDimensions.BossArena.EggPromptDistance,
 		Enabled = false,
 	})
+	if onHold then
+		prompt.PromptButtonHoldBegan:Connect(function()
+			onHold(index, true)
+		end)
+		prompt.PromptButtonHoldEnded:Connect(function()
+			onHold(index, false)
+		end)
+	end
 	prompt.Triggered:Connect(function()
 		onPick(index)
 	end)
 	prompt.Parent = part
-	eggPrompts[index] = { part = part, prompt = prompt }
+	eggPrompts[part] = { part = part, room = room, prompt = prompt }
 	part:GetAttributeChangedSignal("Status"):Connect(BossHud.refreshEggPrompts)
 	BossHud.refreshEggPrompts()
 end
@@ -145,8 +166,12 @@ function BossHud.render(now: number)
 end
 
 -- ต่อสายของจริง (Main.client.lua) — รอของจาก server เบื้องหลัง ไม่บล็อกสคริปต์หลัก
--- onPickEgg(index) = ยิง PickUpBossEggRequest (5B)
-function BossHud.start(playerGui: Instance, onPickEgg: (index: number) -> ())
+-- onPickEgg(index) = ยิง PickUpBossEggRequest (5B) · onHoldEgg(index, holding) = ยิง BossEggHoldRequest (5B-2)
+function BossHud.start(
+	playerGui: Instance,
+	onPickEgg: (index: number) -> (),
+	onHoldEgg: (index: number, holding: boolean) -> ()
+)
 	task.spawn(function()
 		local folder = ReplicatedStorage:WaitForChild(Config.BOSS_STATE_FOLDER)
 		local arena = Workspace:WaitForChild("Map"):WaitForChild(Config.BOSS_ARENA_NAME)
@@ -157,7 +182,7 @@ function BossHud.start(playerGui: Instance, onPickEgg: (index: number) -> ())
 		local eggFolder = arena:WaitForChild(Config.BOSS_EGG_FOLDER)
 		local function tryAttach(child: Instance)
 			if child:IsA("BasePart") then
-				BossHud.attachEggPrompt(child, onPickEgg)
+				BossHud.attachEggPrompt(child, onPickEgg, onHoldEgg)
 			end
 		end
 		for _, child in eggFolder:GetChildren() do
@@ -172,14 +197,24 @@ function BossHud.start(playerGui: Instance, onPickEgg: (index: number) -> ())
 		localPlayer:GetAttributeChangedSignal(Config.BOSS_EGG_CARRY_ATTRIBUTE):Connect(readCarrying)
 
 		local function readState()
+			local alive: { [number]: boolean? } = {}
+			for room = 1, Config.Balance.Stage.COUNT do
+				local value = folder:GetAttribute(Config.getBossStateAttribute("BossAlive", room))
+				alive[room] = if type(value) == "boolean" then value else nil
+			end
 			BossHud.setState({
 				phase = folder:GetAttribute("Phase"),
 				phaseEndsAt = folder:GetAttribute("PhaseEndsAt"),
-				bossAlive = folder:GetAttribute("BossAlive"),
+				bossAlive = alive,
 			})
 		end
 		readState()
-		folder.AttributeChanged:Connect(readState)
+		-- อ่านใหม่เฉพาะค่าที่ใช้จริง (phase · เวลา · บอสห้องไหนตาย) — HP เปลี่ยนทุกครั้งที่มีคนตี ไม่ต้องไล่ 54 ฟองใหม่
+		folder.AttributeChanged:Connect(function(name: string)
+			if name == "Phase" or name == "PhaseEndsAt" or string.sub(name, 1, #"BossAlive") == "BossAlive" then
+				readState()
+			end
+		end)
 
 		while true do
 			BossHud.render(Workspace:GetServerTimeNow())

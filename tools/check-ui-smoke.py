@@ -128,6 +128,8 @@ local function newInstance(className)
 		__propSignals = {},
 		Activated = newSignal(),
 		Triggered = newSignal(), -- ProximityPrompt
+		PromptButtonHoldBegan = newSignal(), -- ProximityPrompt (5B-2: ไข่บอสบอก server ว่าเริ่มกดค้าง)
+		PromptButtonHoldEnded = newSignal(),
 	}
 	return setmetatable(object, InstanceMeta)
 end
@@ -1637,7 +1639,7 @@ do
 
 	local night = Config.Balance.BossCycle.NIGHT_SECONDS
 	local endsAt = 10000
-	BossHud.setState({ phase = "night", phaseEndsAt = endsAt, bossAlive = true })
+	BossHud.setState({ phase = "night", phaseEndsAt = endsAt, bossAlive = {} })
 	BossHud.render(endsAt - night)
 	check("กลางคืนวินาทีแรก → โชว์ 59", count.Text, "59")
 	check("  แผ่นตัวเลขเปิดอยู่", surface.Enabled, true)
@@ -1648,11 +1650,11 @@ do
 	BossHud.render(endsAt + 2)
 	check("เลยเวลาไปแล้ว (รอ server เปลี่ยน phase) → ค้าง 0 ไม่ติดลบ", count.Text, "0")
 
-	BossHud.setState({ phase = "day", phaseEndsAt = endsAt + 540, bossAlive = true })
+	BossHud.setState({ phase = "day", phaseEndsAt = endsAt + 540, bossAlive = {} })
 	BossHud.render(endsAt + 3)
 	check("กลางวัน → ซ่อนตัวเลข", surface.Enabled, false)
 
-	BossHud.setState({ phase = "night", phaseEndsAt = endsAt + 1200, bossAlive = true })
+	BossHud.setState({ phase = "night", phaseEndsAt = endsAt + 1200, bossAlive = {} })
 	BossHud.render(endsAt + 1200 - night)
 	check("คืนถัดไป → โชว์ 59 ใหม่", count.Text .. tostring(surface.Enabled), "59true")
 
@@ -1660,27 +1662,48 @@ do
 	check("ยังไม่ได้สถานะจาก server → ไม่ error และไม่โชว์", pcall(BossHud.render, 0) and surface.Enabled == false, true)
 end
 
-print("\n━━ BossHud: จุดกด E ค้างที่ไข่บอส (Phase 5B) ━━")
+print("\n━━ BossHud: จุดกด E ค้างที่ไข่บอส (Phase 5B · 5B-2 ทุกห้อง + บอก server จังหวะกดค้าง) ━━")
 do
 	local BossHud = loaded.BossHud
 	local picked = {}
+	local holds = {}
 	local eggs = {}
+	local function onPick(i)
+		table.insert(picked, i)
+	end
+	local function onHold(i, holding)
+		table.insert(holds, `{i}:{tostring(holding)}`)
+	end
+	-- ห้อง 1 ครบ 6 ฟอง (ชื่อ/Attribute ตามที่ MapBuilder สร้าง)
 	for index = 1, Config.Balance.BossCycle.EGGS_PER_NIGHT do
 		local part = newInstance("Part")
-		part.Name = `BossEgg{index}`
+		part.Name = Config.getBossEggPartName(1, index)
+		part:SetAttribute("Room", 1)
 		part:SetAttribute("Index", index)
 		part:SetAttribute("Status", "none")
 		eggs[index] = part
-		check(`ติดจุดกดที่ไข่ฟอง {index} ไม่ error`, pcall(BossHud.attachEggPrompt, part, function(i)
-			table.insert(picked, i)
-		end))
+		check(`ติดจุดกดที่ไข่ห้อง 1 ฟอง {index} ไม่ error`, pcall(BossHud.attachEggPrompt, part, onPick, onHold))
 	end
+	-- 5B-2: ห้อง 2 ฟองที่ 1 — index ซ้ำกับห้อง 1 ต้องติดได้แยกกัน
+	local room2Egg = newInstance("Part")
+	room2Egg.Name = Config.getBossEggPartName(2, 1)
+	room2Egg:SetAttribute("Room", 2)
+	room2Egg:SetAttribute("Index", 1)
+	room2Egg:SetAttribute("Status", "none")
+	check("ติดจุดกดที่ไข่ห้อง 2 ฟอง 1 (index ซ้ำห้อง 1) ไม่ error", pcall(BossHud.attachEggPrompt, room2Egg, onPick, onHold))
+	local room2Prompt = findDescendant(room2Egg, "PickUpBossEgg")
+	check("  ไข่ห้อง 2 มีจุดกดของตัวเอง", room2Prompt ~= nil, true)
+	local noRoom = newInstance("Part")
+	noRoom:SetAttribute("Index", 1)
+	BossHud.attachEggPrompt(noRoom, onPick, onHold)
+	check("  Part ไม่มี Attribute Room → ไม่ติด", findDescendant(noRoom, "PickUpBossEgg") == nil, true)
+
 	local prompt1 = findDescendant(eggs[1], "PickUpBossEgg")
 	check("  prompt อยู่ใต้ Part ไข่", prompt1 ~= nil, true)
 	check("  สร้างผ่าน UiKit.prompt (OnePerButton)", prompt1 and prompt1.Exclusivity, "Enum.ProximityPromptExclusivity.OnePerButton")
 	check("  กดค้างตาม EGG_PICKUP_HOLD_SECONDS", prompt1 and prompt1.HoldDuration, Config.Balance.BossCycle.EGG_PICKUP_HOLD_SECONDS)
 	check("  ระยะกดตาม EggPromptDistance", prompt1 and prompt1.MaxActivationDistance, Config.MapDimensions.BossArena.EggPromptDistance)
-	BossHud.attachEggPrompt(eggs[1], function() end)
+	BossHud.attachEggPrompt(eggs[1], onPick, onHold)
 	local count = 0
 	for _, child in rawget(eggs[1], "__children") do
 		if child.Name == "PickUpBossEgg" then
@@ -1690,16 +1713,25 @@ do
 	check("  ติดซ้ำฟองเดิม → ไม่เพิ่ม prompt", count, 1)
 
 	-- ไข่ชุดใหม่ขึ้นห้อง (กลางคืน · บอสอยู่) → เห็นไข่แต่ยังไม่มีจุดกด
-	for index, part in eggs do
+	for _, part in eggs do
 		part:SetAttribute("Status", "resting")
 	end
-	BossHud.setState({ phase = "night", phaseEndsAt = 100, bossAlive = true })
+	room2Egg:SetAttribute("Status", "resting")
+	BossHud.setState({ phase = "night", phaseEndsAt = 100, bossAlive = { [1] = true, [2] = true } })
 	check("บอสยังอยู่ → จุดกดปิด (เห็นไข่ แต่หยิบไม่ได้)", prompt1.Enabled, false)
 	-- 5B-fix (ผู้ใช้สั่ง "ให้ผู้เล่นลุ้น"): ไม่โชว์น้ำหนักบน prompt
 	check("  ชื่อบน prompt ไม่บอกน้ำหนัก", prompt1.ObjectText, "ไข่บอส")
-	BossHud.setState({ phase = "day", phaseEndsAt = 700, bossAlive = false })
-	check("บอสตายแล้ว → จุดกดเปิด", prompt1.Enabled, true)
+	BossHud.setState({ phase = "day", phaseEndsAt = 700, bossAlive = { [1] = false, [2] = true } })
+	check("บอสห้อง 1 ตายแล้ว → จุดกดห้อง 1 เปิด", prompt1.Enabled, true)
+	check("  บอสห้อง 2 ยังอยู่ → จุดกดห้อง 2 ยังปิด (5B-2 แยกห้อง)", room2Prompt.Enabled, false)
+	BossHud.setState({ phase = "day", phaseEndsAt = 700, bossAlive = {} })
+	check("  ยังไม่รู้สถานะบอส (ไม่มี Attribute) → ปิดไว้ก่อน", prompt1.Enabled, false)
+	BossHud.setState({ phase = "day", phaseEndsAt = 700, bossAlive = { [1] = false, [2] = true } })
 
+	-- 5B-2: บอก server ว่าเริ่มกด/ปล่อย (server จับเวลาเอง)
+	prompt1.PromptButtonHoldBegan:Fire()
+	prompt1.PromptButtonHoldEnded:Fire()
+	check("เริ่มกด/ปล่อย → บอก server 'ฟองที่ 1' true แล้ว false", table.concat(holds, ","), "1:true,1:false")
 	prompt1.Triggered:Fire()
 	check("กดครบเวลา → ยิงคำขอหยิบ 'ฟองที่ 1' เท่านั้น", table.concat(picked, ","), "1")
 
@@ -1713,7 +1745,7 @@ do
 	check("  วางลง/ส่งแล้ว → เปิดกลับ", prompt2.Enabled, true)
 	eggs[2]:SetAttribute("Status", "gone")
 	check("ฟองที่เก็บไปแล้ว → จุดกดปิด", prompt2.Enabled, false)
-	BossHud.setState({ phase = "night", phaseEndsAt = 1300, bossAlive = true })
+	BossHud.setState({ phase = "night", phaseEndsAt = 1300, bossAlive = { [1] = true, [2] = true } })
 	local anyOpen = false
 	for _, part in eggs do
 		local prompt = findDescendant(part, "PickUpBossEgg")

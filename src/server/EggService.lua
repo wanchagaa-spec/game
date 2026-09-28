@@ -188,7 +188,8 @@ function EggService.grantEgg(player: Player, eggId: string): (boolean, string?)
 end
 
 -- 5B: ไข่บอสที่ผู้เล่นถือกลับถึงเซฟโซน — **น้ำหนักสุ่มไว้แล้วตอนบอสเกิด** (BossService · Config.rollMotherWeightForEgg ตัวเดิม)
--- ห้ามสุ่มใหม่ (ผู้เล่นเห็นขนาด/ป้ายน้ำหนักตั้งแต่ไข่อยู่ในห้อง) · เข้ากระเป๋าทางเดียวกับ grantEgg
+-- ห้ามสุ่มใหม่ (ผู้เล่นเห็นขนาดไข่ตั้งแต่ไข่อยู่ในห้อง) · เข้ากระเป๋าทางเดียวกับ grantEgg
+-- 5B-2: eggId = ไข่ของห้องที่หยิบมา (Config.getBossEggId(ห้อง) = egg_stageN) — ตัวนี้ไม่ต้องรู้ว่ามาจากห้องไหน
 -- ⚠️ BossService เรียกเท่านั้น (inject ผ่าน Main.server.lua) · น้ำหนักมาจากสถานะของ server ไม่ใช่จาก client
 function EggService.grantBossEgg(player: Player, eggId: string, weight: number): (boolean, string?)
 	local data = dataOf(player)

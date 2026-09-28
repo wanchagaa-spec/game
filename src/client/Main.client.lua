@@ -91,6 +91,8 @@ local toggleMotherLockRequest = Remotes.waitFor(Config.RemoteNames.TOGGLE_MOTHER
 local bossEventNotify = Remotes.waitFor(Config.RemoteNames.BOSS_EVENT_NOTIFY)
 -- ⚠️ 5B: หยิบไข่บอส — ส่ง index ของฟองที่กด E ค้าง (BossHud ติดจุดกด) · ผลกลับมาทาง bossEventNotify
 local pickUpBossEggRequest = Remotes.waitFor(Config.RemoteNames.PICK_UP_BOSS_EGG_REQUEST)
+-- ⚠️ 5B-2: บอก server ว่าเริ่มกด/ปล่อย E ที่ไข่บอส — server จับเวลากดค้างเอง (ยิงหยิบตรง ๆ โดยไม่กดค้างครบ = ถูกปฏิเสธ)
+local bossEggHoldRequest = Remotes.waitFor(Config.RemoteNames.BOSS_EGG_HOLD_REQUEST)
 
 --------------------------------------------------------------------------------
 -- สี / ค่าคงที่
@@ -938,9 +940,10 @@ actionResult.OnClientEvent:Connect(function(ok: boolean, message: string)
 end)
 
 -- ⚠️ 5B: ตัวเลขต่อท้าย (น้ำหนักไข่ · เงินที่ได้ · จำนวนคนแบ่ง) มาจาก server เสมอ — ที่นี่แค่จัดรูปข้อความ
+-- 5B-2: + เลขห้อง ("killed"/"locked" = a · "reward" = c) · "heavy" = รายการ { room, weight } ทุกห้องในข้อความเดียว
 -- เหตุการณ์ "ทำไม่สำเร็จ/เสียของ" (หยิบไม่ได้ · กระเป๋าเต็ม · ไข่หาย · ติดล็อก) โชว์สีเตือน
-bossEventNotify.OnClientEvent:Connect(function(kind: string, a: number?, b: number?)
-	local message = Config.formatBossEventMessage(kind, a, b)
+bossEventNotify.OnClientEvent:Connect(function(kind: string, a: any?, b: number?, c: number?)
+	local message = Config.formatBossEventMessage(kind, a, b, c)
 	if message ~= "" then
 		showToast(message, not Config.isBossEventWarning(kind))
 	end
@@ -961,8 +964,11 @@ TroopRenderer.start()
 
 -- ⚠️ Phase 5A: ตัวเลข 59 → 0 บนกำแพงกั้นกลางคืน (รอของจาก server เบื้องหลัง ไม่บล็อกบรรทัดถัดไป)
 -- ⚠️ 5B: + จุดกด E ค้างที่ไข่บอส — ยิงแค่ "ฟองที่ i" · server ตัดสินทุกอย่างเอง (บอสตายไหม · ระยะ · ถืออยู่แล้วไหม)
+-- ⚠️ 5B-2: + บอกจังหวะเริ่มกด/ปล่อย (server จับเวลากดค้างเอง) · ห้องไหน server ดูจากตำแหน่งตัวละครเอง
 BossHud.start(playerGui, function(index: number)
 	pickUpBossEggRequest:FireServer(index)
+end, function(index: number, holding: boolean)
+	bossEggHoldRequest:FireServer(index, holding)
 end)
 
 print("[egg-army-game] client พร้อมแล้ว")

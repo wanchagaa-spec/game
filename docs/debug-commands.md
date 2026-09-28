@@ -218,7 +218,7 @@ EggService.debugWipeSavedData(player, player.Name)  -- ต้องส่งช�
 
 ---
 
-## คำสั่งบอส + วงจรกลางวัน/กลางคืน (Phase 5A) — อยู่ที่ `BossService`
+## คำสั่งบอส + วงจรกลางวัน/กลางคืน + ไข่บอส (Phase 5A · 5B) — อยู่ที่ `BossService`
 
 เรียกผ่าน**สะพานเดียวกัน** (`ServerStorage.EggServiceDebug`) — สะพานหาชื่อใน `EggService` ก่อน ไม่เจอค่อยหาใน `BossService`
 ทุกคำสั่งคืน**ข้อความสรุปสถานะ** (phase · เหลือกี่วิ · HP บอส · ผู้ทำดาเมจ · ล็อกกี่คน) ให้ดูใน Output ทันที
@@ -226,18 +226,21 @@ EggService.debugWipeSavedData(player, player.Name)  -- ต้องส่งช�
 
 | คำสั่ง | ทำอะไร |
 |---|---|
-| `debugBossNight()` | ข้ามไป**ต้นกลางคืน**ทันที: วาปทุกคนมาหน้าป้อม · กำแพงกั้นขึ้น · บอสเกิด (ตัวเก่ายังไม่ตาย = ฟื้น HP เต็ม) · นับ 59 → 0 ใหม่ |
+| `debugBossNight(firstEggKg?)` | ข้ามไป**ต้นกลางคืน**ทันที: วาปทุกคนมาหน้าป้อม (ฝั่งลาน) · กำแพงกั้นปิดปากเลน · บอสเกิด (ตัวเก่ายังไม่ตาย = ฟื้น HP เต็ม) · **ไข่ 6 ฟองชุดใหม่** (ชุดเก่า + ที่ใครถืออยู่หาย) · นับ 59 → 0 ใหม่ · 5B: ใส่ `firstEggKg` (≥ 100) = บังคับน้ำหนักไข่ฟองที่ 1 **ก่อน**ประกาศ — ทดสอบแจ้งเตือนไข่หนัก (> 100,000) โดยไม่ต้องรอดวง |
 | `debugBossDay()` | ข้ามไป**ต้นกลางวัน**ทันที: กำแพงกั้นหาย เข้าไปตีบอสได้ (ไม่มีบอส = ใช้ `debugBossNight` ก่อน) |
 | `debugDamageBoss(player, amount)` | ทำดาเมจ `amount` ในนามผู้เล่นคนนั้น — นับเข้าบันทึกผู้ทำดาเมจเหมือนตีจริง · กติกาเดิม: กลางวัน + บอสยังอยู่ |
-| `debugKillBoss(player)` | ฆ่าบอสในนามผู้เล่นคนนั้น (ดาเมจเท่า HP ที่เหลือ) → "กำจัดบอสแล้ว!" · ปลดล็อกอัญเชิญทุกคน |
-| `debugBossStatus()` | ดูสถานะอย่างเดียว ไม่เปลี่ยนอะไร |
+| `debugKillBoss(player)` | ฆ่าบอสในนามผู้เล่นคนนั้น (ดาเมจเท่า HP ที่เหลือ) → "กำจัดบอสแล้ว!" · ปลดล็อกอัญเชิญทุกคน · 5B: ไข่หยิบได้ · **จ่ายเงินบอส**ตามกติกาจริง (ต้องยืนอยู่ในห้องด่าน 1 ถึงได้ — ยืนในลาน = ไม่ได้) |
+| `debugBossStatus()` | ดูสถานะอย่างเดียว ไม่เปลี่ยนอะไร (ท้ายบรรทัดมีสถานะไข่ 5B) |
+| `debugBossEggs()` | 5B: น้ำหนัก · วาง/ถือ/เก็บแล้ว · ใครถือ ของไข่ทุกฟอง + บอกว่าตอนนี้หยิบได้หรือยัง |
 
 ```lua
 game.ServerStorage.EggServiceDebug:Invoke("debugBossNight")
+game.ServerStorage.EggServiceDebug:Invoke("debugBossNight", 152300)   -- ไข่ฟองที่ 1 หนัก 152,300 → ประกาศทั้งเซิร์ฟ
 game.ServerStorage.EggServiceDebug:Invoke("debugBossDay")
 game.ServerStorage.EggServiceDebug:Invoke("debugDamageBoss", game.Players:GetPlayers()[1], 300)
 game.ServerStorage.EggServiceDebug:Invoke("debugKillBoss", game.Players:GetPlayers()[1])
 print(game.ServerStorage.EggServiceDebug:Invoke("debugBossStatus"))
+print(game.ServerStorage.EggServiceDebug:Invoke("debugBossEggs"))
 ```
 
 - อยากเห็นข้อความคืนมา → ห่อด้วย `print(...)` (Output เห็นบรรทัด `[BossService] ...` อยู่แล้วทุกครั้งที่ phase เปลี่ยน/บอสตาย)

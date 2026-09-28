@@ -157,9 +157,22 @@ end
 -- แจกไข่ (server เท่านั้น)
 --------------------------------------------------------------------------------
 
+-- ⚠️ ทางเดียวที่ไข่ (ที่มีน้ำหนักแล้ว) เข้ากระเป๋า — grantEgg (สุ่มน้ำหนักเอง) กับไข่บอส 5B (น้ำหนักสุ่มไว้ตั้งแต่บอสเกิด)
+-- ใช้ตัวเดียวกัน: PlayerData.addHeldEgg → sync → log · เต็ม = คืน false "ถือไข่เต็มแล้ว" เหมือนกันทุกทาง
+local function addEggToBag(player: Player, data: Data, eggId: string, weight: number): (boolean, string?)
+	local egg = PlayerData.addHeldEgg(data.heldEggs, eggId, weight)
+	if not egg then
+		return false, "ถือไข่เต็มแล้ว"
+	end
+
+	EggService.sync(player)
+
+	print(`[EggService] {player.Name} ได้ {egg.eggId} #{egg.id} น้ำหนัก {Config.formatWeight(egg.weight)}`)
+	return true, nil
+end
+
 -- ⚠️ ห้ามให้ client เรียกถึงได้ และห้ามรับน้ำหนักมาจาก client
--- Phase 5 บอสจะเรียกตัวนี้ตอนผู้เล่นแย่งไข่สำเร็จ
--- ระหว่างที่ยังไม่มีบอส ใช้เป็นคำสั่งเทสต์ใน command bar ฝั่ง server
+-- ใช้กับไข่รางวัลผ่านด่าน · ไข่เริ่มต้น · ไข่ตำนาน · คำสั่งเทสต์ (ไข่บอส 5B ใช้ grantBossEgg — น้ำหนักมาก่อนแล้ว)
 function EggService.grantEgg(player: Player, eggId: string): (boolean, string?)
 	local data = dataOf(player)
 	if not data then
@@ -171,15 +184,25 @@ function EggService.grantEgg(player: Player, eggId: string): (boolean, string?)
 		return false, `สร้างไข่ "{eggId}" ไม่ได้ (ไม่มีอยู่ หรือถูกปิดไปแล้ว)`
 	end
 
-	local egg = PlayerData.addHeldEgg(data.heldEggs, rolledId, weight)
-	if not egg then
-		return false, "ถือไข่เต็มแล้ว"
+	return addEggToBag(player, data, rolledId, weight)
+end
+
+-- 5B: ไข่บอสที่ผู้เล่นถือกลับถึงเซฟโซน — **น้ำหนักสุ่มไว้แล้วตอนบอสเกิด** (BossService · Config.rollMotherWeightForEgg ตัวเดิม)
+-- ห้ามสุ่มใหม่ (ผู้เล่นเห็นขนาด/ป้ายน้ำหนักตั้งแต่ไข่อยู่ในห้อง) · เข้ากระเป๋าทางเดียวกับ grantEgg
+-- ⚠️ BossService เรียกเท่านั้น (inject ผ่าน Main.server.lua) · น้ำหนักมาจากสถานะของ server ไม่ใช่จาก client
+function EggService.grantBossEgg(player: Player, eggId: string, weight: number): (boolean, string?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น"
 	end
-
-	EggService.sync(player)
-
-	print(`[EggService] {player.Name} ได้ {egg.eggId} #{egg.id} น้ำหนัก {Config.formatWeight(egg.weight)}`)
-	return true, nil
+	local eggType = Config.getEgg(eggId)
+	if not eggType or not eggType.enabled then
+		return false, `ไข่ "{eggId}" ไม่มีอยู่ หรือถูกปิดไปแล้ว`
+	end
+	if type(weight) ~= "number" or weight < 1 or weight % 1 ~= 0 then
+		return false, "น้ำหนักไข่ต้องเป็นจำนวนเต็มบวก"
+	end
+	return addEggToBag(player, data, eggType.id, weight)
 end
 
 --------------------------------------------------------------------------------

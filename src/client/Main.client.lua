@@ -89,6 +89,8 @@ local stageClearedNotify = Remotes.waitFor(Config.RemoteNames.STAGE_CLEARED_NOTI
 local toggleMotherLockRequest = Remotes.waitFor(Config.RemoteNames.TOGGLE_MOTHER_LOCK_REQUEST)
 -- ⚠️ Phase 5A: server แจ้งทุกคนเอง ("night" / "day" / "killed") — ข้อความจริงอยู่ที่ Config.formatBossEventMessage
 local bossEventNotify = Remotes.waitFor(Config.RemoteNames.BOSS_EVENT_NOTIFY)
+-- ⚠️ 5B: หยิบไข่บอส — ส่ง index ของฟองที่กด E ค้าง (BossHud ติดจุดกด) · ผลกลับมาทาง bossEventNotify
+local pickUpBossEggRequest = Remotes.waitFor(Config.RemoteNames.PICK_UP_BOSS_EGG_REQUEST)
 
 --------------------------------------------------------------------------------
 -- สี / ค่าคงที่
@@ -935,10 +937,12 @@ actionResult.OnClientEvent:Connect(function(ok: boolean, message: string)
 	showToast(message, ok)
 end)
 
-bossEventNotify.OnClientEvent:Connect(function(kind: string)
-	local message = Config.formatBossEventMessage(kind)
+-- ⚠️ 5B: ตัวเลขต่อท้าย (น้ำหนักไข่ · เงินที่ได้ · จำนวนคนแบ่ง) มาจาก server เสมอ — ที่นี่แค่จัดรูปข้อความ
+-- เหตุการณ์ "ทำไม่สำเร็จ/เสียของ" (หยิบไม่ได้ · กระเป๋าเต็ม · ไข่หาย · ติดล็อก) โชว์สีเตือน
+bossEventNotify.OnClientEvent:Connect(function(kind: string, a: number?, b: number?)
+	local message = Config.formatBossEventMessage(kind, a, b)
 	if message ~= "" then
-		showToast(message, true)
+		showToast(message, not Config.isBossEventWarning(kind))
 	end
 end)
 
@@ -956,7 +960,10 @@ WallRenderer.start()
 TroopRenderer.start()
 
 -- ⚠️ Phase 5A: ตัวเลข 59 → 0 บนกำแพงกั้นกลางคืน (รอของจาก server เบื้องหลัง ไม่บล็อกบรรทัดถัดไป)
-BossHud.start(playerGui)
+-- ⚠️ 5B: + จุดกด E ค้างที่ไข่บอส — ยิงแค่ "ฟองที่ i" · server ตัดสินทุกอย่างเอง (บอสตายไหม · ระยะ · ถืออยู่แล้วไหม)
+BossHud.start(playerGui, function(index: number)
+	pickUpBossEggRequest:FireServer(index)
+end)
 
 print("[egg-army-game] client พร้อมแล้ว")
 print("   จำลองด่านที่พังแล้วเพื่อทดสอบกำแพง (ค่าจริงจาก sync จะเขียนทับทันที): WallRenderer.setWallProgress(n)")

@@ -59,8 +59,8 @@ row("META", "killBossMult", Config.Balance.Economy.KILL_BOSS_MULTIPLIER)
 row("META", "minUpgradeShare", Config.Balance.BalanceCheck.MIN_UPGRADE_SHARE)
 row("META", "maxUpgradeShare", Config.Balance.BalanceCheck.MAX_UPGRADE_SHARE)
 row("META", "eggsPerHour", Config.getEggsPerHour())
-row("META", "bossEggs", Config.Balance.Boss.EGGS_PER_SPAWN)
-row("META", "bossRespawn", Config.Balance.Boss.RESPAWN_SECONDS)
+row("META", "bossEggs", Config.Balance.BossCycle.MODEL_EGGS_PER_SPAWN)
+row("META", "bossRespawn", Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS)
 row("META", "players", Config.Balance.BalanceCheck.PLAYERS_PER_SERVER)
 row("META", "maxFarmRatio", Config.Balance.BalanceCheck.MAX_FARM_TO_CLEAR_RATIO)
 row("META", "eggBagCapacity", Config.Balance.Hatchery.BAG_CAPACITY)
@@ -180,7 +180,7 @@ for stage = 2, 9 do
 	local hrs = Config.getReferenceClearHours(stage)
 	local penIncome = Config.getPenCapacity(stage) * Config.getCoinsPerMinute(w, stage) * 60
 	local killTotal = Config.getStageDefenderRewardTotal(stage)
-	local bossPerHour = (3600 / Config.Balance.Boss.RESPAWN_SECONDS) * Config.getBossKillReward(stage)
+	local bossPerHour = (3600 / Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS) * Config.getBossKillReward(stage)
 		/ check.PLAYERS_PER_SERVER
 	local total = (penIncome + bossPerHour) * hrs + killTotal
 	local need = (Config.getPenUpgradeCost(stage) or 0)
@@ -295,7 +295,7 @@ row("META", "minWallThickness", Config.getMinWallThickness())
 row("META", "physicsFps", Config.Balance.SpeedUpgrade.PHYSICS_FPS)
 row("META", "thicknessSafety", Config.Balance.SpeedUpgrade.THICKNESS_SAFETY)
 row("META", "speedCostMultiplier", Config.Balance.SpeedUpgrade.COST_MULTIPLIER)
-row("META", "bossRespawn", Config.Balance.Boss.RESPAWN_SECONDS)
+row("META", "bossRespawn", Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS)
 
 -- ── ความหนากำแพงทุกชนิด ──
 for _, entry in
@@ -316,7 +316,7 @@ local nest1 = Config.getBossNestCenter(1).X - Config.getPenPlotCenter(1).X
 for level = 0, Config.Balance.SpeedUpgrade.MAX_LEVEL do
 	local v = Config.getWalkSpeed(level)
 	row("TRAVEL", level, v, nest9 / v, nest9 * 2 / v,
-		(nest9 * 2 / v) / Config.Balance.Boss.RESPAWN_SECONDS * 100, nest1 / v)
+		(nest9 * 2 / v) / Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS * 100, nest1 / v)
 end
 
 -- ── รายได้ vs รายจ่ายรวมต่อด่าน (แยกทุกบ่อ) ──
@@ -369,7 +369,7 @@ end
 do
 	local w = check.REFERENCE_WEIGHT[1]
 	local perHour = Config.getPenCapacity(1) * Config.getCoinsPerMinute(w, 1) * 60
-		+ (3600 / Config.Balance.Boss.RESPAWN_SECONDS) * Config.getBossKillReward(1) / check.PLAYERS_PER_SERVER
+		+ (3600 / Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS) * Config.getBossKillReward(1) / check.PLAYERS_PER_SERVER
 	local needed = Config.getSpeedUpgradeCost(0) or 0
 	local others = Config.getStageDamageUpgradeTotal(1)
 		+ (Config.getWeaponUpgradeCost(1) or 0)
@@ -389,7 +389,7 @@ do
 		end
 		local w = check.REFERENCE_WEIGHT[stage]
 		local incomePerHour = Config.getPenCapacity(stage) * Config.getCoinsPerMinute(w, stage) * 60
-			+ (3600 / Config.Balance.Boss.RESPAWN_SECONDS) * Config.getBossKillReward(stage) / check.PLAYERS_PER_SERVER
+			+ (3600 / Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS) * Config.getBossKillReward(stage) / check.PLAYERS_PER_SERVER
 		local capDps = Config.getReferenceDps(stage)
 		local capLevel = Config.getMaxDamageLevel(stage)
 		local level = Config.getMaxDamageLevel(stage - 1)

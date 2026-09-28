@@ -763,12 +763,15 @@ return function(t, Config)
 
 	print("── ยามเวลาฟาร์ม ──")
 	-- ⚠️ อย่า hardcode จำนวนผู้เล่น — ผูกกับ Config เพื่อให้เทสต์ตามไปเองเวลาปรับ
-	local expectedEggs = (3600 / Config.Balance.Boss.RESPAWN_SECONDS)
-		* Config.Balance.Boss.EGGS_PER_SPAWN
+	-- 5B: Balance.Boss ลบแล้ว — โมเดลสมดุลอ่าน BossCycle.MODEL_* (ตัวเลขเดิม 5 นาที · 5 ฟอง) ไม่ใช่วงจรจริง
+	-- (เปลี่ยนเป็นวงจรจริง = จูนสมดุล ผู้ใช้ตัดสิน — ดูคอมเมนต์ที่ตัวค่าใน Config)
+	local expectedEggs = (3600 / Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS)
+		* Config.Balance.BossCycle.MODEL_EGGS_PER_SPAWN
 		/ Config.Balance.BalanceCheck.PLAYERS_PER_SERVER
 	check("ไข่/ชม./คน ตรงสูตร บอสวาง ÷ จำนวนผู้เล่น",
 		math.abs(Config.getEggsPerHour() - expectedEggs) < 1e-9, true)
-	check("ที่ 6 คน ได้ 10 ฟอง/ชม./คน", math.abs(Config.getEggsPerHour() - 10) < 1e-9, true)
+	check("ที่ 6 คน ได้ 10 ฟอง/ชม./คน (โมเดลสมดุล — ตัวเลขเดิม)", math.abs(Config.getEggsPerHour() - 10) < 1e-9, true)
+	check("Balance.Boss ชุดเก่าถูกลบแล้ว (ไม่มีใครอ่านได้)", Config.Balance.Boss, nil) -- legacy-boss: ok (ตรวจว่าหายจริง)
 	local farmOk = true
 	for st = 2, 9 do
 		local ratio = Config.getReferenceFarmHours(st) / Config.getReferenceClearHours(st)
@@ -949,13 +952,13 @@ return function(t, Config)
 	end
 	check("รังบอสอยู่ในช่วงด่านตัวเองทุกด่าน", nestInRange, true)
 	check("รังบอสอยู่หลังกำแพงทุกด่านที่มีกำแพง", nestBehindWall, true)
-	check("จุดวางไข่ในรัง = จำนวนไข่ที่บอสวาง", Config.Balance.Boss.EGGS_PER_SPAWN, 5)
+	check("ไข่ที่บอสวางต่อคืน = 6 ฟอง (5B)", Config.Balance.BossCycle.EGGS_PER_NIGHT, 6)
 
-	-- จุดวางไข่ต้องอยู่ในรัง ไม่หลุดขอบ
+	-- จุดวางไข่ต้องอยู่ในรัง ไม่หลุดขอบ (5B: มุมห้อง หลังบอส — ตรวจครบทุกห้องเผื่อรอบ "บอสทุกห้อง")
 	local spotsInside = true
 	for st = 1, Config.Balance.Stage.COUNT do
 		local center = Config.getBossNestCenter(st)
-		for i = 1, Config.Balance.Boss.EGGS_PER_SPAWN do
+		for i = 1, Config.Balance.BossCycle.EGGS_PER_NIGHT do
 			local spot = Config.getBossEggSpot(st, i)
 			if math.abs(spot.X - center.X) > map.BossRoom.Size.X / 2
 				or math.abs(spot.Z - center.Z) > map.BossRoom.Size.Y / 2 then
@@ -1409,9 +1412,10 @@ return function(t, Config)
 	-- นั่งปนกันอยู่ที่ Config ชั้นเดียวกัน ไม่มีอะไรบอกว่าอันไหนเป็นอันไหน
 	print("── Config.Balance: ลูกบิดสมดุลอยู่ที่เดียว ──")
 
+	-- 5B: "Boss" ลบแล้ว (ค่าที่ยังใช้ย้ายไป BossCycle) → แทนที่ด้วย "BossCycle" ให้ยังนับ 17 กลุ่มแรกเท่าเดิม
 	local BALANCE_GROUPS = {
 		"StageWeightTiers", "Weight", "Production", "Damage", "NewPlayer",
-		"Economy", "Pen", "Bag", "Hatchery", "Stages", "Stage", "Boss",
+		"Economy", "Pen", "Bag", "Hatchery", "Stages", "Stage", "BossCycle",
 		"DamageUpgrade", "SpeedUpgrade", "Combat", "BalanceCheck", "Weapon",
 	}
 
@@ -1429,6 +1433,16 @@ return function(t, Config)
 	check("ทุกกลุ่มสมดุลอยู่ใน Config.Balance", table.concat(missingFromBalance, ","), "")
 	check("ไม่มีกลุ่มสมดุลเหลือที่ Config ชั้นบนสุด", table.concat(leakedToTop, ","), "")
 	check("นับได้ 17 กลุ่ม", #BALANCE_GROUPS, 17)
+	check("กลุ่ม Boss ชุดเก่าไม่อยู่ทั้งใน Balance และชั้นบนสุด (5B)",
+		(Config.Balance :: any).Boss == nil and (Config :: any).Boss == nil, true)
+	do
+		-- ยามต้องจับคนที่เติม Balance.Boss กลับเข้าไป
+		local balance: any = Config.Balance
+		balance.Boss = { RESPAWN_SECONDS = 300 }
+		check("เติม Balance.Boss กลับ → validate ไม่ผ่าน", pcall(Config.validate), false) -- legacy-boss: ok (ข้อความเทสต์)
+		balance.Boss = nil
+		check("  ลบออกแล้ว validate ผ่านเหมือนเดิม", pcall(Config.validate), true)
+	end
 
 	-- ของที่ **ต้องไม่** ถูกย้ายเข้า Balance — id · schema · รูปทรงแมพ · ชื่อ remote
 	for _, name in { "MapDimensions", "RemoteNames", "DataStore", "Stack", "Uid", "World",

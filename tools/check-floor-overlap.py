@@ -53,6 +53,7 @@ function Instance.new(className)
 \tobj.GetChildren = function() return {} end
 \tobj.FindFirstChildOfClass = function() return nil end
 \tobj.PivotTo = function() end
+\tobj.SetAttribute = function() end -- 5B: ไข่บอสติด Attribute (Index/Weight/Status) — ไม่มีผลกับพื้น
 \tif className == "Part" or className == "SpawnLocation" then
 \t\ttable.insert(__created, obj)
 \tend

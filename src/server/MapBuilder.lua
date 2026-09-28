@@ -17,12 +17,13 @@
 --
 -- ══ สิ่งที่ไฟล์นี้สร้าง (server · ทุกคนเห็นเหมือนกัน) ══
 --   ลานหญ้า + คอก 6 แปลงพร้อมรั้วไม้เตี้ย · แผงร้านค้า · เลนรบพร้อมกำแพงสองข้าง
---   ห้องบอส 1 ห้องต่อด่าน พร้อมจุดวางไข่ · กำแพงใสกันตกขอบแมพ
+--   ห้องบอส 1 ห้องต่อด่าน · กำแพงหินกันตกขอบแมพ
+--   ลานบอสกลาง (Phase 5A/5B) — กำแพงกั้นกลางคืน (ปิดช่องทางเข้าเลน) · ตัวบอส + ไข่ 6 ฟองที่มุมห้องด่าน 1
+--     (สร้างแค่ "ของ" · สถานะ/ขนาดไข่/ซ่อนโชว์ = BossService)
 --   ป้ายอัปเกรดบนแมพ (UI-2) — **ตัวป้ายเปล่า ๆ** ข้อความ + จุดกด E ติดฝั่ง client (src/client/MapSigns.lua)
 --
 -- ══ สิ่งที่ไฟล์นี้ **ไม่** สร้าง ══
 --   กำแพงกั้นด่าน · ทหารฝ่ายรับ · กองทัพผู้เล่น → **วาดฝั่ง client**
---   บอกับไข่ในรัง → ของจริงบน server แต่เป็นงาน Phase 5 (ตรงนี้ทำแค่ที่วาง)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -47,7 +48,6 @@ local COLORS = {
 	pedestalBase = Color3.fromRGB(92, 96, 110), -- หินเทาอมฟ้า
 	pedestalGlow = Color3.fromRGB(120, 200, 255), -- แกนเรืองแสง + แสง + อนุภาค
 	bossFloor = Color3.fromRGB(150, 122, 94),
-	bossEgg = Color3.fromRGB(230, 218, 190),
 	stall = Color3.fromRGB(158, 112, 76),
 	stallRoof = Color3.fromRGB(190, 92, 78),
 	marker = Color3.fromRGB(86, 74, 58),
@@ -129,11 +129,12 @@ export type PenPlot = {
 	label: TextLabel,
 }
 
+-- ⚠️ 5B: ไม่มี eggSpots แล้ว — แผ่นวางไข่ 5 จุดวงกลมของดีไซน์ "บอสด่านละตัว" ลบแล้ว
+-- ไข่บอสกลางอยู่ที่ BossArena.BossEggs (buildBossArena) · จุดวางจาก Config.getBossEggSpot
 export type BossRoom = {
 	stage: number,
 	model: Model,
 	center: Vector3,
-	eggSpots: { Part },
 }
 
 local root: Folder? = nil
@@ -285,6 +286,13 @@ function MapBuilder.buildPlaza(parent: Folder)
 	local eastWingCenterZ = (laneHalf + halfDepth) / 2
 	makeFloor("EastWingUpper", eastWingSizeX, eastWingSizeZ, eastWingCenterX, eastWingCenterZ, COLORS.grass, plaza)
 	makeFloor("EastWingLower", eastWingSizeX, eastWingSizeZ, eastWingCenterX, -eastWingCenterZ, COLORS.grass, plaza)
+
+	-- ══ 5B: หญ้าปากเลน ══ ช่วงต้นเลน (X 140) → แนวกำแพงหิน (Config.getLaneFloorStartX · X 157.5) ตรงช่อง Z ของเลน
+	-- เดิมพื้นเลนสีน้ำตาลเริ่มที่ต้นเลน → ยื่นออกมาบนหญ้าในลาน (ภาพที่ผู้ใช้ส่งมา) · ตอนนี้ขอบน้ำตาลเสมอช่องประตูพอดี
+	-- ⚠️ ต่อชนพอดี ไม่ทับ: GrassFloor จบที่ getPlazaMaxX · ปีก East* อยู่คนละช่วง Z · LaneFloor เริ่มที่ขอบนี้ (ไม่มีระนาบซ้อน)
+	-- แท่นอัญเชิญ (X 141–155) จึงตั้งอยู่บนหญ้าผืนนี้ — ตำแหน่งแท่นไม่เปลี่ยน
+	local mouthEndX = Config.getLaneFloorStartX()
+	makeFloor("LaneMouthGrass", mouthEndX - maxX, MAP.Lane.Width, (maxX + mouthEndX) / 2, 0, COLORS.grass, plaza)
 
 	-- ⚠️ **ไม่มี Part ของทางเดินกลางแล้ว** — ลบทิ้งตอนไล่บั๊กภาพกระพริบ
 	-- มันเคยเป็นแถบเทาที่อ่านเป็น "ถนน" แล้วถูกเปลี่ยนเป็นหญ้าให้กลืนกับพื้น
@@ -545,7 +553,6 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	lane.Name = "BattleLane"
 	lane.Parent = parent
 
-	local startX = Config.getLaneStartX()
 	local endX = Config.getLaneEndX()
 
 	-- ══ พื้นเลน ══ **สร้างเป็นช่วง ๆ เว้นตรงห้องบอส**
@@ -558,8 +565,11 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	-- ขยับความสูงแปลว่ามีขั้นให้สะดุด และของที่วางบนพื้นจะลอยหรือจม
 	-- ห้องบอสกว้างกว่าเลนอยู่แล้ว (80 > 60) ช่วงที่เว้นไว้จึงถูกพื้นห้องบอสคลุมเต็มพอดี
 	-- ⚠️ ชื่อ floorCursor ไม่ใช่ cursor เฉย ๆ เพราะตัวสร้างกำแพงข้างล่างมี cursor ของตัวเอง
+	-- ⚠️ 5B: พื้นเลน (สีน้ำตาล) **เริ่มที่แนวกำแพงหินขอบแมพ/ช่องประตู** (Config.getLaneFloorStartX · X 157.5) ไม่ใช่ต้นเลน
+	--   เดิมเริ่มที่ getLaneStartX (X 140) → ยื่นออกมาบนหญ้าในลาน 17.5 studs (ภาพที่ผู้ใช้ส่งมา) · ช่วงนั้นเป็นหญ้าแล้ว
+	--   (buildPlaza · "LaneMouthGrass") · ⚠️ แค่ Part พื้น — ต้นเลน/แท่นอัญเชิญ/ทางเดินทหาร/ระยะการรบยังอ่าน getLaneStartX
 	local roomHalfSpan = MAP.BossRoom.Size.X / 2
-	local floorCursor = startX
+	local floorCursor = Config.getLaneFloorStartX()
 
 	local function laneSegment(fromX: number, toX: number, index: number)
 		if toX - fromX <= 0 then
@@ -680,20 +690,9 @@ function MapBuilder.buildBossRooms(parent: Folder)
 		local gated = if Config.getWallX(stage) then "หลังกำแพง" else "เข้าได้เลย"
 		makeLabel(`รังบอสด่าน {stage} · {gated}`, 280, base, 10)
 
-		local spots: { Part } = {}
-		for i = 1, Config.Balance.Boss.EGGS_PER_SPAWN do
-			local spot = makePart(
-				`EggSpot{i}`,
-				MAP.BossRoom.EggPadSize,
-				Config.getBossEggSpot(stage, i),
-				COLORS.bossEgg,
-				model
-			)
-			spot.CanCollide = false
-			spots[i] = spot
-		end
-
-		bossRooms[stage] = { stage = stage, model = model, center = center, eggSpots = spots }
+		-- ⚠️ 5B: ไม่วางแผ่นจุดไข่แล้ว (เดิม 5 จุดวงกลมตาม Balance.Boss.EGGS_PER_SPAWN ที่ลบแล้ว)
+		-- ไข่จริงของบอสกลางอยู่มุมห้อง — buildBossArena · ห้องอื่นยังไม่มีบอส (รอบ "บอสทุกห้อง")
+		bossRooms[stage] = { stage = stage, model = model, center = center }
 	end
 end
 
@@ -701,19 +700,65 @@ end
 -- โซน 4b — ลานบอสกลาง (Phase 5A) · บอสตัวเดียวของเซิร์ฟ + กำแพงกั้นกลางคืน
 --------------------------------------------------------------------------------
 -- ⚠️ อยู่ในห้องบอสของด่าน BossArena.Stage (ด่าน 1 — ด่านเดียวที่ไม่มีกำแพง ทุกคนเดินถึง · validate() บังคับ)
--- ที่นี่สร้าง "ของ" อย่างเดียว · เปิด/ปิดกำแพงกั้น · ซ่อน/โชว์บอส · อัปเดตแถบ HP = BossService
+-- ที่นี่สร้าง "ของ" อย่างเดียว · เปิด/ปิดกำแพงกั้น · ซ่อน/โชว์บอส · อัปเดตแถบ HP · ขนาด/สถานะไข่ = BossService
 -- กำแพงกั้น **ชิ้นเดียวของ server** ชนได้เฉพาะกลางคืน (BossService ตั้ง CanCollide) — ทหารไม่โดนเพราะทหารเป็นภาพ
 --   ฝั่ง client (Anchored + CanCollide = false ขยับด้วย PivotTo) และการรบคิดเป็นตัวเลข ไม่มีอะไรในเลนที่ใช้ฟิสิกส์
 --   นอกจากตัวผู้เล่น → ใช้ CanCollide ธรรมดาก็ "กันเฉพาะผู้เล่น" แล้ว ไม่ต้องมี CollisionGroup
--- ⚠️ Persistent: client ติดตัวเลขนับถอยหลังไว้ที่ผิวกำแพงกั้น (เหตุผลเดียวกับแท่นอัญเชิญ/ป้ายบนแมพ)
+-- ⚠️ 5B: กำแพงกั้นย้ายไป**ปิดช่องทางเข้าเลนพอดี** (ช่องประตูกำแพงหินขอบแมพ) · สีขาวทึบ · บอส + ไข่ 6 ฟองอยู่มุมห้อง
+-- ⚠️ Persistent: client ติดตัวเลขนับถอยหลังไว้ที่ผิวกำแพงกั้น + จุดกด E ที่ไข่ (เหตุผลเดียวกับแท่นอัญเชิญ/ป้ายบนแมพ)
 local BOSS_ARENA_COLORS = {
-	barrier = Color3.fromRGB(255, 90, 70),
+	barrier = Color3.fromRGB(245, 245, 245), -- 5B: ขาวทึบ (เดิมแดง ForceField โปร่ง)
 	bossBody = Color3.fromRGB(92, 58, 120),
 	bossHead = Color3.fromRGB(120, 76, 150),
 	bossEye = Color3.fromRGB(255, 220, 90),
 	hpBack = Color3.fromRGB(30, 30, 30),
 	hpFill = Color3.fromRGB(215, 60, 60),
+	egg = Color3.fromRGB(236, 226, 196), -- ไข่บอส (สีเดียวกันทุกฟอง — ขนาดบอกน้ำหนัก)
 }
+
+-- ไข่บอส 1 ฟอง — ทรงกลม (ขนาดเท่ากันทุกแกน) + ป้ายน้ำหนักลอยเหนือไข่ · เริ่มแบบซ่อน (Status = "none")
+-- ⚠️ อยู่ตลอด ไม่ถอดออกจากโลก — BossService ซ่อน/โชว์ด้วย Transparency + Attribute Status แทน
+--   (ถอดออกแล้วใส่กลับ = client ได้ instance ใหม่ จุดกด E ที่ติดไว้ฝั่ง client หายไปด้วย)
+local function buildBossEgg(folder: Folder, index: number)
+	local spot = Config.getBossCycleEggSpot(index)
+	local size = MAP.Blockout.EggSize
+	local egg = Instance.new("Part")
+	egg.Name = `BossEgg{index}`
+	egg.Shape = Enum.PartType.Ball
+	egg.Size = size
+	egg.Position = Vector3.new(spot.X, Config.getBallRadius(size), spot.Z)
+	egg.Color = BOSS_ARENA_COLORS.egg
+	egg.Material = Enum.Material.SmoothPlastic
+	egg.Anchored = true
+	egg.CanCollide = false
+	egg.CanTouch = false
+	egg.CastShadow = false
+	egg.Transparency = 1
+	egg:SetAttribute("Index", index)
+	egg:SetAttribute("Weight", 0)
+	egg:SetAttribute("Status", "none")
+	egg.Parent = folder
+
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "WeightLabel"
+	gui.Size = UDim2.fromOffset(150, 30)
+	gui.StudsOffsetWorldSpace = Vector3.new(0, 2.5, 0)
+	gui.MaxDistance = 150
+	gui.AlwaysOnTop = false
+	gui.Enabled = false
+	gui.Adornee = egg
+	gui.Parent = egg
+	local text = Instance.new("TextLabel")
+	text.Name = "Text"
+	text.Size = UDim2.fromScale(1, 1)
+	text.BackgroundTransparency = 1
+	text.TextScaled = true
+	text.Font = Enum.Font.GothamBold
+	text.TextColor3 = Color3.fromRGB(255, 255, 255)
+	text.TextStrokeTransparency = 0.3
+	text.Text = ""
+	text.Parent = gui
+end
 
 function MapBuilder.buildBossArena(parent: Folder)
 	local arenaDim = MAP.BossArena
@@ -723,6 +768,7 @@ function MapBuilder.buildBossArena(parent: Folder)
 	model.Parent = parent
 
 	-- กำแพงกั้นกลางคืน — เริ่มแบบกลางวัน (มองไม่เห็น · ไม่ชน) BossService สลับเองตาม phase
+	-- 5B: ปิดช่องประตูกำแพงหินขอบแมพพอดี (X/หนา/สูงเท่ากำแพงหิน · กว้างเท่าช่อง) · ขาวทึบตอนกลางคืน
 	local barrierSize = Config.getBossBarrierSize()
 	local barrier = makePart(
 		Config.BOSS_BARRIER_NAME,
@@ -731,17 +777,26 @@ function MapBuilder.buildBossArena(parent: Folder)
 		BOSS_ARENA_COLORS.barrier,
 		model
 	)
-	barrier.Material = Enum.Material.ForceField
+	barrier.Material = Enum.Material.SmoothPlastic
 	barrier.Transparency = 1
 	barrier.CanCollide = false
 	barrier.CanQuery = false
 	barrier.CastShadow = false
 
+	-- ไข่บอส 6 ฟองหลังบอส มุมเดียวกัน (5B)
+	local eggs = Instance.new("Folder")
+	eggs.Name = Config.BOSS_EGG_FOLDER
+	eggs.Parent = model
+	for index = 1, Config.Balance.BossCycle.EGGS_PER_NIGHT do
+		buildBossEgg(eggs, index)
+	end
+
 	-- ตัวบอส (blockout กล่อง ไม่ใช้ Humanoid) — BossService ถอดออกจากโลกตอนไม่มีชีวิต
+	-- 5B: ยืนมุมห้อง (Config.getBossPosition) ไม่ใช่กึ่งกลางห้องแล้ว
 	local boss = Instance.new("Model")
 	boss.Name = Config.BOSS_MODEL_NAME
 	boss.Parent = model
-	local center = Config.getBossArenaCenter()
+	local center = Config.getBossPosition()
 	local size = arenaDim.BossSize
 	local bodyHeight = size.Y * 0.7
 	local body = makePart("Body", Vector3.new(size.X, bodyHeight, size.Z), center, BOSS_ARENA_COLORS.bossBody, boss)

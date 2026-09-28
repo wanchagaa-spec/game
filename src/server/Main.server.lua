@@ -164,7 +164,9 @@ ProductionService.start(EggService.sync)
 -- PlayerData fields ธรรมดา ไม่มีระบบเซฟแยก)
 -- ⚠️ Phase 5A: วงจรกลางวัน/กลางคืน + บอสตัวเดียวของเซิร์ฟ — ต้องหลัง MapBuilder.build (ใช้กำแพงกั้น/ตัวบอสที่สร้างไว้)
 -- และก่อน CombatService.start (ส่ง gate ของล็อกอัญเชิญเข้าไป) · EggService อ่านสถานะล็อกผ่าน provider ที่ inject
-BossService.start()
+-- ⚠️ Phase 5B: inject ทางเข้ากระเป๋าไข่ (EggService.grantBossEgg = ทางเพิ่มไข่เดิม) + sync (เงินบอส/ไข่ใหม่ขึ้นจอทันที)
+-- แทน require ตรง ๆ — กัน BossService ผูกกับ EggService (หลักเดียวกับ ProductionService.start(EggService.sync))
+BossService.start(EggService.grantBossEgg, EggService.sync)
 EggService.setBossLockProvider(BossService.isLocked)
 
 -- ⚠️ Phase 4A: inject ตัวแจกไข่รางวัลผ่านด่านเข้าไป (กัน circular require แบบเดียวกับ ProductionService)
@@ -184,7 +186,7 @@ if RunService:IsStudio() then
 		if type(name) ~= "string" or string.sub(name, 1, 5) ~= "debug" then
 			error(`EggServiceDebug: เรียกได้เฉพาะ EggService.debug* / BossService.debug* — ได้ {tostring(name)}`)
 		end
-		-- Phase 5A: คำสั่งบอส (debugBossNight/debugBossDay/debugDamageBoss/debugKillBoss/debugBossStatus)
+		-- Phase 5A/5B: คำสั่งบอส (debugBossNight/debugBossDay/debugDamageBoss/debugKillBoss/debugBossStatus/debugBossEggs)
 		-- อยู่ที่ BossService — สะพานเดียวกัน ชื่อไม่ชนกับของ EggService
 		local fn = (EggService :: any)[name]
 		if type(fn) ~= "function" then

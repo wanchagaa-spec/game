@@ -347,6 +347,35 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- 2b) Phase 5B: grantBossEgg — ไข่บอสที่ถือกลับถึงเซฟโซน (น้ำหนักสุ่มไว้ตั้งแต่บอสเกิด) · ทางเพิ่มไข่เดิม
+--------------------------------------------------------------------------------
+
+print("\\n━━ grantBossEgg (5B): น้ำหนักเดิมเป๊ะ · ทางเดียวกับ grantEgg · กันค่าแปลก ━━")
+do
+\tlocal player, data = freshPlayer("BossEgg1")
+\ttable.clear(data.heldEggs.items)
+\tlocal ok = EggService.grantBossEgg(player, Config.Balance.BossCycle.EGG_ID, 152300)
+\tcheck("เข้ากระเป๋าสำเร็จ", ok, true)
+\tcheck("  ได้ 1 ฟอง", #data.heldEggs.items, 1)
+\tcheck("  น้ำหนักตรงเป๊ะ (ไม่สุ่มใหม่)", data.heldEggs.items[1] and data.heldEggs.items[1].weight, 152300)
+\tcheck("  ชนิดไข่ตรง", data.heldEggs.items[1] and data.heldEggs.items[1].eggId, Config.Balance.BossCycle.EGG_ID)
+\tfor _, bad in { 0, -5, 100.5, "100" } do
+\t\tlocal badOk = EggService.grantBossEgg(player, "egg_stage1", bad)
+\t\tcheck(`น้ำหนักแปลก ({tostring(bad)}) → ปฏิเสธ`, badOk, false)
+\tend
+\tcheck("ไข่ที่ปิดแล้ว → ปฏิเสธ", (EggService.grantBossEgg(player, "egg_common", 1000)), false)
+\tcheck("ไข่ที่ไม่มีจริง → ปฏิเสธ", (EggService.grantBossEgg(player, "egg_ไม่มีจริง", 1000)), false)
+\tcheck("  กระเป๋ายังมี 1 ฟอง", #data.heldEggs.items, 1)
+\tfor i = 1, Config.Balance.Hatchery.BAG_CAPACITY do
+\t\ttable.insert(data.heldEggs.items, { id = 1000 + i, eggId = "egg_stage1", weight = 100 })
+\tend
+\tdata.heldEggs.nextEggId = 1000 + Config.Balance.Hatchery.BAG_CAPACITY + 1
+\tlocal fullOk, fullReason = EggService.grantBossEgg(player, "egg_stage1", 5000)
+\tcheck("กระเป๋าเต็ม → false (เหมือนเต็มปกติ)", fullOk, false)
+\tcheck("  เหตุผลเดียวกับ grantEgg", fullReason, "ถือไข่เต็มแล้ว")
+end
+
+--------------------------------------------------------------------------------
 -- 3) debugSetWallProgress
 --------------------------------------------------------------------------------
 

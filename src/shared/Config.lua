@@ -450,31 +450,43 @@ Config.MapDimensions = {
 	BossRoom = {
 		Size = vec2(80, 80),
 
-		-- ไข่ในรังวางเป็นวงกลม รัศมี = สัดส่วนนี้ของด้านลึกห้อง
-		-- เก็บเป็นสัดส่วนเพื่อให้ไข่ยังอยู่ในห้องเสมอแม้ปรับขนาดห้อง
-		EggRadiusRatio = 0.3,
-		EggPadSize = vec3(7, 0.4, 7),
+		-- ⚠️ 5B: บอส + ไข่อยู่**มุมห้อง** ฝั่งเดียว อีกฝั่งเว้นเป็นทางวิ่งผ่าน (นอกระยะตีบอส) ไปด่านถัดไป
+		-- ฝั่งของแต่ละด่าน **สลับฟันปลา** (validate() บังคับว่าติดกันต้องคนละฝั่ง) — ผู้ใช้วางแผนไว้ใน docs/boss-plan.md
+		-- ซ้าย/ขวา = ยืนหันหน้าไปทางปลายเลน (+X): **ขวา = +Z · ซ้าย = −Z**
+		-- ⚠️ ตอนนี้ใช้จริงแค่ด่าน BossArena.Stage (ด่าน 1) — ด่านอื่นเก็บไว้ให้รอบ "บอสทุกห้อง"
+		-- (เดิมมีไข่ 5 จุดวางเป็นวงกลม EggRadiusRatio/EggPadSize ของดีไซน์ "บอสด่านละตัวรีเกิด 5 นาที" — ลบแล้วใน 5B)
+		CornerSide = { "right", "left", "right", "left", "right", "left", "right", "left", "right" },
 	},
 
 	-- ══ ลานบอสกลาง (Phase 5A) ══ บอสตัวเดียวของเซิร์ฟ อยู่ในห้องบอสของด่าน `Stage`
 	-- ⚠️ ต้องเป็นด่านที่ **ไม่มีกำแพงกั้น** (ด่าน 1) — กำแพงด่านวาดแยกต่อคนฝั่ง client และชนได้จริง
 	--   ผู้เล่นด่าน 1 เดินได้แค่ก่อนกำแพงด่าน 2 (X 320) → ช่วงเดียวที่ **ทุกคนเดินถึง** คือช่วงด่าน 1
 	--   (ผู้ใช้เลือกแบบนี้ใน Phase 5A · validate() บังคับว่าด่านนี้ไม่มีกำแพง)
-	-- กำแพงกั้นกลางคืน = ของ server ชิ้นเดียว ขวางเลนก่อนถึงห้อง · ทหารไม่โดน (ทหารเป็นภาพ Anchored ไม่ชน)
+	-- กำแพงกั้นกลางคืน = ของ server ชิ้นเดียว · ทหารไม่โดน (ทหารเป็นภาพ Anchored ไม่ชน)
+	-- ⚠️ 5B: กำแพงกั้นย้ายไป**ปิดช่องทางเข้าเลนพอดี** (ช่องประตูของกำแพงหินขอบแมพฝั่งตะวันออก X 157.5–162.5)
+	--   ขนาด/ตำแหน่งคำนวณจากกำแพงขอบแมพเอง (getBossBarrierX/Size) — ไม่มีค่าของตัวเองให้ตั้งผิดแล้ว
 	BossArena = {
 		Stage = 1,
 		BossSize = vec3(10, 14, 10), -- blockout กล่อง (ไม่ใช่ Humanoid)
-		-- กำแพงกั้นอยู่หน้าห้องบอสเท่านี้ (วัดจากขอบห้องถึงกึ่งกลางกำแพง) — ไม่ชนชิ้นผายออกของกำแพงข้างเลน
-		BarrierInsetX = 10,
-		BarrierThickness = 5, -- ⚠️ ต้อง ≥ Config.getMinWallThickness() เหมือนกำแพงชนิดอื่น (validate() บังคับ)
-		-- หน้าป้อม: จุดยืนตอนวาปกลางคืน — แถวละ GatherPerRow คน เรียงจากหน้ากำแพงกั้นถอยออกมา
+		-- หน้าป้อม: จุดยืนตอนวาปกลางคืน **ฝั่งลานกลาง** หน้ากำแพงกั้น — แถวละ GatherPerRow คน ถอยจากกำแพงออกมา
+		-- ⚠️ ถอยไกลพอให้เห็นตัวเลขนับถอยหลังทั้งแผ่น (กำแพงสูง 40) และพ้นแท่นอัญเชิญ (X 141–155 · validate() บังคับ)
 		GatherPerRow = 3,
-		GatherFrontGap = 10, -- แถวแรกห่างผิวหน้ากำแพงกั้นเท่านี้
-		GatherRowGap = 12,
+		GatherFrontGap = 25, -- แถวแรกห่างผิวหน้ากำแพงกั้น (ฝั่งลาน) เท่านี้
+		GatherRowGap = 10,
 		GatherSpacingZ = 15,
-		-- ไข่ 6 ฟองหลังบอส (5B) — แถวเดียวขวางเลน หลังกึ่งกลางบอสไปทาง +X
-		EggBackOffset = 30,
-		EggSpacingZ = 10,
+		-- ══ 5B: บอสอยู่มุมห้อง (ฝั่งตาม BossRoom.CornerSide) ══
+		BossCornerX = 10, -- กึ่งกลางบอสเลยกึ่งกลางห้องลึกเข้าไปทาง +X เท่านี้
+		BossCornerZ = 22, -- กึ่งกลางบอสห่างแนวกลางเลนเท่านี้ ไปทางฝั่งมุม
+		-- ทางวิ่งฝั่งตรงข้ามมุม (นอกระยะตีของบอส) ต้องกว้างอย่างน้อยเท่านี้ — วัดที่ช่วงเลนปกติ (แคบกว่าห้อง) · validate()
+		RunPathMinWidth = 20,
+		-- ไข่ 6 ฟอง**หลังบอส** (+X) มุมเดียวกัน — ตาราง EggColumns คอลัมน์ · แถวกลางตรงกับ Z ของบอส
+		EggColumns = 2,
+		EggBackOffset = 14, -- คอลัมน์แรกห่างกึ่งกลางบอสไปทาง +X เท่านี้
+		EggColumnGap = 8,
+		EggRowGap = 8,
+		-- หยิบไข่: กด E ค้าง (client · UiKit.prompt) · server ตรวจระยะจากตำแหน่งตัวละครที่ server เห็นอีกชั้น
+		EggPromptDistance = 8,
+		EggPickupRange = 10, -- server ยอมคลาดจาก prompt เล็กน้อย (ตำแหน่ง client/server ห่างกันได้ช่วงเดินอยู่)
 	},
 
 	-- ══ ร้านค้า ══ แผงเล็ก ๆ วางที่ขอบลาน **ไม่ใช่อาคารใหญ่**
@@ -684,7 +696,16 @@ Config.RemoteNames = {
 	-- ข้อความจริงอยู่ที่ Config.formatBossEventMessage(kind) · สถานะต่อเนื่อง (phase/เวลา/HP) ไม่ส่งทางนี้
 	-- แต่อยู่ใน Attribute ของ ReplicatedStorage[Config.BOSS_STATE_FOLDER] (ทุกคนเห็นค่าเดียวกัน)
 	-- ⚠️ การตีบอส **ไม่มี RemoteEvent** — ใช้ Tool.Activated ของอาวุธที่ server สร้างเอง (ยิงถึง server ในตัว)
+	-- ⚠️ 5B เพิ่ม kind + ตัวเลขต่อท้าย (ตัวเลขมาจาก server เสมอ · signature (kind, a?, b?) ของเดิมยังใช้ได้):
+	--   FireAllClients("heavy", น้ำหนัก) ตอนบอสเกิดถ้าไข่หนักเกิน HEAVY_EGG_ALERT_KG
+	--   FireClient(player, "picked" | "delivered", น้ำหนัก) · ("reward", เงินที่ได้, จำนวนคนแบ่ง) · "bagFull" · "eggLost"
+	--   · "pickupAlive" | "pickupCarrying" | "pickupTaken" | "pickupRange" (หยิบไม่สำเร็จ)
 	BOSS_EVENT_NOTIFY = "BossEventNotify",
+
+	-- client → server : PickUpBossEggRequest(eggIndex: number) — 5B หยิบไข่บอส (กด E ค้างที่ไข่ · UiKit.prompt)
+	-- ⚠️ ส่งแค่ "กดที่ฟองไหน" · server ตัดสินเองทั้งหมด (บอสตายแล้วไหม · ฟองนั้นยังอยู่ไหม · ถืออยู่แล้วไหม ·
+	--   ระยะจากตำแหน่งตัวละครที่ server เห็น) · index ไม่ใช่จำนวนเต็ม 1..EGGS_PER_NIGHT = ทิ้งเงียบ ๆ
+	PICK_UP_BOSS_EGG_REQUEST = "PickUpBossEggRequest",
 }
 
 --------------------------------------------------------------------------------
@@ -760,10 +781,14 @@ local Balance = {}
 -- เพิ่มกลุ่มสมดุลใหม่เมื่อไหร่ **ต้องเติมชื่อตรงนี้ด้วย** ไม่งั้นยามมองไม่เห็น
 local BALANCE_GROUPS: { string } = {
 	"StageWeightTiers", "Weight", "Production", "Damage", "NewPlayer",
-	"Economy", "Pen", "Bag", "Hatchery", "Stages", "Stage", "Boss",
+	"Economy", "Pen", "Bag", "Hatchery", "Stages", "Stage",
 	"DamageUpgrade", "SpeedUpgrade", "Combat", "BalanceCheck", "Weapon",
 	"VisualScale", "RobuxBoost", "BossCycle",
 }
+
+-- กลุ่มที่ลบทิ้งแล้ว — validate() บังคับว่าห้ามโผล่กลับมา (ทั้งใน Config.Balance และชั้นบนสุด)
+-- "Boss" = ดีไซน์ "บอสด่านละตัว รีเกิด 5 นาที · ไข่ 5 ฟอง" (ลบใน 5B · ค่าที่ยังใช้ย้ายไป BossCycle)
+local REMOVED_BALANCE_GROUPS: { string } = { "Boss" }
 
 --------------------------------------------------------------------------------
 -- น้ำหนักตัวแม่
@@ -1338,7 +1363,8 @@ Balance.Economy = {
 	KILL_DEFENDER_MULTIPLIER = 2,
 
 	-- บอส: KILL_BOSS_BASE × KILL_BOSS_MULTIPLIER^(ด่าน-1) ต่อการฆ่า 1 ครั้ง
-	--   ใช้ ×10 ไม่ใช่ ×2 เพราะบอสฆ่าซ้ำได้เรื่อย ๆ (รีเกิดทุก 5 นาที)
+	--   ใช้ ×10 ไม่ใช่ ×2 เพราะบอสฆ่าซ้ำได้เรื่อย ๆ (เกิดใหม่ทุกคืน — รอบละ getBossCycleSeconds())
+	--   ⚠️ 5B: บอสกลางตอนนี้จ่าย BossCycle.KILL_REWARD (ชั่วคราว = ค่าด่าน 1 ของสูตรนี้) — สูตรนี้ใช้ในโมเดลสมดุล
 	--   ต้องตามราคาของที่โต ×10 ให้ทัน ไม่งั้นบอสกลายเป็นเศษเงินตั้งแต่กลางเกม
 	--
 	KILL_BOSS_BASE = 10000,
@@ -1508,34 +1534,36 @@ Balance.Stage = {
 }
 
 --------------------------------------------------------------------------------
--- บอสและการแย่งไข่
+-- บอสและการแย่งไข่ — Phase 5A/5B วงจรกลางวัน/กลางคืน
 --------------------------------------------------------------------------------
--- บอสอยู่ในพื้นที่รังของแต่ละด่าน ใช้ร่วมกันทั้งเซิร์ฟเวอร์
--- แต่เข้าได้เฉพาะคนที่พังกำแพงถึงด่านนั้นแล้ว
---
+-- ⚠️ ดีไซน์ใหม่ (ผู้ใช้ยืนยันแล้ว): รอบละ DAY + NIGHT วินาที · กลางคืนบอสเกิดพร้อมไข่ EGGS_PER_NIGHT ฟอง
+-- ตอนนี้ **บอสตัวเดียวใช้ร่วมกันทั้งเซิร์ฟ** ที่ห้องบอสด่าน 1 (MapDimensions.BossArena) · แผนเต็ม "บอสทุกห้อง"
+-- อยู่ใน docs/boss-plan.md (รอบถัดไป)
+-- ⚠️ 5B: **ลบ `Balance.Boss` ชุดเก่าแล้ว** (ดีไซน์ "บอสด่านละตัว รีเกิด 5 นาที · ไข่ 5 ฟอง") — ค่าที่ยังใช้จริงย้ายมาที่นี่:
+--   RESPAWN_SECONDS / EGGS_PER_SPAWN → MODEL_BOSS_SPAWN_SECONDS / MODEL_EGGS_PER_SPAWN (**โมเดลสมดุลเท่านั้น** ตัวเลขเดิม)
+--   EGG_GRAB_HOLD_SECONDS → EGG_PICKUP_HOLD_SECONDS
+--   HP_BASE / HP_MULTIPLIER → BOSS_HP_BASE / BOSS_HP_MULTIPLIER (สเกลบอสต่อด่าน ผูกกับอาวุธ ×10 — validate())
+--   ⚠️ บอสกลางตอนนี้ใช้ BOSS_HP (ชั่วคราว) ไม่ใช่ getBossHp(ด่าน) — สเกลต่อด่านเก็บไว้ให้รอบ "บอสทุกห้อง"
+-- เซิร์ฟเปิดใหม่เริ่มที่ต้นกลางวันเสมอ · **ไม่เซฟ DataStore** (สถานะไข่/คนถือไข่ก็ไม่เซฟ)
+-- กลางคืน: วาปทุกคนมาหน้าป้อม · กำแพงกั้นขึ้น · บอสเกิด (ตัวเก่ายังไม่ตาย = ฟื้น HP เต็ม) · ไข่ชุดใหม่ 6 ฟอง
+-- กลางวัน: กำแพงกั้นหาย เข้าไปตีบอสได้ · บอสตายแล้วไม่เกิดจนคืนถัดไป · บอสตายแล้วไข่ถึงหยิบได้
 -- ⚠️ server เป็นคนตัดสินเจ้าของไข่เท่านั้น ห้าม client ตัดสินเด็ดขาด
-
-Balance.Boss = {
-	RESPAWN_SECONDS = 300, -- รีเกิดทุก 5 นาที
-	EGGS_PER_SPAWN = 5, -- ไข่ที่วางในรังตอนบอสเกิด
-	EGG_GRAB_HOLD_SECONDS = 3, -- กดค้างกี่วินาทีถึงจะได้ไข่ (โดนตีแล้วนับใหม่)
-
-	HP_BASE = 100, -- HP บอสด่าน 1
-	HP_MULTIPLIER = 10, -- คูณต่อด่าน
-}
-
---------------------------------------------------------------------------------
--- Phase 5A — วงจรกลางวัน/กลางคืน + บอสตัวเดียวของเซิร์ฟเวอร์
---------------------------------------------------------------------------------
--- ⚠️ ดีไซน์ใหม่ (ผู้ใช้ยืนยันแล้ว): **บอสตัวเดียวใช้ร่วมกันทั้งเซิร์ฟ** ที่ห้องบอสด่าน 1 (MapDimensions.BossArena)
--- ไม่ใช่ "บอสด่านละตัว" แบบ Balance.Boss ข้างบน — ค่าชุดข้างบน (RESPAWN_SECONDS 5 นาที · ไข่ 5 ฟอง · HP ×10
--- ต่อด่าน) **ยังไม่ลบ/ไม่แก้** เพราะ validate() ผูกไว้กับอาวุธ ×10 · 5B จะตัดสินว่าเก็บหรือเลิกใช้
--- รอบละ DAY + NIGHT วินาที วนตลอด · เซิร์ฟเปิดใหม่เริ่มที่ต้นกลางวันเสมอ · **ไม่เซฟ DataStore**
--- กลางคืน: วาปทุกคนมาหน้าป้อม · กำแพงกั้นขึ้น · บอสเกิด (ตัวเก่ายังไม่ตาย = ฟื้น HP เต็ม)
--- กลางวัน: กำแพงกั้นหาย เข้าไปตีบอสได้ · บอสตายแล้วไม่เกิดจนคืนถัดไป
 Balance.BossCycle = {
 	DAY_SECONDS = 540, -- 9 นาที
 	NIGHT_SECONDS = 60, -- 1 นาที (ตัวเลขนับถอยหลัง 59 → 0 บนกำแพงกั้น)
+
+	-- สเกล HP บอสต่อด่าน (ย้ายจาก Balance.Boss) — HP ด่าน N = BASE × MULTIPLIER^(N-1) ต้องโตเท่าอาวุธ ×10 ต่อขั้น
+	-- (อาวุธขั้น N ตีบอสด่าน N ตาย 10 ครั้งพอดี · validate() ผูก) · บอสกลางตอนนี้ยังไม่ใช้ค่านี้ (ใช้ BOSS_HP)
+	BOSS_HP_BASE = 100,
+	BOSS_HP_MULTIPLIER = 10,
+
+	-- ⚠️⚠️ **ค่าของโมเดลสมดุล (ยาม validate + เทสต์) ไม่ใช่วงจรจริง** — ย้ายจาก Balance.Boss ตัวเลขเดิมเป๊ะ
+	-- วงจรจริงคือบอสเกิดคืนละครั้ง (getBossCycleSeconds = 600 วิ) · ไข่ EGGS_PER_NIGHT = 6 ฟอง
+	-- ลองเปลี่ยนโมเดลให้อ่านวงจรจริงแล้ว (5B): validate() ยังผ่าน แต่ไข่/คน/ชม. 10 → 6 · เงินบอสในโมเดลหายครึ่ง
+	--   → ราคาอัปดาเมจกินรายได้ 35% → 51–63% · ส่วนเกินเงินด่าน 2–4 เหลือ 1.13–1.35 เท่า (เทสต์ต้องการ ≥ 1.5)
+	--   = **เปลี่ยนสมดุล** ซึ่งไม่ได้สั่ง จึงคงตัวเลขเดิมไว้ก่อน · ผู้ใช้ตัดสินตอนจูนสมดุล (Phase 6/7)
+	MODEL_BOSS_SPAWN_SECONDS = 300,
+	MODEL_EGGS_PER_SPAWN = 5,
 
 	-- ⚠️ ค่าชั่วคราวทั้งหมดข้างล่าง — จูนจริง Phase 6
 	BOSS_HP = 1000, -- อาวุธขั้น 1 (10 ดาเมจ × 2 ครั้ง/วิ) ≈ 50 วิคนเดียว · 6 คน ≈ 8 วิ
@@ -1550,8 +1578,17 @@ Balance.BossCycle = {
 	BOSS_ATTACK_INTERVAL = 2, -- วินาที
 	BOSS_ATTACK_RANGE = 14, -- แนวราบจากกึ่งกลางบอส
 
-	-- ไข่ที่บอสวางหลังตัวเองตอนเกิด — **5B ใช้** (รอบนี้ยังไม่วางไข่จริง แค่กันตำแหน่งไว้)
+	-- ══ 5B: ไข่บอส ══ เกิดพร้อมบอสต้นกลางคืน หลังตัวบอสมุมเดียวกัน · หยิบได้หลังบอสตายเท่านั้น
 	EGGS_PER_NIGHT = 6,
+	-- ชนิดไข่ของไข่บอส — **ชนิดที่มีอยู่แล้ว** (ไข่ด่าน 1 · บอสอยู่ห้องด่าน 1) ไม่ได้สร้างชนิดใหม่ · validate() บังคับว่าเปิดใช้/มาจากบอส
+	-- น้ำหนักสุ่มด้วย Config.rollMotherWeightForEgg ตัวเดิม **ตอนบอสเกิด** (ไม่ใช่ตอนหยิบ/ตอนเข้ากระเป๋า)
+	EGG_ID = "egg_stage1",
+	EGG_PICKUP_HOLD_SECONDS = 3, -- กด E ค้างกี่วินาทีถึงหยิบได้ (ย้ายจาก Balance.Boss.EGG_GRAB_HOLD_SECONDS)
+	-- ไข่หนักเกินค่านี้ (kg · มากกว่า ไม่ใช่เท่ากับ) → ประกาศทั้งเซิร์ฟตอนบอสเกิด "คืนนี้บอสเฝ้าไข่ …"
+	HEAVY_EGG_ALERT_KG = 100000,
+	-- เงินก้อนเดียวตอนบอสตาย แบ่งเท่ากัน (ปัดลง) ให้คนที่ทำดาเมจบอสตัวนี้ **และยังอยู่ในห้องด่าน 1 ตอนบอสตาย**
+	-- ค่าชั่วคราว = เท่าเงินบอสด่าน 1 ในโมเดลสมดุล (Economy.KILL_BOSS_BASE) · จูนจริง Phase 6
+	KILL_REWARD = 10000,
 }
 
 --------------------------------------------------------------------------------
@@ -1806,7 +1843,8 @@ Balance.BalanceCheck = {
 	REFERENCE_CLASS = { "C", "C", "C", "B", "B", "B", "A", "A", "A" },
 
 	-- ══ โมเดลอัตราได้ไข่ ══ ใช้ตรวจว่า "เวลาฟาร์ม" ไม่บานเกินเวลาตี
-	-- บอสรีเกิดทุก RESPAWN_SECONDS วางไข่ EGGS_PER_SPAWN ฟอง หารกันทั้งเซิร์ฟ
+	-- บอสเกิดทุก BossCycle.MODEL_BOSS_SPAWN_SECONDS วางไข่ MODEL_EGGS_PER_SPAWN ฟอง หารกันทั้งเซิร์ฟ
+	-- (5B: ตัวเลขเดิมของ Balance.Boss ที่ลบแล้ว — ไม่ใช่วงจรจริง 10 นาที/6 ฟอง · เหตุผลอยู่ที่ตัวค่าใน BossCycle)
 	PLAYERS_PER_SERVER = 6,
 
 	-- เวลาฟาร์มไข่ให้ได้ของที่ด่านนั้นต้องการ ต้องไม่เกินเวลาตีกำแพงกี่เท่า
@@ -1910,7 +1948,7 @@ Config.PurchaseLog = {
 --
 -- สเกลนี้ตั้งใจให้ "อาวุธขั้น N ตีบอสด่าน N ตายใน 10 ครั้งพอดี" ทุกด่าน
 -- (HP บอส 100×10^(N-1) ÷ damage 10×10^(N-1) = 10 เสมอ)
--- ห้ามแก้ DAMAGE_BASE หรือ HP_BASE ของบอสข้างเดียว ไม่งั้นความรู้สึกจะเพี้ยนทั้งเกม
+-- ห้ามแก้ DAMAGE_BASE หรือ BossCycle.BOSS_HP_BASE ข้างเดียว ไม่งั้นความรู้สึกจะเพี้ยนทั้งเกม
 
 Balance.Weapon = {
 	MAX_LEVEL = 10,
@@ -2955,21 +2993,38 @@ function Config.getBossNestCenter(stage: number): Vector3
 	return vec3(endX - Config.getBossRoomInset(), 0, 0)
 end
 
--- จุดวางไข่ที่ i ในรังบอสด่านนั้น (i = 1..Boss.EGGS_PER_SPAWN) วางเป็นวงกลม
-function Config.getBossEggSpot(stage: number, index: number): Vector3
-	local room = Config.MapDimensions.BossRoom
-	local radius = room.Size.Y * room.EggRadiusRatio
-	local total = Config.Balance.Boss.EGGS_PER_SPAWN
-	local center = Config.getBossNestCenter(stage)
-	local angle = (index - 1) / total * math.pi * 2
-	return vec3(
-		center.X + math.cos(angle) * radius,
-		center.Y,
-		center.Z + math.sin(angle) * radius
-	)
+-- ══ มุมบอสในห้องบอส (5B) ══ ฝั่งมุมของด่านนั้น: +1 = ขวา (+Z) · −1 = ซ้าย (−Z) — ยืนหันไปทางปลายเลน (+X)
+-- ⚠️ อ่านจาก BossRoom.CornerSide (สลับฟันปลาต่อด่าน · validate() บังคับ) · ห้ามตัดสินฝั่งเองที่อื่น
+function Config.getBossCornerSign(stage: number): number
+	local clamped = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
+	return if Config.MapDimensions.BossRoom.CornerSide[clamped] == "left" then -1 else 1
 end
 
--- ══ ลานบอสกลาง (Phase 5A) ══ บอสตัวเดียวของเซิร์ฟ · MapBuilder วาง · BossService ใช้ · docs/map-layout.md §4.3
+-- กึ่งกลางบอส (บนพื้น) ในห้องบอสด่านนั้น — มุมห้องฝั่ง getBossCornerSign · อีกฝั่งเว้นเป็นทางวิ่ง
+function Config.getBossCornerCenter(stage: number): Vector3
+	local arena = Config.MapDimensions.BossArena
+	local room = Config.getBossNestCenter(stage)
+	return vec3(room.X + arena.BossCornerX, 0, room.Z + Config.getBossCornerSign(stage) * arena.BossCornerZ)
+end
+
+-- จุดวางไข่ที่ i (1..BossCycle.EGGS_PER_NIGHT) **หลังบอส** (+X) มุมเดียวกับบอส — ตาราง EggColumns คอลัมน์
+-- เรียงคอลัมน์ใกล้บอสก่อน · ในคอลัมน์เรียงจากแนวกลางเลนออกไปทางผนัง · แถวกลางตรงกับ Z ของบอส
+function Config.getBossEggSpot(stage: number, index: number): Vector3
+	local arena = Config.MapDimensions.BossArena
+	local total = Config.Balance.BossCycle.EGGS_PER_NIGHT
+	local columns = arena.EggColumns
+	local rows = math.ceil(total / columns)
+	local i = math.clamp(math.floor(index), 1, total) - 1
+	local column = i // rows
+	local row = i % rows
+	local boss = Config.getBossCornerCenter(stage)
+	local sign = Config.getBossCornerSign(stage)
+	local x = boss.X + arena.EggBackOffset + column * arena.EggColumnGap
+	local z = boss.Z + sign * (row - (rows - 1) / 2) * arena.EggRowGap
+	return vec3(x, 0, z)
+end
+
+-- ══ ลานบอสกลาง (Phase 5A · 5B) ══ บอสตัวเดียวของเซิร์ฟ · MapBuilder วาง · BossService ใช้ · docs/map-layout.md §4.3
 -- ⚠️ ทุกพิกัดของลานบอสมาจากชุดนี้ ห้ามคำนวณเองใน MapBuilder/BossService
 
 -- ความยาวหนึ่งรอบ (กลางวัน + กลางคืน)
@@ -2977,31 +3032,41 @@ function Config.getBossCycleSeconds(): number
 	return Config.Balance.BossCycle.DAY_SECONDS + Config.Balance.BossCycle.NIGHT_SECONDS
 end
 
--- กึ่งกลางลานบอส = กึ่งกลางห้องบอสของด่าน BossArena.Stage (ด่าน 1 — ด่านเดียวที่ทุกคนเดินถึง)
+-- กึ่งกลางห้องบอสของด่าน BossArena.Stage (ด่าน 1 — ด่านเดียวที่ทุกคนเดินถึง) — ใช้ติดป้ายห้อง/วัดขอบห้อง
+-- ⚠️ 5B: ตัวบอสไม่ได้ยืนตรงนี้แล้ว — อยู่มุมห้อง getBossPosition()
 function Config.getBossArenaCenter(): Vector3
 	return Config.getBossNestCenter(Config.MapDimensions.BossArena.Stage)
 end
 
--- กำแพงกั้นกลางคืน — X กึ่งกลาง · ขวางเลนก่อนถึงห้องบอส BarrierInsetX studs
-function Config.getBossBarrierX(): number
-	local map = Config.MapDimensions
-	return Config.getBossArenaCenter().X - map.BossRoom.Size.X / 2 - map.BossArena.BarrierInsetX
+-- ตำแหน่งบอสกลาง (บนพื้น) — มุมห้องบอสด่าน BossArena.Stage · ระยะตีบอส/บอสตีกลับวัดจากจุดนี้
+function Config.getBossPosition(): Vector3
+	return Config.getBossCornerCenter(Config.MapDimensions.BossArena.Stage)
 end
 
--- ขนาดกำแพงกั้น — หนา BarrierThickness · สูงเท่ากำแพงข้างเลน · กว้างพอดีผิวด้านในกำแพงข้างเลนสองฝั่ง
--- ⚠️ ไม่ยื่นเข้าไปในเนื้อกำแพงข้างเลน — ยื่นแล้วผิวบน (Y = WallHeight) ซ้อนระนาบเดียวกัน = z-fighting
---   (บทเรียนเดียวกับ getLaneWallStartX) · ชนพอดีผิวด้านในก็ปิดเลนสนิทแล้ว
+-- จุดวางไข่บอสกลางที่ i (1..BossCycle.EGGS_PER_NIGHT) — หลังบอส มุมเดียวกัน
+function Config.getBossCycleEggSpot(index: number): Vector3
+	return Config.getBossEggSpot(Config.MapDimensions.BossArena.Stage, index)
+end
+
+-- ══ กำแพงกั้นกลางคืน (5B) ══ **ปิดช่องทางเข้าเลนพอดี** = ช่องประตูในกำแพงหินขอบแมพฝั่งตะวันออก
+-- ⚠️ ผูกกับกำแพงขอบแมพทั้งชุด (X · ความหนา · ความสูง · ช่องประตูกว้าง Lane.Width) — ไม่มีค่าของตัวเองให้ตั้งผิด
+--   กว้างเต็มช่อง ไม่มีช่องว่าง ไม่ยื่น · ไม่ทับกำแพงหินข้าง ๆ (ชนปลายกันพอดีที่ Z = ±Lane.Width/2 = กระพริบไม่ได้)
+--   เดิม (5A) ขวางกลางเลนที่ X 217.5–222.5 → ย้ายตามแผนผู้ใช้: กลางคืนปิดทั้งสนามรบ ทุกคนอยู่ฝั่งลาน
+function Config.getBossBarrierX(): number
+	return Config.getEastBoundaryX()
+end
+
 function Config.getBossBarrierSize(): Vector3
 	local map = Config.MapDimensions
-	return vec3(map.BossArena.BarrierThickness, map.Lane.WallHeight, map.Lane.Width - map.Lane.WallThickness)
+	return vec3(map.Boundary.Thickness, map.Boundary.Height, map.Lane.Width)
 end
 
--- ผิวหน้ากำแพงกั้น (ฝั่งลานคอก −X) — ตัวเลขนับถอยหลังติดผิวนี้ · หน้าป้อมนับระยะจากผิวนี้
+-- ผิวหน้ากำแพงกั้น (ฝั่งลานกลาง −X) — ตัวเลขนับถอยหลังติดผิวนี้ · หน้าป้อมนับระยะจากผิวนี้ · = ขอบเซฟโซน
 function Config.getBossBarrierFrontX(): number
-	return Config.getBossBarrierX() - Config.MapDimensions.BossArena.BarrierThickness / 2
+	return Config.getBossBarrierX() - Config.getBossBarrierSize().X / 2
 end
 
--- จุดยืนหน้าป้อมตอนวาปกลางคืน · index = 1..World.MAX_PENS · แถวละ GatherPerRow คน ไม่ซ้อนกัน (validate() บังคับ)
+-- จุดยืนหน้าป้อมตอนวาปกลางคืน (ฝั่งลานกลาง) · index = 1..World.MAX_PENS · แถวละ GatherPerRow คน ไม่ซ้อนกัน (validate())
 function Config.getBossGatherSpot(index: number): Vector3
 	local arena = Config.MapDimensions.BossArena
 	local perRow = arena.GatherPerRow
@@ -3013,21 +3078,49 @@ function Config.getBossGatherSpot(index: number): Vector3
 	return vec3(x, 0, z)
 end
 
--- จุดวางไข่ที่ i หลังบอส (**5B ใช้** · รอบนี้ยังไม่วางไข่จริง) · i = 1..BossCycle.EGGS_PER_NIGHT · แถวเดียวขวางเลน
-function Config.getBossCycleEggSpot(index: number): Vector3
-	local arena = Config.MapDimensions.BossArena
-	local total = Config.Balance.BossCycle.EGGS_PER_NIGHT
-	local center = Config.getBossArenaCenter()
-	return vec3(center.X + arena.EggBackOffset, 0, (index - (total + 1) / 2) * arena.EggSpacingZ)
+-- ══ โซนของแมพ (5B · แผนผู้ใช้ docs/boss-plan.md) ══
+--   เซฟโซน = คอกทั้งหมด + ลานกลาง (ทุกอย่างฝั่งตะวันตกของแนวกำแพงหินขอบแมพฝั่งตะวันออก)
+--   สนามรบ = ตั้งแต่ปากทางเข้าเลน (ผิวหน้ากำแพงกั้น X 157.5) เป็นต้นไป
+--   ห้องด่าน N = ช่วงเลนของด่าน N ที่เดินได้จริง · ด่าน 1 = ปากเลน → ผิวหน้ากำแพงด่าน 2
+-- ⚠️ server ตัดสินจากตำแหน่งตัวละครที่ server เห็นเท่านั้น (ส่งไข่เข้ากระเป๋า · แบ่งเงินบอส · ถืออาวุธ)
+
+-- ขอบเซฟโซน = ผิวหน้ากำแพงกั้น (ฝั่งลาน) = ผิวด้านในของกำแพงหินขอบแมพฝั่งตะวันออก
+function Config.getSafeZoneEdgeX(): number
+	return Config.getBossBarrierFrontX()
 end
 
--- อยู่ในเขตตีบอสไหม (หลังผิวหลังกำแพงกั้น → ท้ายห้องบอส) — server ถือ/เก็บอาวุธให้อัตโนมัติตามนี้
+-- อยู่ในเซฟโซนไหม — X น้อยกว่าขอบ (ฝั่งลาน) · ลานล้อมด้วยกำแพงหินอยู่แล้ว ไม่ต้องเช็คแกนอื่น
+function Config.isInSafeZone(position: Vector3): boolean
+	return position.X < Config.getSafeZoneEdgeX()
+end
+
+-- ช่วง X ของห้องด่านนั้น (minX, maxX) — จากผิวหลังกำแพงด่านนั้น (ด่านไม่มีกำแพง = ขอบเซฟโซน) ถึงผิวหน้ากำแพง
+-- ด่านถัดไป (ด่านสุดท้าย = ปลายเลน) · ความหนากำแพงด่านอ่าน StageWall.Thickness เหมือน WallRenderer
+function Config.getStageRoomRangeX(stage: number): (number, number)
+	local clamped = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
+	local half = Config.MapDimensions.StageWall.Thickness / 2
+	local wallX = Config.getWallX(clamped)
+	local minX = if wallX then wallX + half else Config.getSafeZoneEdgeX()
+	local maxX = Config.getLaneEndX()
+	for next = clamped + 1, Config.Balance.Stage.COUNT do
+		local nextWallX = Config.getWallX(next)
+		if nextWallX then
+			maxX = nextWallX - half
+			break
+		end
+	end
+	return minX, maxX
+end
+
+function Config.isInStageRoom(stage: number, position: Vector3): boolean
+	local minX, maxX = Config.getStageRoomRangeX(stage)
+	return position.X >= minX and position.X <= maxX and math.abs(position.Z) <= Config.getLaneHalfWidthAt(position.X)
+end
+
+-- อยู่ในเขตบอสกลางไหม = ห้องด่าน BossArena.Stage ทั้งห้อง (5B · เดิมเฉพาะห้องบอส 80 × 80)
+-- server ถือ/เก็บอาวุธอัตโนมัติ + นับว่า "ยังอยู่ในห้อง" ตอนแบ่งเงินบอส ตามนี้
 function Config.isInBossArena(position: Vector3): boolean
-	local map = Config.MapDimensions
-	local center = Config.getBossArenaCenter()
-	local backX = Config.getBossBarrierX() + map.BossArena.BarrierThickness / 2
-	local endX = center.X + map.BossRoom.Size.X / 2
-	return position.X >= backX and position.X <= endX and math.abs(position.Z) <= map.BossRoom.Size.Y / 2
+	return Config.isInStageRoom(Config.MapDimensions.BossArena.Stage, position)
 end
 
 -- เลขนับถอยหลังบนกำแพงกั้น จาก "วินาทีที่เหลือของกลางคืน" → 59, 58 … 0 (เลขละ 1 วินาทีพอดี)
@@ -3037,8 +3130,9 @@ function Config.getBossCountdownValue(remainingSeconds: number): number
 	return math.clamp(math.ceil(remainingSeconds) - 1, 0, math.max(0, nightSeconds - 1))
 end
 
--- ข้อความเหตุการณ์บอส (BossEventNotify) — client โชว์เป็น toast · ข้อความล็อกอัญเชิญอยู่ที่ BOSS_LOCK_MESSAGE
-function Config.formatBossEventMessage(kind: string): string
+-- ข้อความเหตุการณ์บอส (BossEventNotify(kind, a?, b?)) — client โชว์เป็น toast · ข้อความล็อกอัญเชิญอยู่ที่ BOSS_LOCK_MESSAGE
+-- ⚠️ ตัวเลข (a/b) มาจาก server เสมอ (น้ำหนักไข่ · เงินที่ได้ · จำนวนคนแบ่ง) — client แค่จัดรูปข้อความ
+function Config.formatBossEventMessage(kind: string, a: number?, b: number?): string
 	if kind == "night" then
 		return `🌙 กลางคืนแล้ว — บอสตื่นที่ห้องบอสด่าน {Config.MapDimensions.BossArena.Stage} · รอเช้าแล้วเข้าไปตีได้`
 	elseif kind == "day" then
@@ -3048,8 +3142,38 @@ function Config.formatBossEventMessage(kind: string): string
 	elseif kind == "locked" then
 		-- ส่งเฉพาะคนที่เพิ่งติดล็อก (ไม่ใช่ทุกคน) — บอกว่าทำไมทหารหยุดเอง
 		return `🔒 พังกำแพงแล้วแต่บอสยังอยู่ — {Config.BOSS_LOCK_MESSAGE}`
+	-- ══ 5B ══
+	elseif kind == "heavy" then
+		-- ทุกคน ตอนบอสเกิด · เฉพาะคืนที่มีไข่หนักเกิน HEAVY_EGG_ALERT_KG
+		return `🥚 คืนนี้บอสเฝ้าไข่ {Config.formatCoins(a or 0)} กก.!`
+	elseif kind == "picked" then
+		return `🥚 หยิบไข่บอสแล้ว ({Config.formatCoins(a or 0)} กก.) — วิ่งกลับเซฟโซน (ลานกลาง) เพื่อเก็บเข้ากระเป๋า`
+	elseif kind == "delivered" then
+		return `เก็บไข่บอสแล้ว ({Config.formatCoins(a or 0)} กก.)`
+	elseif kind == "bagFull" then
+		return "กระเป๋าไข่เต็ม — ถือไข่บอสไว้ก่อน มีที่ว่างเมื่อไหร่เก็บให้เอง"
+	elseif kind == "eggLost" then
+		return "🌙 กลางคืนแล้ว — ไข่บอสที่ถืออยู่หายไป (ไข่ชุดใหม่เกิดพร้อมบอส)"
+	elseif kind == "reward" then
+		return `ได้ ${Config.formatCoins(a or 0)} จากบอส (แบ่ง {b or 0} คน)`
+	elseif kind == "pickupAlive" then
+		return "ต้องกำจัดบอสก่อนถึงหยิบไข่ได้"
+	elseif kind == "pickupCarrying" then
+		return "ถือไข่บอสได้ทีละฟอง — เอาฟองที่ถืออยู่ไปเก็บที่เซฟโซนก่อน"
+	elseif kind == "pickupTaken" then
+		return "ไข่ฟองนี้ไม่อยู่แล้ว"
+	elseif kind == "pickupRange" then
+		return "อยู่ไกลไข่เกินไป — เดินเข้าไปใกล้ ๆ ก่อน"
 	end
 	return ""
+end
+
+-- เหตุการณ์ที่เป็น "ทำไม่สำเร็จ/เสียของ" → client โชว์ toast สีเตือน (ที่เหลือ = สีปกติ)
+function Config.isBossEventWarning(kind: string): boolean
+	return kind == "locked"
+		or kind == "bagFull"
+		or kind == "eggLost"
+		or string.sub(kind, 1, 6) == "pickup"
 end
 
 -- ⚠️ ข้อความเดียวทั้ง server (ปฏิเสธคำขอ) และ client (โชว์ในหน้าต่างอัญเชิญ) — Phase 5A ล็อกอัญเชิญ
@@ -3060,6 +3184,12 @@ Config.BOSS_ARENA_NAME = "BossArena" -- Model ใต้ Workspace.Map
 Config.BOSS_BARRIER_NAME = "BossBarrier" -- Part ใน BossArena (กำแพงกั้นกลางคืน)
 Config.BOSS_MODEL_NAME = "CycleBoss" -- Model ใน BossArena (ตัวบอส)
 Config.WEAPON_TOOL_NAME = "Weapon" -- Tool ที่ server ใส่ Backpack ให้ทุกคน (ถือ/เก็บอัตโนมัติในเขตบอส)
+-- ══ 5B: ไข่บอส ══
+Config.BOSS_EGG_FOLDER = "BossEggs" -- Folder ใน BossArena · Part "BossEgg{i}" (i = 1..EGGS_PER_NIGHT) อยู่ตลอด ซ่อน/โชว์ตามสถานะ
+-- Attribute บน Part ไข่: Index (1..N) · Weight (kg) · Status ("none" | "resting" | "carried" | "gone")
+--   client ติดจุดกด E (UiKit.prompt) ที่ Part พวกนี้ · เปิดเฉพาะ Status = "resting" + บอสตายแล้ว + ตัวเองไม่ได้ถือไข่
+Config.BOSS_EGG_CARRY_ATTRIBUTE = "CarryingBossEgg" -- Attribute บน Player: true = กำลังถือไข่บอส (server ตั้ง)
+Config.BOSS_CARRIED_EGG_NAME = "CarriedBossEgg" -- Part ใน character ของคนถือ (server สร้าง · ทุกคนเห็น)
 
 -- ══ ร้านค้า ══ แผงเล็ก ๆ วางเรียงติดกันที่ขอบซ้ายของลานคอก ตรงกลางผนังด้านหลัง (UI-2)
 -- กึ่งกลางแนวแผง (ใช้เป็น "ตำแหน่งร้าน" ตอนวัดระยะ)
@@ -3124,6 +3254,15 @@ end
 --   ยังอ่าน getLaneStartX เหมือนเดิม ไม่มีอะไรเปลี่ยน · จุดปล่อยทหารจึงอยู่ตรงปากเลน ก่อนถึงกำแพงข้าง
 function Config.getLaneWallStartX(): number
 	return Config.getEastBoundaryX() + Config.MapDimensions.Boundary.Thickness / 2
+end
+
+-- ══ พื้นเลน (สีน้ำตาล): จุดเริ่ม ══ เสมอผิว**ด้านใน** (ฝั่งลาน) ของกำแพงหินขอบแมพ = ขอบช่องประตูเลน (5B)
+-- ⚠️ เดิมพื้นเลนเริ่มที่ต้นเลน (getLaneStartX = X 140) → แผ่นน้ำตาลยื่นออกมาบนหญ้าในลาน 17.5 studs
+--   ช่วง X 140 → ค่านี้ ตรงช่อง Z ของเลน เป็นหญ้าแทน (MapBuilder "LaneMouthGrass")
+-- ⚠️ **ภาพล้วน** — ไม่มีการคำนวณใดอ่านค่านี้ · ต้นเลน · แท่นอัญเชิญ · ทางเดินทหาร · ความยาวเลน · ระยะการรบ
+--   ยังอ่าน getLaneStartX เหมือนเดิม (validate() บังคับว่าค่านี้ไม่ก่อนต้นเลน)
+function Config.getLaneFloorStartX(): number
+	return Config.getEastBoundaryX() - Config.MapDimensions.Boundary.Thickness / 2
 end
 
 -- ขอบพื้นจริงฝั่งตะวันออก — แถบหญ้าที่มองเห็นได้แต่เดินไปไม่ถึง เท่ากับสามด้านที่เหลือ
@@ -3360,9 +3499,11 @@ function Config.getStageTotalHp(stage: number): number
 	return Config.getStageDefenderHp(stage) + Config.getStageWallHp(stage)
 end
 
+-- HP บอสด่านนั้นตามสเกลต่อด่าน (ผูกกับอาวุธ ×10) — ⚠️ บอสกลางของ 5A/5B ใช้ BossCycle.BOSS_HP (ชั่วคราว) ไม่ใช่ตัวนี้
 function Config.getBossHp(stage: number): number
 	local clamped = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
-	return Config.Balance.Boss.HP_BASE * Config.Balance.Boss.HP_MULTIPLIER ^ (clamped - 1)
+	local cycle = Config.Balance.BossCycle
+	return cycle.BOSS_HP_BASE * cycle.BOSS_HP_MULTIPLIER ^ (clamped - 1)
 end
 
 -- แปลงสัดส่วน HP ที่เหลือ → จำนวนโมเดลทหารที่ควรแสดงในแมพ
@@ -3516,7 +3657,9 @@ function Config.getReferenceStageIncome(stage: number): number
 	end
 
 	local penPerHour = Config.getPenCapacity(stage) * Config.getCoinsPerMinute(weight, stage) * 60
-	local bossPerHour = (3600 / Config.Balance.Boss.RESPAWN_SECONDS)
+	-- ⚠️ 5B: อัตราบอสของ "โมเดลสมดุล" (BossCycle.MODEL_BOSS_SPAWN_SECONDS = ตัวเลขเดิมของ Balance.Boss ที่ลบแล้ว)
+	-- ไม่ใช่วงจรจริง — ดูเหตุผลที่ตัวค่า (อ่านวงจรจริงแล้วส่วนเกินเงินตกต่ำกว่าเกณฑ์ = เปลี่ยนสมดุลโดยไม่ได้สั่ง)
+	local bossPerHour = (3600 / Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS)
 		* Config.getBossKillReward(stage)
 		/ check.PLAYERS_PER_SERVER
 
@@ -3532,11 +3675,13 @@ function Config.getReferenceClearHours(stage: number): number
 	return totalHp / (Config.getReferenceDps(stage) * 3600)
 end
 
--- ไข่ที่ผู้เล่น 1 คนได้ต่อชั่วโมง (บอสรีเกิดเรื่อย ๆ หารกันทั้งเซิร์ฟ)
+-- ไข่ที่ผู้เล่น 1 คนได้ต่อชั่วโมง ตาม "โมเดลสมดุล" (บอสเกิดเรื่อย ๆ หารกันทั้งเซิร์ฟ) — ยามเวลาฟาร์มใช้
+-- ⚠️ 5B: อ่าน BossCycle.MODEL_* (ตัวเลขเดิมของ Balance.Boss ที่ลบแล้ว = 10 ฟอง/คน/ชม.) ไม่ใช่วงจรจริง
+--   (วงจรจริง 10 นาที · 6 ฟอง = 6 ฟอง/คน/ชม.) — เปลี่ยนเมื่อไหร่ = จูนสมดุล ผู้ใช้ตัดสิน (ดูเหตุผลที่ตัวค่า)
 function Config.getEggsPerHour(): number
-	local boss = Config.Balance.Boss
-	local spawnsPerHour = 3600 / boss.RESPAWN_SECONDS
-	return spawnsPerHour * boss.EGGS_PER_SPAWN / Config.Balance.BalanceCheck.PLAYERS_PER_SERVER
+	local cycle = Config.Balance.BossCycle
+	local spawnsPerHour = 3600 / cycle.MODEL_BOSS_SPAWN_SECONDS
+	return spawnsPerHour * cycle.MODEL_EGGS_PER_SPAWN / Config.Balance.BalanceCheck.PLAYERS_PER_SERVER
 end
 
 -- ชั่วโมงที่ใช้ฟาร์มไข่จนเติมคอกเต็มด้วยแม่คลาสอ้างอิงของด่านนั้น (หรือดีกว่า)
@@ -3695,6 +3840,12 @@ function Config.validate()
 				.. `มีสองที่แล้วค่าจะไม่ตรงกันโดยไม่มีใครรู้`
 		)
 	end
+	for _, groupName in REMOVED_BALANCE_GROUPS do
+		assert(
+			(Config.Balance :: any)[groupName] == nil and rawget(Config :: any, groupName) == nil,
+			`Config: "{groupName}" ถูกลบไปแล้ว (ค่าที่ยังใช้ย้ายไป Balance.BossCycle) — ห้ามเติมกลับ มีสองชุดแล้วอ่านผิดชุด`
+		)
+	end
 
 	for eggId, egg in EggTypes do
 		assert(egg.id == eggId, `Config: EggTypes["{eggId}"].id ไม่ตรงกับคีย์ ({egg.id})`)
@@ -3829,10 +3980,12 @@ function Config.validate()
 	-- โดยไม่ต้องจำว่าต้องมาเพิ่มในรายการตรงนี้ด้วย
 	-- ค่าที่ยอมให้เป็น 0 ได้ (เช่น Lane.StartGap) assert แยกไว้ข้างบนแล้ว
 	local ZERO_ALLOWED = { ["Lane.StartGap"] = true }
+	-- ค่าที่ไม่ใช่ตัวเลข/เวกเตอร์ — ตรวจแยกของตัวเองในบล็อกลานบอส (5B: ตารางฝั่งมุมบอส "left"/"right" ต่อด่าน)
+	local NOT_A_MEASURE = { ["BossRoom.CornerSide"] = true }
 	for groupName, group in dim do
 		for key, value in group :: any do
 			local path = `{groupName}.{key}`
-			if ZERO_ALLOWED[path] then
+			if ZERO_ALLOWED[path] or NOT_A_MEASURE[path] then
 				continue
 			end
 			if type(value) == "number" then
@@ -4105,6 +4258,11 @@ function Config.validate()
 		laneWallStart < Config.getBossNestCenter(1).X - dim.BossRoom.Size.X / 2,
 		"Config: กำแพงข้างเลนเริ่มเลยห้องบอสด่าน 1 — ช่วงก่อนห้องไม่มีกำแพง"
 	)
+	-- 5B: พื้นเลนสีน้ำตาลเริ่มเสมอแนวกำแพงหิน (ช่องประตู) — ไม่ยื่นเข้าลาน · ไม่ก่อนต้นเลน (ภาพล้วน)
+	assert(
+		Config.getLaneFloorStartX() == eastWallInnerX and Config.getLaneFloorStartX() >= Config.getLaneStartX(),
+		"Config: พื้นเลนต้องเริ่มที่ผิวด้านในกำแพงหินขอบแมพพอดี (ไม่ยื่นออกมาบนหญ้าในลาน)"
+	)
 
 	-- ══ ป้ายบนแมพ (UI-2) ══ ต้องไม่ขวางประตู · ไม่ทับป้ายชื่อ · ไม่ล้ำไปแปลงข้าง ๆ · อยู่ในกำแพงใส
 	local sign = dim.MapSign
@@ -4189,10 +4347,11 @@ function Config.validate()
 		`Config: ระยะกด E ของแท่นอัญเชิญทับป้ายดาเมจ (ห่างกัน {pedestalToDamage})`
 	)
 
-	-- ══ ลานบอสกลาง + วงจรกลางวัน/กลางคืน (Phase 5A) ══
+	-- ══ ลานบอสกลาง + วงจรกลางวัน/กลางคืน (Phase 5A · 5B) ══
 	do
 		local cycle = Config.Balance.BossCycle
 		local arena = dim.BossArena
+		local room = dim.BossRoom
 		assert(cycle.DAY_SECONDS > 0 and cycle.NIGHT_SECONDS >= 1, "Config: BossCycle ต้องมีทั้งกลางวันและกลางคืน (อย่างน้อย 1 วินาที)")
 		assert(cycle.BOSS_HP > 0, "Config: BossCycle.BOSS_HP ต้องมากกว่า 0")
 		assert(
@@ -4205,6 +4364,26 @@ function Config.validate()
 			"Config: ค่าบอสตีกลับต้องเป็นบวก (INTERVAL > 0 · DAMAGE ≥ 0 · RANGE > 0)"
 		)
 		assert(cycle.EGGS_PER_NIGHT >= 1, "Config: BossCycle.EGGS_PER_NIGHT ต้องมีอย่างน้อย 1")
+		assert(cycle.EGG_PICKUP_HOLD_SECONDS > 0, "Config: หยิบไข่บอสต้องกด E ค้าง (EGG_PICKUP_HOLD_SECONDS > 0)")
+		assert(cycle.HEAVY_EGG_ALERT_KG > 0, "Config: BossCycle.HEAVY_EGG_ALERT_KG ต้องมากกว่า 0")
+		assert(
+			cycle.KILL_REWARD >= 0 and cycle.KILL_REWARD % 1 == 0,
+			"Config: BossCycle.KILL_REWARD ต้องเป็นจำนวนเต็ม ≥ 0 (แบ่งแบบปัดลง — เศษทศนิยมจะงอกเงิน)"
+		)
+		-- ไข่บอสต้องเป็นชนิดที่มีอยู่แล้ว เปิดใช้ และมาจากบอส (ไม่ใช่ไข่ Robux)
+		local bossEggType = EggTypes[cycle.EGG_ID]
+		assert(
+			bossEggType ~= nil and bossEggType.enabled and bossEggType.source == "boss",
+			`Config: BossCycle.EGG_ID = "{cycle.EGG_ID}" ต้องเป็นไข่ที่มีอยู่ เปิดใช้ และ source = "boss"`
+		)
+		assert(
+			cycle.BOSS_HP_BASE > 0 and cycle.BOSS_HP_MULTIPLIER > 1,
+			"Config: สเกล HP บอสต่อด่านต้องเป็นบวกและโตขึ้นทุกด่าน"
+		)
+		assert(
+			cycle.MODEL_BOSS_SPAWN_SECONDS > 0 and cycle.MODEL_EGGS_PER_SPAWN > 0,
+			"Config: ค่าบอสของโมเดลสมดุล (MODEL_*) ต้องเป็นบวก — ยามเวลาฟาร์ม/รายได้อ้างอิงหารด้วยค่านี้"
+		)
 
 		-- ⚠️ ข้อที่สำคัญที่สุด: กำแพงด่านวาดแยกต่อคนฝั่ง client และชนได้จริง → ด่านที่มีกำแพง
 		-- ผู้เล่นที่ยังไม่พังเดินไปไม่ถึงบอส · ต้องเป็นด่านที่ไม่มีกำแพงเท่านั้น (ด่าน 1)
@@ -4212,43 +4391,74 @@ function Config.validate()
 			arena.Stage >= 1 and arena.Stage <= Config.Balance.Stage.COUNT and Config.getWallX(arena.Stage) == nil,
 			`Config: BossArena.Stage ({arena.Stage}) ต้องเป็นด่านที่ไม่มีกำแพงกั้น — ไม่งั้นผู้เล่นที่ยังไม่พังกำแพงนั้นเดินไปตีบอสไม่ได้`
 		)
-		assert(
-			arena.BarrierThickness >= Config.getMinWallThickness(),
-			`Config: กำแพงกั้นบอสหนา {arena.BarrierThickness} บางกว่าเกณฑ์ {Config.getMinWallThickness()} — วิ่งเร็วสุดแล้วทะลุได้`
-		)
 
-		local center = Config.getBossArenaCenter()
-		local roomStart = center.X - dim.BossRoom.Size.X / 2
-		local roomEnd = center.X + dim.BossRoom.Size.X / 2
+		-- ══ 5B: กำแพงกั้นปิดช่องประตูของกำแพงหินขอบแมพฝั่งตะวันออกพอดี ══
+		-- MapBuilder.buildBoundary แบ่งกำแพงฝั่งตะวันออกเป็น EastUpper/EastLower เว้นช่อง |Z| < Lane.Width/2
+		-- → กำแพงกั้นต้อง: X เดียวกัน · หนาเท่ากัน · สูงเท่ากัน · กว้างเท่าช่องพอดี (ชนปลายกัน ไม่ทับ = ไม่กระพริบ)
+		local barrierSize = Config.getBossBarrierSize()
 		local barrierFront = Config.getBossBarrierFrontX()
-		local barrierBack = Config.getBossBarrierX() + arena.BarrierThickness / 2
 		assert(
-			barrierFront >= laneWallStart,
-			"Config: กำแพงกั้นบอสต้องอยู่ในเลน (หลังจุดเริ่มกำแพงข้างเลน) ไม่งั้นเดินอ้อมกำแพงกั้นได้"
+			barrierSize.X >= Config.getMinWallThickness(),
+			`Config: กำแพงกั้นบอสหนา {barrierSize.X} บางกว่าเกณฑ์ {Config.getMinWallThickness()} — วิ่งเร็วสุดแล้วทะลุได้`
 		)
 		assert(
-			barrierBack <= roomStart - dim.Lane.WallThickness / 2,
-			"Config: กำแพงกั้นบอสชนชิ้นผายออกของกำแพงข้างเลนตรงปากห้องบอส — เพิ่ม BossArena.BarrierInsetX"
+			Config.getBossBarrierX() == Config.getEastBoundaryX() and barrierSize.X == dim.Boundary.Thickness,
+			"Config: กำแพงกั้นบอสไม่เสมอแนวกำแพงหินขอบแมพฝั่งตะวันออก — ยื่นเข้าลาน/เข้าเลน"
+		)
+		assert(barrierSize.Y == dim.Boundary.Height, "Config: กำแพงกั้นบอสสูงไม่เท่ากำแพงหินข้าง ๆ")
+		assert(
+			barrierSize.Z == dim.Lane.Width,
+			"Config: กำแพงกั้นบอสกว้างไม่เท่าช่องทางเข้าเลน (เหลือช่อง = เดินลอดได้ · เกิน = ทับกำแพงหิน = กระพริบ)"
+		)
+		assert(barrierFront == eastWallInnerX, "Config: ผิวหน้ากำแพงกั้นต้องเสมอผิวด้านในกำแพงหินขอบแมพ")
+		assert(
+			Config.getBossBarrierX() + barrierSize.X / 2 <= laneWallStart,
+			"Config: กำแพงกั้นบอสล้ำเข้าไปในกำแพงข้างเลน (ซ้อนกัน = กระพริบ)"
 		)
 		assert(
 			pedestalCenter.X + pedestalHalf < barrierFront,
-			"Config: แท่นอัญเชิญต้องอยู่หน้ากำแพงกั้นบอส (ไม่งั้นกลางคืนเข้าไปกด E ที่แท่นไม่ได้)"
+			"Config: แท่นอัญเชิญต้องอยู่หน้ากำแพงกั้นบอส ฝั่งลาน (ไม่งั้นกลางคืนเข้าไปกด E ที่แท่นไม่ได้)"
 		)
 
-		-- จุดยืนหน้าป้อม: ครบทุกคนในเซิร์ฟ · อยู่ในเลน · หน้ากำแพงกั้น · ไม่ทับแท่นอัญเชิญ · ไม่ซ้อนกัน
-		local innerHalf = (dim.Lane.Width - dim.Lane.WallThickness) / 2
+		-- ══ 5B: โซน — เซฟโซนกับห้องด่านบอสต้องต่อกันพอดี (ไม่มีช่วงที่ไม่ใช่ทั้งสองอย่าง) ══
+		local roomMinX, roomMaxX = Config.getStageRoomRangeX(arena.Stage)
+		assert(Config.getSafeZoneEdgeX() == barrierFront, "Config: ขอบเซฟโซนต้องเป็นผิวหน้ากำแพงกั้น (ปากทางเข้าเลน)")
+		assert(roomMinX == Config.getSafeZoneEdgeX(), "Config: ห้องด่านบอสต้องเริ่มที่ขอบเซฟโซนพอดี")
+		assert(roomMaxX > roomMinX, "Config: ห้องด่านบอสยาว ≤ 0")
+		assert(Config.isInSafeZone(pedestalCenter), "Config: แท่นอัญเชิญต้องอยู่ในเซฟโซน")
+		for penIndex = 1, Config.World.MAX_PENS do
+			local penCenter = Config.getPenPlotCenter(penIndex)
+			assert(
+				Config.isInSafeZone(vec3(penCenter.X + dim.Pen.Size.X / 2, 0, penCenter.Z))
+					and Config.isInSafeZone(Config.getSpawnPointForPen(penIndex)),
+				`Config: คอก {penIndex} / จุดเกิดต้องอยู่ในเซฟโซนทั้งแปลง`
+			)
+		end
+
+		-- ══ 5B: จุดยืนหน้าป้อม (ฝั่งลานกลาง) — ครบทุกคน · หน้ากำแพงกั้น · ในเซฟโซน · ไม่ทับแท่น/ป้าย/คอก · ไม่ซ้อนกัน ══
 		local playerHalf = 2 -- ครึ่งความกว้างตัวละครโดยประมาณ + เผื่อ
 		local placed: { Vector3 } = {}
 		for index = 1, Config.World.MAX_PENS do
 			local spot = Config.getBossGatherSpot(index)
-			assert(math.abs(spot.Z) + playerHalf <= innerHalf, `Config: จุดยืนหน้าป้อม {index} ชิดกำแพงข้างเลนเกินไป`)
 			assert(
-				spot.X - playerHalf >= laneWallStart and spot.X + playerHalf <= barrierFront,
-				`Config: จุดยืนหน้าป้อม {index} ต้องอยู่ในเลน ระหว่างจุดเริ่มกำแพงข้างเลนกับหน้ากำแพงกั้น`
+				spot.X + playerHalf < barrierFront and Config.isInSafeZone(spot),
+				`Config: จุดยืนหน้าป้อม {index} ต้องอยู่ฝั่งลาน (เซฟโซน) หน้ากำแพงกั้น`
 			)
 			assert(
-				spot.X - playerHalf > pedestalCenter.X + pedestalHalf,
-				`Config: จุดยืนหน้าป้อม {index} ทับแท่นอัญเชิญ`
+				math.abs(spot.Z) + playerHalf <= dim.Lane.Width / 2,
+				`Config: จุดยืนหน้าป้อม {index} ไม่ได้อยู่ตรงหน้าช่องทางเข้าเลน (มองตัวเลขบนกำแพงกั้นเฉียงเกินไป)`
+			)
+			assert(spot.X - playerHalf >= wallMinX, `Config: จุดยืนหน้าป้อม {index} อยู่นอกกำแพงขอบแมพฝั่งตะวันตก`)
+			local toPedestal = math.sqrt((spot.X - pedestalCenter.X) ^ 2 + (spot.Z - pedestalCenter.Z) ^ 2)
+			assert(
+				toPedestal > pedestal.PromptDistance,
+				`Config: จุดยืนหน้าป้อม {index} ใกล้แท่นอัญเชิญเกิน (ห่าง {toPedestal}) — ทับแท่น/จุดกด E ของแท่นโผล่ตอนรอ`
+			)
+			local toDamage = math.sqrt((spot.X - damageSpot.X) ^ 2 + (spot.Z - damageSpot.Z) ^ 2)
+			assert(toDamage >= signHalf + playerHalf, `Config: จุดยืนหน้าป้อม {index} ทับป้ายดาเมจ`)
+			assert(
+				spot.X - playerHalf > Config.getPenYardRightX() or math.abs(spot.Z) + playerHalf <= dim.Pen.RowGap / 2,
+				`Config: จุดยืนหน้าป้อม {index} ล้ำเข้าไปในคอก`
 			)
 			for other, prev in placed do
 				local gap = math.sqrt((spot.X - prev.X) ^ 2 + (spot.Z - prev.Z) ^ 2)
@@ -4257,26 +4467,84 @@ function Config.validate()
 			table.insert(placed, spot)
 		end
 
-		-- ตัวบอสอยู่ในห้อง · ระยะตียาวกว่าครึ่งตัวบอส (ยืนชิดแล้วต้องตีถึง)
+		-- ตัวบอส: ระยะตียาวกว่าครึ่งตัวบอส (ยืนชิดแล้วต้องตีถึง)
 		local bossHalf = math.max(arena.BossSize.X, arena.BossSize.Z) / 2
-		assert(bossHalf < dim.BossRoom.Size.X / 2 and bossHalf < dim.BossRoom.Size.Y / 2, "Config: ตัวบอสใหญ่กว่าห้องบอส")
+		assert(bossHalf < room.Size.X / 2 and bossHalf < room.Size.Y / 2, "Config: ตัวบอสใหญ่กว่าห้องบอส")
 		assert(
 			cycle.PLAYER_ATTACK_RANGE > bossHalf + 1,
 			"Config: ระยะตีบอสสั้นกว่าครึ่งตัวบอส — ยืนชิดตัวแล้วยังตีไม่ถึง"
 		)
+		assert(
+			arena.EggPickupRange >= arena.EggPromptDistance and arena.EggPromptDistance > 0,
+			"Config: ระยะหยิบไข่ฝั่ง server ต้องไม่สั้นกว่าระยะจุดกด E (ไม่งั้นกดแล้วโดนปฏิเสธว่าไกลเกิน)"
+		)
+		assert(
+			arena.EggColumns >= 1 and arena.EggColumnGap > 0 and arena.EggRowGap > 0,
+			"Config: ตารางวางไข่บอสต้องมีอย่างน้อย 1 คอลัมน์และระยะห่างเป็นบวก"
+		)
 
-		-- จุดไข่ 6 ฟอง (5B): หลังตัวบอส · ในห้อง · ก่อนกำแพงด่านถัดไป
-		local nextWallX = if arena.Stage < Config.Balance.Stage.COUNT then Config.getWallX(arena.Stage + 1) else nil
-		for index = 1, cycle.EGGS_PER_NIGHT do
-			local egg = Config.getBossCycleEggSpot(index)
-			assert(egg.X > center.X + arena.BossSize.X / 2, `Config: จุดไข่ {index} ต้องอยู่หลังตัวบอส`)
-			assert(
-				egg.X < roomEnd and math.abs(egg.Z) < dim.BossRoom.Size.Y / 2,
-				`Config: จุดไข่ {index} ต้องอยู่ในห้องบอส`
-			)
-			if nextWallX then
-				assert(egg.X < nextWallX - dim.StageWall.Thickness / 2, `Config: จุดไข่ {index} ทับกำแพงด่านถัดไป`)
+		-- ══ 5B: ฝั่งมุมบอสต่อด่าน — ครบทุกด่าน · สลับฟันปลา ══
+		assert(
+			#room.CornerSide == Config.Balance.Stage.COUNT,
+			`Config: BossRoom.CornerSide มี {#room.CornerSide} ช่อง ต้องมีครบ {Config.Balance.Stage.COUNT} ด่าน`
+		)
+		for stage = 1, Config.Balance.Stage.COUNT do
+			local side = room.CornerSide[stage]
+			assert(side == "left" or side == "right", `Config: BossRoom.CornerSide[{stage}] ต้องเป็น "left" หรือ "right"`)
+			if stage > 1 then
+				assert(
+					side ~= room.CornerSide[stage - 1],
+					`Config: มุมบอสด่าน {stage - 1} กับ {stage} อยู่ฝั่งเดียวกัน — ต้องสลับฟันปลา (ซ้าย/ขวา) ทุกด่าน`
+				)
 			end
+		end
+
+		-- ══ 5B: บอส + ไข่ ทุกห้อง (ใช้จริงแค่ด่าน BossArena.Stage แต่ตรวจครบ เผื่อรอบ "บอสทุกห้อง") ══
+		-- บอสในห้อง ฝั่งมุม · ทางวิ่งฝั่งตรงข้ามกว้างพอ (นอกระยะตีบอส) · ไข่หลังบอส มุมเดียวกัน ในห้อง ไม่ซ้อนกัน
+		local wallHalfT = dim.Lane.WallThickness / 2
+		local roomInnerX = room.Size.X / 2 - wallHalfT
+		local roomInnerZ = room.Size.Y / 2 - wallHalfT
+		local laneInnerZ = dim.Lane.Width / 2 - wallHalfT
+		local reach = math.max(cycle.PLAYER_ATTACK_RANGE, cycle.BOSS_ATTACK_RANGE)
+		local eggRadius = Config.getBallRadius(dim.Blockout.EggSize) -- ไข่ tier 1 (ขนาดที่ออกบ่อยสุด)
+		for stage = 1, Config.Balance.Stage.COUNT do
+			local nest = Config.getBossNestCenter(stage)
+			local boss = Config.getBossCornerCenter(stage)
+			local sign = Config.getBossCornerSign(stage)
+			assert(sign * boss.Z > 0, `Config: บอสด่าน {stage} ไม่ได้อยู่ฝั่งมุม ({room.CornerSide[stage]})`)
+			assert(
+				math.abs(boss.X - nest.X) + arena.BossSize.X / 2 <= roomInnerX
+					and math.abs(boss.Z - nest.Z) + arena.BossSize.Z / 2 <= roomInnerZ,
+				`Config: บอสด่าน {stage} ยื่นออกนอกห้องบอส`
+			)
+			-- ทางวิ่ง: จากผนังฝั่งตรงข้าม (วัดที่ช่วงเลนปกติซึ่งแคบกว่าห้อง) ถึงขอบระยะตีของบอส
+			local runPath = sign * boss.Z - reach + laneInnerZ
+			assert(
+				runPath >= arena.RunPathMinWidth,
+				`Config: ทางวิ่งผ่านบอสด่าน {stage} กว้างแค่ {runPath} (ต้อง ≥ {arena.RunPathMinWidth}) — ระยะตีบอสกินทั้งเลน`
+			)
+			local _, stageRoomMaxX = Config.getStageRoomRangeX(stage)
+			local eggs: { Vector3 } = {}
+			for index = 1, cycle.EGGS_PER_NIGHT do
+				local egg = Config.getBossEggSpot(stage, index)
+				assert(egg.X - eggRadius > boss.X + arena.BossSize.X / 2, `Config: ไข่ {index} ด่าน {stage} ต้องอยู่หลังตัวบอส`)
+				assert(sign * egg.Z > 0, `Config: ไข่ {index} ด่าน {stage} ต้องอยู่มุมเดียวกับบอส`)
+				assert(
+					math.abs(egg.X - nest.X) + eggRadius <= roomInnerX and math.abs(egg.Z - nest.Z) + eggRadius <= roomInnerZ,
+					`Config: ไข่ {index} ด่าน {stage} อยู่นอกห้องบอส`
+				)
+				assert(egg.X + eggRadius < stageRoomMaxX, `Config: ไข่ {index} ด่าน {stage} ทับกำแพงด่านถัดไป`)
+				for other, prev in eggs do
+					local gap = math.sqrt((egg.X - prev.X) ^ 2 + (egg.Z - prev.Z) ^ 2)
+					assert(gap >= eggRadius * 2 + 1, `Config: ไข่ {index} ด่าน {stage} ซ้อนกับไข่ {other} (ห่าง {gap})`)
+				end
+				table.insert(eggs, egg)
+			end
+		end
+		-- บอสกลาง + ไข่ของมันต้องอยู่ใน "ห้องด่านบอส" ที่ server ใช้ตัดสิน (ถืออาวุธ · แบ่งเงิน)
+		assert(Config.isInBossArena(Config.getBossPosition()), "Config: บอสกลางไม่อยู่ในห้องด่านบอส")
+		for index = 1, cycle.EGGS_PER_NIGHT do
+			assert(Config.isInBossArena(Config.getBossCycleEggSpot(index)), `Config: ไข่บอสกลาง {index} ไม่อยู่ในห้องด่านบอส`)
 		end
 	end
 
@@ -4698,14 +4966,12 @@ function Config.validate()
 		"Config: ช่วงจำนวนโมเดลที่แสดงไม่ถูกต้อง"
 	)
 
-	assert(Config.Balance.Boss.RESPAWN_SECONDS > 0, "Config: เวลารีเกิดบอสต้องมากกว่า 0")
-	assert(Config.Balance.Boss.EGGS_PER_SPAWN > 0, "Config: จำนวนไข่ต่อรอบต้องมากกว่า 0")
-	assert(Config.Balance.Boss.EGG_GRAB_HOLD_SECONDS > 0, "Config: เวลากดค้างหยิบไข่ต้องมากกว่า 0")
+	-- (5B: ค่ารีเกิด/จำนวนไข่/เวลากดค้างของ Balance.Boss เดิมย้ายไป BossCycle แล้ว — ตรวจในบล็อกลานบอสข้างบน)
 
 	-- สเกลที่ทำให้ "อาวุธขั้น N ตีบอสด่าน N ตายในจำนวนครั้งเท่ากันทุกด่าน"
 	-- ถ้าตัวคูณสองตัวนี้ไม่เท่ากัน ความรู้สึกตอนสู้บอสจะเพี้ยนไปเรื่อย ๆ ตามด่าน
 	assert(
-		Config.Balance.Weapon.DAMAGE_MULTIPLIER == Config.Balance.Boss.HP_MULTIPLIER,
+		Config.Balance.Weapon.DAMAGE_MULTIPLIER == Config.Balance.BossCycle.BOSS_HP_MULTIPLIER,
 		"Config: ตัวคูณ damage อาวุธกับตัวคูณ HP บอสต้องเท่ากัน ไม่งั้นจำนวนครั้งที่ตีบอสจะเพี้ยนตามด่าน"
 	)
 	assert(Config.Balance.Weapon.MAX_LEVEL >= stage.COUNT, "Config: ขั้นอาวุธต้องมีอย่างน้อยเท่าจำนวนด่าน")

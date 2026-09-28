@@ -1658,6 +1658,71 @@ do
 	check("ยังไม่ได้สถานะจาก server → ไม่ error และไม่โชว์", pcall(BossHud.render, 0) and surface.Enabled == false, true)
 end
 
+print("\n━━ BossHud: จุดกด E ค้างที่ไข่บอส (Phase 5B) ━━")
+do
+	local BossHud = loaded.BossHud
+	local picked = {}
+	local eggs = {}
+	for index = 1, Config.Balance.BossCycle.EGGS_PER_NIGHT do
+		local part = newInstance("Part")
+		part.Name = `BossEgg{index}`
+		part:SetAttribute("Index", index)
+		part:SetAttribute("Weight", 0)
+		part:SetAttribute("Status", "none")
+		eggs[index] = part
+		check(`ติดจุดกดที่ไข่ฟอง {index} ไม่ error`, pcall(BossHud.attachEggPrompt, part, function(i)
+			table.insert(picked, i)
+		end))
+	end
+	local prompt1 = findDescendant(eggs[1], "PickUpBossEgg")
+	check("  prompt อยู่ใต้ Part ไข่", prompt1 ~= nil, true)
+	check("  สร้างผ่าน UiKit.prompt (OnePerButton)", prompt1 and prompt1.Exclusivity, "Enum.ProximityPromptExclusivity.OnePerButton")
+	check("  กดค้างตาม EGG_PICKUP_HOLD_SECONDS", prompt1 and prompt1.HoldDuration, Config.Balance.BossCycle.EGG_PICKUP_HOLD_SECONDS)
+	check("  ระยะกดตาม EggPromptDistance", prompt1 and prompt1.MaxActivationDistance, Config.MapDimensions.BossArena.EggPromptDistance)
+	BossHud.attachEggPrompt(eggs[1], function() end)
+	local count = 0
+	for _, child in rawget(eggs[1], "__children") do
+		if child.Name == "PickUpBossEgg" then
+			count += 1
+		end
+	end
+	check("  ติดซ้ำฟองเดิม → ไม่เพิ่ม prompt", count, 1)
+
+	-- ไข่ชุดใหม่ขึ้นห้อง (กลางคืน · บอสอยู่) → เห็นไข่แต่ยังไม่มีจุดกด
+	for index, part in eggs do
+		part:SetAttribute("Weight", 100 + index)
+		part:SetAttribute("Status", "resting")
+	end
+	BossHud.setState({ phase = "night", phaseEndsAt = 100, bossAlive = true })
+	check("บอสยังอยู่ → จุดกดปิด (เห็นไข่ แต่หยิบไม่ได้)", prompt1.Enabled, false)
+	check("  ชื่อบน prompt = น้ำหนักฟองนั้น", prompt1.ObjectText, "ไข่บอส 101 กก.")
+	BossHud.setState({ phase = "day", phaseEndsAt = 700, bossAlive = false })
+	check("บอสตายแล้ว → จุดกดเปิด", prompt1.Enabled, true)
+
+	prompt1.Triggered:Fire()
+	check("กดครบเวลา → ยิงคำขอหยิบ 'ฟองที่ 1' เท่านั้น", table.concat(picked, ","), "1")
+
+	eggs[1]:SetAttribute("Status", "carried")
+	check("ฟองที่มีคนถือ → จุดกดปิด", prompt1.Enabled, false)
+	local prompt2 = findDescendant(eggs[2], "PickUpBossEgg")
+	check("  ฟองอื่นยังเปิด", prompt2.Enabled, true)
+	BossHud.setCarrying(true)
+	check("ตัวเองถือไข่อยู่ → ปิดจุดกดทุกฟอง (ถือทีละฟอง)", prompt2.Enabled, false)
+	BossHud.setCarrying(false)
+	check("  วางลง/ส่งแล้ว → เปิดกลับ", prompt2.Enabled, true)
+	eggs[2]:SetAttribute("Status", "gone")
+	check("ฟองที่เก็บไปแล้ว → จุดกดปิด", prompt2.Enabled, false)
+	BossHud.setState({ phase = "night", phaseEndsAt = 1300, bossAlive = true })
+	local anyOpen = false
+	for _, part in eggs do
+		local prompt = findDescendant(part, "PickUpBossEgg")
+		if prompt and prompt.Enabled then
+			anyOpen = true
+		end
+	end
+	check("คืนถัดไป (บอสเกิดใหม่) → จุดกดปิดทุกฟอง", anyOpen, false)
+end
+
 print(string.format("\n=== ผ่าน %d / ตก %d ===", passCount, failCount))
 if failCount > 0 then
 	error(`มีเทสต์ตก {failCount} เคส`, 0)

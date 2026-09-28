@@ -39,11 +39,13 @@ return function(t, Config)
 		check("  ผิวหน้า (ฝั่งลาน) = X 157.5", Config.getBossBarrierFrontX(), 157.5)
 		check("  ผิวหลังไม่ล้ำเข้ากำแพงข้างเลน", Config.getBossBarrierX() + barrierSize.X / 2 <= Config.getLaneWallStartX(), true)
 		local pedestal = Config.getSummonPedestalCenter()
+		-- 5B-fix: แท่นอัญเชิญย้ายเข้าเลน (สนามรบ) หลังกำแพงกั้น · จุดกด E ไม่ทะลุออกมาฝั่งลาน
 		check(
-			"  ไม่บังแท่นอัญเชิญ (แท่นอยู่ฝั่งลาน)",
-			pedestal.X + map.SummonPedestal.Diameter / 2 < Config.getBossBarrierFrontX(),
+			"  แท่นอัญเชิญอยู่หลังกำแพงกั้น (ในสนามรบ)",
+			pedestal.X - map.SummonPedestal.Diameter / 2 >= Config.getBossBarrierX() + barrierSize.X / 2,
 			true
 		)
+		check("  จุดกด E ของแท่นกดจากฝั่งลานไม่ได้", pedestal.X - map.SummonPedestal.PromptDistance >= Config.getBossBarrierFrontX(), true)
 
 		local minGap = math.huge
 		local allInFront = true
@@ -685,7 +687,8 @@ return function(t, Config)
 		local map = Config.MapDimensions
 		local edge = Config.getSafeZoneEdgeX()
 		check("ขอบเซฟโซน = ผิวหน้ากำแพงกั้น (X 157.5)", edge, 157.5)
-		check("เซฟโซน: แท่นอัญเชิญ", Config.isInSafeZone(Config.getSummonPedestalCenter()), true)
+		check("สนามรบ (5B-fix): แท่นอัญเชิญ", Config.isInSafeZone(Config.getSummonPedestalCenter()), false)
+		check("  แท่นอัญเชิญอยู่ในห้องด่าน 1", Config.isInBossArena(Config.getSummonPedestalCenter()), true)
 		check("เซฟโซน: กลางลานคอก", Config.isInSafeZone(pos(0, 0)), true)
 		local spawnsSafe = true
 		for index = 1, Config.World.MAX_PENS do
@@ -704,7 +707,7 @@ return function(t, Config)
 
 		check("พื้นเลนเริ่มที่แนวกำแพงหิน (ไม่ยื่นบนหญ้า)", Config.getLaneFloorStartX(), 157.5)
 		check("  ต้นเลน (การรบ/แท่นอัญเชิญ) ยังเป็น X 140 เหมือนเดิม", Config.getLaneStartX(), 140)
-		check("  แท่นอัญเชิญยังอยู่ X 148", Config.getSummonPedestalCenter().X, 148)
+		check("  แท่นอัญเชิญย้ายเข้าเลนที่ X 177 (5B-fix)", Config.getSummonPedestalCenter().X, 177)
 
 		check("ตารางฝั่งมุมบอสครบ 9 ด่าน", #map.BossRoom.CornerSide, Config.Balance.Stage.COUNT)
 		local alternates = true
@@ -743,5 +746,29 @@ return function(t, Config)
 		check("ตั้งด่าน 1 กับ 2 ฝั่งเดียวกัน → validate ไม่ผ่าน", pcall(Config.validate), false)
 		map.BossRoom.CornerSide[2] = saved
 		check("  คืนค่าแล้ว validate ผ่าน", pcall(Config.validate), true)
+	end
+
+	----------------------------------------------------------------------------
+	print("── 5B-fix (ผลทดสอบ Studio รอบ 1): วาปเฉพาะคนในสนามรบ · ไม่บอกน้ำหนักไข่ก่อนเก็บ ──")
+	----------------------------------------------------------------------------
+	do
+		local edge = Config.getSafeZoneEdgeX()
+		check("ยืนในคอก → ไม่วาป", BossService.shouldGatherAtNight(pos(0, 85)), false)
+		check("ยืนกลางลาน/หน้าป้อม → ไม่วาป", BossService.shouldGatherAtNight(Config.getBossGatherSpot(1)), false)
+		check("ยืนร้านค้า → ไม่วาป", BossService.shouldGatherAtNight(Config.getShopCenter()), false)
+		check("ยืนในเลน (สนามรบ) → วาป", BossService.shouldGatherAtNight(pos(200, 0)), true)
+		check("ยืนที่แท่นอัญเชิญ (ในเลนแล้ว) → วาป", BossService.shouldGatherAtNight(Config.getSummonPedestalCenter()), true)
+		check("ยืนห้องบอส → วาป", BossService.shouldGatherAtNight(Config.getBossPosition()), true)
+		check("ยืนเลยกำแพงด่าน 2 (ด่านไกล) → วาป", BossService.shouldGatherAtNight(pos(600, 0)), true)
+		check("ขอบพอดี (ช่องประตู) = สนามรบ → วาป", BossService.shouldGatherAtNight(pos(edge, 0)), true)
+
+		local picked = Config.formatBossEventMessage("picked", 152300)
+		check("ข้อความหยิบไข่ไม่บอกน้ำหนัก (ให้ลุ้น)", string.find(picked, "กก.", 1, true), nil)
+		check("  ไม่มีตัวเลขน้ำหนักหลุดมา", string.find(picked, "152", 1, true), nil)
+		check(
+			"ข้อความเก็บเข้ากระเป๋ายังเฉลยน้ำหนัก",
+			Config.formatBossEventMessage("delivered", 152300),
+			"เก็บไข่บอสแล้ว (152,300 กก.)"
+		)
 	end
 end

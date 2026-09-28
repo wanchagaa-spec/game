@@ -207,7 +207,7 @@ end
 local function spawnOurTroop(stage: number)
 	local oursFolder = ensureSubFolder("Ours")
 
-	-- UI-3: โผล่บนแท่นอัญเชิญ (กึ่งกลาง X 148 = กึ่งกลางแท่นปล่อยเดิม · จุดเริ่มเดินไม่เปลี่ยน)
+	-- UI-3: โผล่บนแท่นอัญเชิญ (5B-fix: แท่นย้ายเข้าเลนที่ X 177 · เดิม X 148 — ภาพล้วน เวลาเดินคงที่ 30 วิเท่าเดิม)
 	-- แล้วค่อยกระจายออกทั้งความกว้างเลนระหว่างเดิน · ภาพล้วน ไม่ผูกกับการรบ
 	local pedestal = Config.getSummonPedestalCenter()
 	local startX = pedestal.X

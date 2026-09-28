@@ -716,9 +716,11 @@ local BOSS_ARENA_COLORS = {
 	egg = Color3.fromRGB(236, 226, 196), -- ไข่บอส (สีเดียวกันทุกฟอง — ขนาดบอกน้ำหนัก)
 }
 
--- ไข่บอส 1 ฟอง — ทรงกลม (ขนาดเท่ากันทุกแกน) + ป้ายน้ำหนักลอยเหนือไข่ · เริ่มแบบซ่อน (Status = "none")
+-- ไข่บอส 1 ฟอง — ทรงกลม (ขนาดเท่ากันทุกแกน) · เริ่มแบบซ่อน (Status = "none")
 -- ⚠️ อยู่ตลอด ไม่ถอดออกจากโลก — BossService ซ่อน/โชว์ด้วย Transparency + Attribute Status แทน
 --   (ถอดออกแล้วใส่กลับ = client ได้ instance ใหม่ จุดกด E ที่ติดไว้ฝั่ง client หายไปด้วย)
+-- ⚠️ 5B-fix (ผู้ใช้สั่ง "ให้ผู้เล่นลุ้น"): **ไม่มีป้ายน้ำหนัก และไม่ส่งน้ำหนักให้ client** — ดูได้แค่ขนาดไข่ (บอก tier คร่าว ๆ)
+--   น้ำหนักจริงเห็นตอนเก็บเข้ากระเป๋าแล้วเท่านั้น
 local function buildBossEgg(folder: Folder, index: number)
 	local spot = Config.getBossCycleEggSpot(index)
 	local size = MAP.Blockout.EggSize
@@ -735,29 +737,8 @@ local function buildBossEgg(folder: Folder, index: number)
 	egg.CastShadow = false
 	egg.Transparency = 1
 	egg:SetAttribute("Index", index)
-	egg:SetAttribute("Weight", 0)
 	egg:SetAttribute("Status", "none")
 	egg.Parent = folder
-
-	local gui = Instance.new("BillboardGui")
-	gui.Name = "WeightLabel"
-	gui.Size = UDim2.fromOffset(150, 30)
-	gui.StudsOffsetWorldSpace = Vector3.new(0, 2.5, 0)
-	gui.MaxDistance = 150
-	gui.AlwaysOnTop = false
-	gui.Enabled = false
-	gui.Adornee = egg
-	gui.Parent = egg
-	local text = Instance.new("TextLabel")
-	text.Name = "Text"
-	text.Size = UDim2.fromScale(1, 1)
-	text.BackgroundTransparency = 1
-	text.TextScaled = true
-	text.Font = Enum.Font.GothamBold
-	text.TextColor3 = Color3.fromRGB(255, 255, 255)
-	text.TextStrokeTransparency = 0.3
-	text.Text = ""
-	text.Parent = gui
 end
 
 function MapBuilder.buildBossArena(parent: Folder)

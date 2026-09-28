@@ -3,7 +3,7 @@
 --
 -- ══ กติกา (ผู้ใช้ยืนยันแล้ว) ══
 --   รอบละ DAY + NIGHT วินาที (Config.Balance.BossCycle · 9 + 1 นาที) วนตลอด · เซิร์ฟเปิดใหม่เริ่มต้นกลางวันเสมอ
---   กลางคืน: วาปทุกคนมาหน้าป้อม · กำแพงกั้นขึ้น (กันเฉพาะผู้เล่น) · บอสเกิด — ตัวเก่ายังไม่ตาย = ฟื้น HP เต็ม
+--   กลางคืน: วาปคนที่อยู่ในสนามรบมาหน้าป้อม (5B-fix — คนในคอก/ลานอยู่ที่เดิม) · กำแพงกั้นขึ้น (กันเฉพาะผู้เล่น) · บอสเกิด — ตัวเก่ายังไม่ตาย = ฟื้น HP เต็ม
 --   กลางวัน: กำแพงกั้นหาย เข้าไปตีบอสได้ทั้งวัน · บอสตายแล้วหายไปจนคืนถัดไป
 --   ตีบอส = อาวุธ (Tool) ที่ server ใส่ Backpack ให้ · ถือ/เก็บอัตโนมัติตามเขตบอส (Backpack เดิมของ Roblox ปิดอยู่)
 --   ⚠️ ระบบ personal combat ของ Phase 4 **ยังไม่มีในโค้ด** — รอบนี้ทำขั้นต่ำเท่าที่ต้องใช้ตีบอส (ผู้ใช้เลือก)
@@ -328,6 +328,12 @@ function BossService.pickUpEgg(
 	return "ok", egg
 end
 
+-- 5B-fix (ผู้ใช้สั่ง): ต้นกลางคืนวาปมาหน้าป้อม**เฉพาะคนที่อยู่ในสนามรบ** (นอกเซฟโซน) — คนในคอก/ลานอยู่ที่เดิม
+-- ⚠️ position = ตำแหน่งตัวละครที่ server เห็น
+function BossService.shouldGatherAtNight(position: Vector3): boolean
+	return not Config.isInSafeZone(position)
+end
+
 -- ไข่ที่คนนี้ถืออยู่ (nil = ไม่ได้ถือ)
 function BossService.getCarriedEgg(state: State, userId: number): BossEgg?
 	local index = state.carrying[userId]
@@ -580,21 +586,9 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 		return nil
 	end
 
-	-- ป้ายน้ำหนักเหนือไข่ (ของ server — ทุกคนเห็นเหมือนกัน)
-	local function setWeightLabel(part: BasePart, weight: number, visible: boolean)
-		local gui = part:FindFirstChild("WeightLabel") :: BillboardGui?
-		if not gui then
-			return
-		end
-		gui.Enabled = visible
-		gui.StudsOffsetWorldSpace = Vector3.new(0, Config.getBallRadius(part.Size) + 1.5, 0)
-		local text = gui:FindFirstChild("Text") :: TextLabel?
-		if text then
-			text.Text = `{Config.formatCoins(weight)} กก.`
-		end
-	end
-
 	-- ไข่ในห้อง: ขนาดตามน้ำหนัก · โชว์เฉพาะฟองที่วางอยู่ · Attribute ให้ client ติด/เปิดจุดกด E
+	-- ⚠️ 5B-fix (ผู้ใช้สั่ง "ให้ผู้เล่นลุ้น"): **ไม่มีป้ายน้ำหนัก และไม่ส่งน้ำหนักให้ client** (ไม่มี Attribute Weight) —
+	--   เห็นแค่ขนาดไข่ · น้ำหนักจริงเฉลยตอนเก็บเข้ากระเป๋า ("delivered") · ประกาศไข่หนักต้นคืนยังอยู่ (บอกแค่ฟองหนักสุด)
 	local function publishEggs()
 		for index, part in eggParts do
 			local egg = state.eggs[index]
@@ -606,9 +600,7 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 				part.Position = Vector3.new(spot.X, Config.getBallRadius(size), spot.Z)
 			end
 			part.Transparency = if resting then 0 else 1
-			part:SetAttribute("Weight", if egg then egg.weight else 0)
 			part:SetAttribute("Status", if egg then egg.status else "none")
-			setWeightLabel(part, if egg then egg.weight else 0, resting)
 		end
 	end
 
@@ -639,13 +631,6 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 		weld.Part0 = root
 		weld.Part1 = part
 		weld.Parent = part
-		local label = eggParts[egg.index]:FindFirstChild("WeightLabel")
-		if label then
-			local copy = label:Clone() :: BillboardGui
-			copy.Adornee = part
-			copy.Enabled = true
-			copy.Parent = part
-		end
 		part.Parent = character
 		return part
 	end
@@ -709,15 +694,23 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 		syncCarriedVisuals()
 	end
 
-	-- ต้นกลางคืน: วาปทุกคนที่มีตัวละครอยู่มาหน้าป้อม (คนที่เข้าเกม/เกิดใหม่ระหว่างคืนเกิดตามปกติ ไม่วาป)
+	-- ต้นกลางคืน: วาปคนที่อยู่ในสนามรบมาหน้าป้อม (คนที่เข้าเกม/เกิดใหม่ระหว่างคืนเกิดตามปกติ ไม่วาป)
 	-- 5B: หน้าป้อม = ฝั่งลานกลาง หน้ากำแพงกั้นที่ปิดปากเลน (หันหน้า +X เข้าหาตัวเลข)
+	-- ⚠️ 5B-fix: **เฉพาะคนที่อยู่ในสนามรบ** (shouldGatherAtNight) — คนในคอก/ลานกลางไม่ถูกวาป ·
+	--   จุดยืนนับเฉพาะคนที่ถูกวาป (คนแรกได้จุด 1 · ไม่เว้นจุดให้คนที่อยู่ในลานอยู่แล้ว)
 	local function gatherEveryone()
 		local index = 0
 		for _, player in Players:GetPlayers() do
 			local character = player.Character
 			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-			local root = character and character:FindFirstChild("HumanoidRootPart")
-			if character and humanoid and root and humanoid.Health > 0 then
+			local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+			if
+				character
+				and humanoid
+				and root
+				and humanoid.Health > 0
+				and BossService.shouldGatherAtNight(root.Position)
+			then
 				index += 1
 				humanoid:UnequipTools()
 				local spot = Config.getBossGatherSpot(index)
@@ -867,7 +860,8 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 		if result == "ok" and egg then
 			bagFullWarned[userId] = nil
 			publish()
-			notify:FireClient(player, "picked", egg.weight)
+			-- 5B-fix: ไม่บอกน้ำหนักตอนหยิบ (ให้ลุ้น) — เฉลยตอนเข้ากระเป๋า ("delivered")
+			notify:FireClient(player, "picked")
 			print(`[BossService] {player.Name} หยิบไข่ #{egg.index} ({egg.weight} กก.)`)
 		elseif PICKUP_FAIL_KIND[result] then
 			notify:FireClient(player, PICKUP_FAIL_KIND[result])
@@ -997,7 +991,7 @@ local function requireState(): State
 	return current :: State
 end
 
--- ข้ามไปต้นกลางคืนทันที: วาปทุกคนมาหน้าป้อม · กำแพงกั้นขึ้น · บอสเกิด/ฟื้น HP เต็ม · นับ 59 → 0 ใหม่ · ไข่ชุดใหม่ 6 ฟอง
+-- ข้ามไปต้นกลางคืนทันที: วาปคนในสนามรบมาหน้าป้อม · กำแพงกั้นขึ้น · บอสเกิด/ฟื้น HP เต็ม · นับ 59 → 0 ใหม่ · ไข่ชุดใหม่ 6 ฟอง
 -- 5B: rawFirstEggKg (ไม่ใส่ได้) = บังคับน้ำหนักไข่ฟองที่ 1 ของชุดใหม่ (kg จำนวนเต็ม ≥ 100) **ก่อน** ประกาศ/โชว์ —
 --   ใช้ทดสอบประกาศไข่หนัก (> HEAVY_EGG_ALERT_KG) โดยไม่ต้องรอดวง · ไม่ใส่ = สุ่มตามปกติทุกฟอง
 function BossService.debugBossNight(rawFirstEggKg: number?): string

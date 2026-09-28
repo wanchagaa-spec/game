@@ -1019,11 +1019,13 @@ return function(t, Config)
 	-- ══ แท่นอัญเชิญ (UI-3) ══ แทนแท่นปล่อยเดิม — ภาพ + จุดกดเท่านั้น ไม่แตะต้นเลน/ระยะการรบ
 	local pedestal = map.SummonPedestal
 	local pedestalCenter = Config.getSummonPedestalCenter()
-	check("แท่นอัญเชิญอยู่ที่ X 148 = กึ่งกลางแท่นปล่อยเดิม (140 + 16/2)", pedestalCenter.X, 148)
+	-- 5B-fix (ผู้ใช้สั่ง): ย้ายเข้าไปในเลน = สนามรบ หลังช่องประตู (เดิม X 148 ในลาน)
+	check("แท่นอัญเชิญอยู่ที่ X 177 = ผิวหลังช่องประตู 162.5 + 7.5 + รัศมี 7", pedestalCenter.X, 177)
 	check("แท่นอัญเชิญอยู่กลางเลน (Z 0)", pedestalCenter.Z, 0)
 	check("แท่นเริ่มที่ต้นเลนหรือหลังจากนั้น (ไม่ล้ำลานคอก)",
 		pedestalCenter.X - pedestal.Diameter / 2 >= Config.getLaneStartX(), true)
-	check("แท่นจบก่อนกำแพงข้างเลน (X 162.5)", pedestalCenter.X + pedestal.Diameter / 2 <= Config.getLaneWallStartX(), true)
+	check("แท่นเริ่มหลังช่องประตู (X 162.5) = อยู่ในเลน สนามรบ", pedestalCenter.X - pedestal.Diameter / 2 >= Config.getLaneWallStartX(), true)
+	check("แท่นจบก่อนห้องบอสด่าน 1", pedestalCenter.X + pedestal.Diameter / 2 < Config.getBossNestCenter(1).X - map.BossRoom.Size.X / 2, true)
 	check("ข้างแท่นเหลือทางเดินกว้างกว่าประตูคอก", map.Lane.Width / 2 - pedestal.Diameter / 2 >= map.Pen.GateWidth, true)
 	check("กด E ค้างครึ่งวินาที", pedestal.PromptHoldSeconds, 0.5)
 	local damageSpotP = Config.getDamageSignSpot()
@@ -1031,14 +1033,14 @@ return function(t, Config)
 	check("ระยะกด E แท่นกับป้ายดาเมจไม่ทับกัน", pedestalGap > pedestal.PromptDistance + map.MapSign.PromptDistance, true)
 	check("ต้นเลนไม่ขยับ (ยังเป็นขอบลานคอก)", Config.getLaneStartX(), Config.getPenYardRightX())
 	check("ไม่มีแท่นปล่อยสี่เหลี่ยมเดิมเหลือใน Config", map.Lane.ReleasePadSize, nil)
-	local savedInset = pedestal.CenterInsetX
+	local savedInset = pedestal.EntranceGap
 	local savedDiameter = pedestal.Diameter
 	local savedPedestalPrompt = pedestal.PromptDistance
 	local savedPedestalClose = pedestal.CloseDistance
-	check("แท่นยื่นเลยกำแพงข้างเลน → ล้ม", mapGuardCatches(
-		function() pedestal.CenterInsetX = 20 end, function() pedestal.CenterInsetX = savedInset end), true)
-	check("แท่นล้ำเข้าลานคอก → ล้ม", mapGuardCatches(
-		function() pedestal.CenterInsetX = 2 end, function() pedestal.CenterInsetX = savedInset end), true)
+	check("แท่นล้ำออกมาทับช่องประตู/ลาน → ล้ม", mapGuardCatches(
+		function() pedestal.EntranceGap = -10 end, function() pedestal.EntranceGap = savedInset end), true)
+	check("แท่นล้ำเข้าห้องบอสด่าน 1 → ล้ม", mapGuardCatches(
+		function() pedestal.EntranceGap = 60 end, function() pedestal.EntranceGap = savedInset end), true)
 	check("แท่นกว้างจนบังทางเข้าเลน → ล้ม", mapGuardCatches(
 		function() pedestal.Diameter = map.Lane.Width end, function() pedestal.Diameter = savedDiameter end), true)
 	check("ระยะกด E แท่นทับป้ายดาเมจ → ล้ม", mapGuardCatches(

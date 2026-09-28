@@ -32,7 +32,11 @@ export type BossState = {
 }
 
 local RENDER_INTERVAL = 0.2
-local PIXELS_PER_STUD = 20
+-- ⚠️ 5B-fix (ผู้ใช้สั่ง "ขยายตัวเลขขึ้น 4 เท่า"): TextScaled ของ Roblox **ตันที่ 100 px** ไม่ว่ากรอบจะใหญ่แค่ไหน
+--   เดิม 20 px/stud → ตัวเลขสูงได้แค่ 100 px = 5 studs (กรอบ Count สูง 20 studs แต่ตัวอักษรตันก่อน)
+--   ลดเหลือ 5 px/stud → 100 px = 20 studs = **ใหญ่ขึ้น 4 เท่า** เต็มกรอบ Count (ครึ่งความสูงกำแพงกั้น 40)
+--   คำบรรยายไม่ตันเพดาน จึงขนาดเท่าเดิมตามกรอบ (แค่ความคมลดลงเล็กน้อย)
+local PIXELS_PER_STUD = 5
 local COUNT_COLOR = Color3.fromRGB(190, 30, 40) -- แดงเข้มบนกำแพงขาว
 local CAPTION_COLOR = Color3.fromRGB(40, 40, 55) -- เทาเข้มเกือบดำ
 local STROKE_COLOR = Color3.fromRGB(255, 255, 255) -- ขอบขาวบาง ๆ ให้ตัวเลขแยกจากเงาบนผิวกำแพง
@@ -84,16 +88,13 @@ function BossHud.attach(playerGui: Instance, barrier: BasePart)
 	countLabel = count
 end
 
--- 5B: เปิด/ปิดจุดกด E ของไข่ทุกฟองตามสถานะล่าสุด + ชื่อบน prompt = น้ำหนักของฟองนั้น
+-- 5B: เปิด/ปิดจุดกด E ของไข่ทุกฟองตามสถานะล่าสุด
+-- ⚠️ 5B-fix (ผู้ใช้สั่ง "ให้ผู้เล่นลุ้น"): ไม่โชว์น้ำหนักบน prompt — server ก็ไม่ส่งน้ำหนักมาแล้ว (เห็นแค่ขนาดไข่)
 function BossHud.refreshEggPrompts()
 	local bossDead = state.bossAlive == false
 	for _, entry in eggPrompts do
 		local status = entry.part:GetAttribute("Status")
-		local weight = entry.part:GetAttribute("Weight")
 		entry.prompt.Enabled = bossDead and status == "resting" and not carrying
-		entry.prompt.ObjectText = if type(weight) == "number" and weight > 0
-			then `ไข่บอส {Config.formatCoins(weight)} กก.`
-			else "ไข่บอส"
 	end
 end
 
@@ -128,7 +129,6 @@ function BossHud.attachEggPrompt(part: BasePart, onPick: (index: number) -> ())
 	prompt.Parent = part
 	eggPrompts[index] = { part = part, prompt = prompt }
 	part:GetAttributeChangedSignal("Status"):Connect(BossHud.refreshEggPrompts)
-	part:GetAttributeChangedSignal("Weight"):Connect(BossHud.refreshEggPrompts)
 	BossHud.refreshEggPrompts()
 end
 

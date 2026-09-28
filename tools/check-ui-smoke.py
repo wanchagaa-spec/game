@@ -1068,6 +1068,7 @@ do
 	local beforeStopCalls = #calls
 	p.summonEnabled = true
 	MapSigns.setPayload(p)
+	check("  5B-fix: กำลังอัญเชิญ → ข้อความบนจุดกด = \"ปิดอัญเชิญ\"", summonPrompt.ActionText, "ปิดอัญเชิญ")
 	summonPrompt.Triggered:Fire(localPlayer)
 	check("  กำลังอัญเชิญอยู่ → กด E ค้างซ้ำ → เรียก stopSummon", lastCall().name, "stopSummon")
 	check("  ไม่เรียก openSummon ซ้ำ", #calls, beforeStopCalls + 1)
@@ -1076,6 +1077,7 @@ do
 	summonOpen = false
 	p.summonEnabled = false
 	MapSigns.setPayload(p)
+	check("  5B-fix: หยุดแล้ว → ข้อความกลับเป็น \"อัญเชิญ\" เหมือนเดิม", summonPrompt.ActionText, "อัญเชิญ")
 	summonPrompt.Triggered:Fire(localPlayer)
 	check("  หยุดแล้ว → กด E ค้างเปิดหน้าต่างได้ตามปกติ", summonOpen, true)
 
@@ -1667,7 +1669,6 @@ do
 		local part = newInstance("Part")
 		part.Name = `BossEgg{index}`
 		part:SetAttribute("Index", index)
-		part:SetAttribute("Weight", 0)
 		part:SetAttribute("Status", "none")
 		eggs[index] = part
 		check(`ติดจุดกดที่ไข่ฟอง {index} ไม่ error`, pcall(BossHud.attachEggPrompt, part, function(i)
@@ -1690,12 +1691,12 @@ do
 
 	-- ไข่ชุดใหม่ขึ้นห้อง (กลางคืน · บอสอยู่) → เห็นไข่แต่ยังไม่มีจุดกด
 	for index, part in eggs do
-		part:SetAttribute("Weight", 100 + index)
 		part:SetAttribute("Status", "resting")
 	end
 	BossHud.setState({ phase = "night", phaseEndsAt = 100, bossAlive = true })
 	check("บอสยังอยู่ → จุดกดปิด (เห็นไข่ แต่หยิบไม่ได้)", prompt1.Enabled, false)
-	check("  ชื่อบน prompt = น้ำหนักฟองนั้น", prompt1.ObjectText, "ไข่บอส 101 กก.")
+	-- 5B-fix (ผู้ใช้สั่ง "ให้ผู้เล่นลุ้น"): ไม่โชว์น้ำหนักบน prompt
+	check("  ชื่อบน prompt ไม่บอกน้ำหนัก", prompt1.ObjectText, "ไข่บอส")
 	BossHud.setState({ phase = "day", phaseEndsAt = 700, bossAlive = false })
 	check("บอสตายแล้ว → จุดกดเปิด", prompt1.Enabled, true)
 

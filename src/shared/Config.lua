@@ -420,18 +420,21 @@ Config.MapDimensions = {
 	},
 
 	-- ══ แท่นอัญเชิญ (UI-3) ══ แทนแท่นปล่อยทหารสี่เหลี่ยมเดิม (16 × 28 · X 140–156)
-	-- จานหินเรืองแสงกลางปากเลน · ทหาร (ภาพ) โผล่ที่กึ่งกลางแท่นแล้วเดินเข้าเลน · กด E ค้างเปิดหน้าต่างอัญเชิญ
+	-- จานหินเรืองแสง · ทหาร (ภาพ) โผล่ที่กึ่งกลางแท่นแล้วเดินเข้าเลน · กด E ค้างเปิดหน้าต่างอัญเชิญ
 	-- ⚠️ **ภาพ + จุดกดเท่านั้น** — การรบคิดเป็นตัวเลขล้วน (CombatService ไม่อ่านพิกัดใด ๆ)
 	--   ต้นเลน · ความยาวเลน · ระยะด่าน ยังอ่าน getLaneStartX / LengthPerStage เหมือนเดิม
-	-- กึ่งกลาง = ต้นเลน + CenterInsetX = X 148 = **กึ่งกลางแท่นเดิมพอดี** ทหารจึงเริ่มเดินจุดเดิม
-	-- ⚠️ CanCollide = false ทั้งแท่น (เดินทับได้ ไม่บังทางเข้าเลน) · validate() บังคับว่าอยู่ในปากเลน
-	--   ก่อนถึงกำแพงข้างเลน (X 162.5) และระยะกด E ไม่ทับป้ายดาเมจ
+	-- ⚠️ 5B-fix (ผลทดสอบ Studio · ผู้ใช้สั่ง): ย้าย**เข้าไปในเลน = พื้นที่สนามรบ** หลังช่องประตู/กำแพงกั้น
+	--   กึ่งกลาง = ผิวหลังช่องประตู (getLaneWallStartX · X 162.5) + EntranceGap + รัศมี = **X 177**
+	--   (เดิม X 148 ในลาน = ต้นเลน + 8) · ผลที่ตามมา: กลางคืนกำแพงกั้นปิดทางไปแท่น (1 นาที) ·
+	--   คนยืนที่แท่นตอนต้นกลางคืนอยู่ในสนามรบ → ถูกวาปออกมาหน้าป้อม
+	-- ⚠️ CanCollide = false ทั้งแท่น (เดินทับได้ ไม่บังทางเดิน) · validate() บังคับว่าอยู่ในเลนหลังช่องประตู
+	--   ก่อนห้องบอสด่าน 1 · จุดกด E ไม่ทะลุกำแพงกั้นออกมาฝั่งลาน · ห่างระยะตีบอส
 	SummonPedestal = {
 		Diameter = 14, -- ฐานหิน
 		CoreDiameter = 10, -- แกนเรืองแสง (Neon) บนฐาน
 		BaseHeight = 0.4,
 		CoreHeight = 0.2, -- แกนนูนเหนือฐานเท่านี้
-		CenterInsetX = 8,
+		EntranceGap = 7.5, -- ระยะจากผิวหลังช่องประตู (X 162.5) ถึงขอบแท่น — เดินเข้าเลนมาแล้วไม่เหยียบแท่นทันที
 		PromptHoldSeconds = 0.5, -- กด E ค้าง
 		PromptDistance = 12, -- วัดจากกึ่งกลางแท่น (รัศมีแท่น 7)
 		CloseDistance = 18, -- เดินออกห่างจากกึ่งกลางแท่นเกินนี้ หน้าต่างอัญเชิญปิดเอง
@@ -698,7 +701,8 @@ Config.RemoteNames = {
 	-- ⚠️ การตีบอส **ไม่มี RemoteEvent** — ใช้ Tool.Activated ของอาวุธที่ server สร้างเอง (ยิงถึง server ในตัว)
 	-- ⚠️ 5B เพิ่ม kind + ตัวเลขต่อท้าย (ตัวเลขมาจาก server เสมอ · signature (kind, a?, b?) ของเดิมยังใช้ได้):
 	--   FireAllClients("heavy", น้ำหนัก) ตอนบอสเกิดถ้าไข่หนักเกิน HEAVY_EGG_ALERT_KG
-	--   FireClient(player, "picked" | "delivered", น้ำหนัก) · ("reward", เงินที่ได้, จำนวนคนแบ่ง) · "bagFull" · "eggLost"
+	--   FireClient(player, "picked") · ("delivered", น้ำหนัก — เฉลยตอนเข้ากระเป๋า) · ("reward", เงินที่ได้, จำนวนคนแบ่ง) · "bagFull" · "eggLost"
+	--   (5B-fix: "picked" ไม่มีน้ำหนักแล้ว — ให้ผู้เล่นลุ้น)
 	--   · "pickupAlive" | "pickupCarrying" | "pickupTaken" | "pickupRange" (หยิบไม่สำเร็จ)
 	BOSS_EVENT_NOTIFY = "BossEventNotify",
 
@@ -1545,7 +1549,7 @@ Balance.Stage = {
 --   HP_BASE / HP_MULTIPLIER → BOSS_HP_BASE / BOSS_HP_MULTIPLIER (สเกลบอสต่อด่าน ผูกกับอาวุธ ×10 — validate())
 --   ⚠️ บอสกลางตอนนี้ใช้ BOSS_HP (ชั่วคราว) ไม่ใช่ getBossHp(ด่าน) — สเกลต่อด่านเก็บไว้ให้รอบ "บอสทุกห้อง"
 -- เซิร์ฟเปิดใหม่เริ่มที่ต้นกลางวันเสมอ · **ไม่เซฟ DataStore** (สถานะไข่/คนถือไข่ก็ไม่เซฟ)
--- กลางคืน: วาปทุกคนมาหน้าป้อม · กำแพงกั้นขึ้น · บอสเกิด (ตัวเก่ายังไม่ตาย = ฟื้น HP เต็ม) · ไข่ชุดใหม่ 6 ฟอง
+-- กลางคืน: วาปคนที่อยู่ในสนามรบมาหน้าป้อม (5B-fix) · กำแพงกั้นขึ้น · บอสเกิด (ตัวเก่ายังไม่ตาย = ฟื้น HP เต็ม) · ไข่ชุดใหม่ 6 ฟอง
 -- กลางวัน: กำแพงกั้นหาย เข้าไปตีบอสได้ · บอสตายแล้วไม่เกิดจนคืนถัดไป · บอสตายแล้วไข่ถึงหยิบได้
 -- ⚠️ server เป็นคนตัดสินเจ้าของไข่เท่านั้น ห้าม client ตัดสินเด็ดขาด
 Balance.BossCycle = {
@@ -2953,8 +2957,10 @@ end
 
 -- กึ่งกลางแท่นอัญเชิญบนพื้น (UI-3) — MapBuilder วางแท่น · client ติดจุดกด E · TroopRenderer เริ่มเดินทหารจากตรงนี้
 -- ⚠️ ภาพ/จุดกดเท่านั้น ไม่มีการคำนวณรบใดอ่านค่านี้
+-- ⚠️ 5B-fix: อยู่**ในเลน (สนามรบ)** หลังช่องประตู = getLaneWallStartX() + EntranceGap + รัศมี (X 177) — เดิม X 148 ในลาน
 function Config.getSummonPedestalCenter(): Vector3
-	return vec3(Config.getLaneStartX() + Config.MapDimensions.SummonPedestal.CenterInsetX, 0, 0)
+	local pedestal = Config.MapDimensions.SummonPedestal
+	return vec3(Config.getLaneWallStartX() + pedestal.EntranceGap + pedestal.Diameter / 2, 0, 0)
 end
 
 -- ความยาวเลนทั้งเส้น
@@ -3147,7 +3153,8 @@ function Config.formatBossEventMessage(kind: string, a: number?, b: number?): st
 		-- ทุกคน ตอนบอสเกิด · เฉพาะคืนที่มีไข่หนักเกิน HEAVY_EGG_ALERT_KG
 		return `🥚 คืนนี้บอสเฝ้าไข่ {Config.formatCoins(a or 0)} กก.!`
 	elseif kind == "picked" then
-		return `🥚 หยิบไข่บอสแล้ว ({Config.formatCoins(a or 0)} กก.) — วิ่งกลับเซฟโซน (ลานกลาง) เพื่อเก็บเข้ากระเป๋า`
+		-- 5B-fix: ไม่บอกน้ำหนักตอนหยิบ (ให้ลุ้น) — เฉลยตอนเก็บเข้ากระเป๋า ("delivered")
+		return "🥚 หยิบไข่บอสแล้ว — วิ่งกลับเซฟโซน (ลานกลาง) เพื่อเก็บเข้ากระเป๋า"
 	elseif kind == "delivered" then
 		return `เก็บไข่บอสแล้ว ({Config.formatCoins(a or 0)} กก.)`
 	elseif kind == "bagFull" then
@@ -3186,7 +3193,8 @@ Config.BOSS_MODEL_NAME = "CycleBoss" -- Model ใน BossArena (ตัวบอ�
 Config.WEAPON_TOOL_NAME = "Weapon" -- Tool ที่ server ใส่ Backpack ให้ทุกคน (ถือ/เก็บอัตโนมัติในเขตบอส)
 -- ══ 5B: ไข่บอส ══
 Config.BOSS_EGG_FOLDER = "BossEggs" -- Folder ใน BossArena · Part "BossEgg{i}" (i = 1..EGGS_PER_NIGHT) อยู่ตลอด ซ่อน/โชว์ตามสถานะ
--- Attribute บน Part ไข่: Index (1..N) · Weight (kg) · Status ("none" | "resting" | "carried" | "gone")
+-- Attribute บน Part ไข่: Index (1..N) · Status ("none" | "resting" | "carried" | "gone")
+--   ⚠️ 5B-fix: **ไม่มี Weight** — ไม่ส่งน้ำหนักให้ client (ให้ผู้เล่นลุ้น · เห็นแค่ขนาดไข่)
 --   client ติดจุดกด E (UiKit.prompt) ที่ Part พวกนี้ · เปิดเฉพาะ Status = "resting" + บอสตายแล้ว + ตัวเองไม่ได้ถือไข่
 Config.BOSS_EGG_CARRY_ATTRIBUTE = "CarryingBossEgg" -- Attribute บน Player: true = กำลังถือไข่บอส (server ตั้ง)
 Config.BOSS_CARRIED_EGG_NAME = "CarriedBossEgg" -- Part ใน character ของคนถือ (server สร้าง · ทุกคนเห็น)
@@ -4315,22 +4323,23 @@ function Config.validate()
 		"Config: ป้ายดาเมจต้องอยู่ในลาน ก่อนถึงต้นเลน (ในกำแพงใส)"
 	)
 
-	-- ══ แท่นอัญเชิญ (UI-3): อยู่ในปากเลน ไม่ทับกำแพง ไม่บังทาง · จุดกดไม่ทับป้ายดาเมจ ══
+	-- ══ แท่นอัญเชิญ (UI-3 · ย้ายเข้าเลนใน 5B-fix): อยู่ในเลนหลังช่องประตู ก่อนห้องบอส · ไม่บังทาง · จุดกดไม่ทับป้ายดาเมจ ══
 	local pedestal = dim.SummonPedestal
 	local pedestalCenter = Config.getSummonPedestalCenter()
 	local pedestalHalf = pedestal.Diameter / 2
 	assert(pedestal.CoreDiameter < pedestal.Diameter, "Config: แกนเรืองแสงของแท่นอัญเชิญต้องเล็กกว่าฐาน")
+	assert(pedestal.EntranceGap >= 0, "Config: SummonPedestal.EntranceGap ติดลบไม่ได้ (แท่นจะล้ำออกมาทับช่องประตู)")
 	assert(
-		pedestalCenter.X - pedestalHalf >= Config.getLaneStartX(),
-		"Config: แท่นอัญเชิญล้ำเข้าไปในลานคอก (ต้องเริ่มที่ต้นเลนหรือหลังจากนั้น)"
+		pedestalCenter.X - pedestalHalf >= laneWallStart,
+		`Config: แท่นอัญเชิญล้ำออกมาทับช่องประตู/ลาน (ต้องเริ่มหลัง X {laneWallStart} = ในเลน สนามรบ)`
 	)
 	assert(
-		pedestalCenter.X + pedestalHalf <= laneWallStart,
-		`Config: แท่นอัญเชิญยื่นเลยจุดเริ่มกำแพงข้างเลน (X {laneWallStart}) — ต้องอยู่ในปากเลนทั้งแท่น`
+		pedestalCenter.X + pedestalHalf <= Config.getBossNestCenter(1).X - dim.BossRoom.Size.X / 2 - dim.Lane.WallThickness / 2,
+		"Config: แท่นอัญเชิญล้ำเข้าไปในห้องบอสด่าน 1"
 	)
 	assert(
-		dim.Lane.Width / 2 - pedestalHalf >= dim.Pen.GateWidth,
-		"Config: แท่นอัญเชิญกว้างจนเหลือทางเดินข้างแท่นแคบกว่าประตูคอก (บังทางเข้าเลน)"
+		dim.Lane.Width / 2 - dim.Lane.WallThickness / 2 - pedestalHalf >= dim.Pen.GateWidth,
+		"Config: แท่นอัญเชิญกว้างจนเหลือทางเดินข้างแท่นแคบกว่าประตูคอก (บังทางเดินในเลน)"
 	)
 	assert(pedestal.PromptHoldSeconds > 0, "Config: แท่นอัญเชิญต้องกด E ค้าง (PromptHoldSeconds > 0)")
 	assert(
@@ -4415,9 +4424,15 @@ function Config.validate()
 			Config.getBossBarrierX() + barrierSize.X / 2 <= laneWallStart,
 			"Config: กำแพงกั้นบอสล้ำเข้าไปในกำแพงข้างเลน (ซ้อนกัน = กระพริบ)"
 		)
+		-- 5B-fix (ผู้ใช้สั่ง): แท่นอัญเชิญอยู่**หลัง**กำแพงกั้น ในสนามรบ · จุดกด E ต้องไม่ทะลุกำแพงกั้นออกมาถึงฝั่งลาน
+		-- (กลางคืนกดที่แท่นไม่ได้ 1 นาที — ยอมรับตามที่สั่ง)
 		assert(
-			pedestalCenter.X + pedestalHalf < barrierFront,
-			"Config: แท่นอัญเชิญต้องอยู่หน้ากำแพงกั้นบอส ฝั่งลาน (ไม่งั้นกลางคืนเข้าไปกด E ที่แท่นไม่ได้)"
+			pedestalCenter.X - pedestalHalf >= Config.getBossBarrierX() + barrierSize.X / 2,
+			"Config: แท่นอัญเชิญต้องอยู่หลังกำแพงกั้น (ในสนามรบ) ไม่ทับกำแพงกั้น"
+		)
+		assert(
+			pedestalCenter.X - pedestal.PromptDistance >= barrierFront,
+			"Config: จุดกด E ของแท่นอัญเชิญยื่นทะลุกำแพงกั้นออกมาฝั่งลาน (กดจากเซฟโซนได้)"
 		)
 
 		-- ══ 5B: โซน — เซฟโซนกับห้องด่านบอสต้องต่อกันพอดี (ไม่มีช่วงที่ไม่ใช่ทั้งสองอย่าง) ══
@@ -4425,7 +4440,10 @@ function Config.validate()
 		assert(Config.getSafeZoneEdgeX() == barrierFront, "Config: ขอบเซฟโซนต้องเป็นผิวหน้ากำแพงกั้น (ปากทางเข้าเลน)")
 		assert(roomMinX == Config.getSafeZoneEdgeX(), "Config: ห้องด่านบอสต้องเริ่มที่ขอบเซฟโซนพอดี")
 		assert(roomMaxX > roomMinX, "Config: ห้องด่านบอสยาว ≤ 0")
-		assert(Config.isInSafeZone(pedestalCenter), "Config: แท่นอัญเชิญต้องอยู่ในเซฟโซน")
+		assert(
+			not Config.isInSafeZone(pedestalCenter) and Config.isInBossArena(pedestalCenter),
+			"Config: แท่นอัญเชิญต้องอยู่ในสนามรบ (ห้องด่าน 1) ไม่ใช่เซฟโซน (5B-fix)"
+		)
 		for penIndex = 1, Config.World.MAX_PENS do
 			local penCenter = Config.getPenPlotCenter(penIndex)
 			assert(
@@ -4543,6 +4561,13 @@ function Config.validate()
 		end
 		-- บอสกลาง + ไข่ของมันต้องอยู่ใน "ห้องด่านบอส" ที่ server ใช้ตัดสิน (ถืออาวุธ · แบ่งเงิน)
 		assert(Config.isInBossArena(Config.getBossPosition()), "Config: บอสกลางไม่อยู่ในห้องด่านบอส")
+		-- 5B-fix: แท่นอัญเชิญอยู่ในห้องเดียวกับบอสแล้ว — ต้องพ้นระยะตีของบอส (ยืนกด E ที่แท่นแล้วไม่โดนบอสตี)
+		local bossPos = Config.getBossPosition()
+		local pedestalToBoss = math.sqrt((pedestalCenter.X - bossPos.X) ^ 2 + (pedestalCenter.Z - bossPos.Z) ^ 2)
+		assert(
+			pedestalToBoss > reach + pedestal.PromptDistance,
+			`Config: แท่นอัญเชิญอยู่ใกล้บอสเกิน (ห่าง {pedestalToBoss}) — ยืนกด E ที่แท่นแล้วอยู่ในระยะตีบอส`
+		)
 		for index = 1, cycle.EGGS_PER_NIGHT do
 			assert(Config.isInBossArena(Config.getBossCycleEggSpot(index)), `Config: ไข่บอสกลาง {index} ไม่อยู่ในห้องด่านบอส`)
 		end

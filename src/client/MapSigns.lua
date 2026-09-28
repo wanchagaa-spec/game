@@ -11,6 +11,7 @@
 -- ⚠️ client ไม่ตัดสินอะไร: ราคา/เพดานอ่านจาก sync · server ตรวจเงิน/เพดานซ้ำเองทุกครั้ง
 -- UI-3: แท่นอัญเชิญ (server สร้างใน MapBuilder · Config.SUMMON_PEDESTAL_NAME) — จุดกด E **ค้าง** ที่แกนเรืองแสง
 --   เปิดหน้าต่างอัญเชิญ (SummonWindow.lua) · เดินออกห่างเกิน SummonPedestal.CloseDistance แล้วปิดเอง
+--   5B-fix: แท่นอยู่ในเลน (สนามรบ) · ข้อความบนจุดกดสลับ "อัญเชิญ" ↔ "ปิดอัญเชิญ" ตาม summonEnabled จาก sync
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -73,6 +74,20 @@ local SELL_COUNTER_NAME = "Counter" -- ชิ้นเคาน์เตอร�
 local actions: Actions
 local signs: { Sign } = {}
 local lastPayload: any = nil
+-- จุดกด E ที่แท่นอัญเชิญ (ติดทีหลังเบื้องหลัง — nil จนกว่าแท่นจะโหลดถึง)
+local summonPrompt: ProximityPrompt? = nil
+
+-- 5B-fix (ผู้ใช้สั่ง): ข้อความบนจุดกด E ของแท่นตามสถานะอัญเชิญจาก sync — กำลังอัญเชิญ = "ปิดอัญเชิญ" (กดแล้วหยุด) ·
+-- ไม่ได้อัญเชิญ = "อัญเชิญ" (กดแล้วเปิดหน้าต่าง) · ตรงกับสิ่งที่ Triggered ทำจริง (UI-fix รอบ 1)
+function MapSigns.getSummonActionText(summonEnabled: boolean?): string
+	return if summonEnabled then "ปิดอัญเชิญ" else "อัญเชิญ"
+end
+
+local function refreshSummonPrompt()
+	if summonPrompt then
+		summonPrompt.ActionText = MapSigns.getSummonActionText(lastPayload and lastPayload.summonEnabled)
+	end
+end
 
 --------------------------------------------------------------------------------
 -- ข้อความบนป้าย — ฟังก์ชันล้วน ไม่แตะ Instance (เทสต์นอก Studio ได้ · tools/check-ui-smoke.py)
@@ -334,11 +349,12 @@ local function attachSummonPedestal()
 		-- ⚠️ ผ่าน UiKit.prompt เท่านั้น (บังคับ OnePerButton — tools/check-prompt-exclusivity.py) · กดค้าง ไม่ใช่กดครั้งเดียว
 		local prompt = UiKit.prompt({
 			Name = "SummonPrompt",
-			ActionText = "อัญเชิญ",
+			ActionText = MapSigns.getSummonActionText(lastPayload and lastPayload.summonEnabled),
 			ObjectText = "แท่นอัญเชิญ",
 			HoldDuration = spec.PromptHoldSeconds,
 			MaxActivationDistance = spec.PromptDistance,
 		})
+		summonPrompt = prompt
 		-- ⚠️ UI-fix รอบ 1: กำลังอัญเชิญอยู่แล้ว → กด E ค้างซ้ำ = หยุดทันที ไม่เปิดหน้าต่าง
 		-- (lastPayload.summonEnabled มาจาก sync ล่าสุด — client ไม่ตัดสินเอง แค่เลือกยิง remote ไหน)
 		prompt.Triggered:Connect(function()
@@ -399,6 +415,7 @@ end
 function MapSigns.setPayload(payload: any)
 	lastPayload = payload
 	render()
+	refreshSummonPrompt()
 end
 
 return MapSigns

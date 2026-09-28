@@ -218,34 +218,45 @@ EggService.debugWipeSavedData(player, player.Name)  -- ต้องส่งช�
 
 ---
 
-## คำสั่งบอส + วงจรกลางวัน/กลางคืน + ไข่บอส (Phase 5A · 5B) — อยู่ที่ `BossService`
+## คำสั่งบอส + วงจรกลางวัน/กลางคืน + ไข่บอส (Phase 5A · 5B · 5B-2) — อยู่ที่ `BossService`
 
 เรียกผ่าน**สะพานเดียวกัน** (`ServerStorage.EggServiceDebug`) — สะพานหาชื่อใน `EggService` ก่อน ไม่เจอค่อยหาใน `BossService`
-ทุกคำสั่งคืน**ข้อความสรุปสถานะ** (phase · เหลือกี่วิ · HP บอส · ผู้ทำดาเมจ · ล็อกกี่คน) ให้ดูใน Output ทันที
-⚠️ ไม่มีอะไรเซฟลง DataStore — สถานะบอสเป็นของเซิร์ฟ (memory) · คำสั่งพวกนี้วิ่งทางเดียวกับลูปจริง (วาป · กำแพงกั้น · แจ้งเตือน)
+ทุกคำสั่งคืน**ข้อความสรุปสถานะ** (phase · เหลือกี่วิ · บอสยังอยู่กี่ห้อง · ล็อกใครเพราะห้องไหน · บรรทัดละห้อง) ให้ดูใน Output ทันที
+⚠️ ไม่มีอะไรเซฟลง DataStore — สถานะบอสเป็นของเซิร์ฟ (memory) · คำสั่งพวกนี้วิ่งทางเดียวกับลูปจริง (วาป · กำแพงกั้น · แจ้งเตือน · แบ่งเงิน)
+⚠️ **5B-2: บอสมีทุกห้อง (1–9)** — คำสั่งที่เกี่ยวกับห้องรับ**เลขห้องต่อท้าย** · **ไม่ใส่ = ห้อง 1** (เหมือนเดิม) ·
+`debugDamageBoss`/`debugKillBoss` **ข้ามสิทธิ์เข้าห้อง + ระยะ** (ไว้ทดสอบห้องไกลโดยไม่ต้องพังกำแพงจริง) แต่ยังต้องกลางวัน + บอสห้องนั้นอยู่ ·
+การแบ่งเงินยังตามกติกาจริง (ต้องยืนอยู่ในห้องนั้นถึงได้เงิน)
 
 | คำสั่ง | ทำอะไร |
 |---|---|
-| `debugBossNight(firstEggKg?)` | ข้ามไป**ต้นกลางคืน**ทันที: วาป**คนที่อยู่ในสนามรบ**มาหน้าป้อม (ฝั่งลาน · 5B-fix — คนในคอก/ลานอยู่ที่เดิม) · กำแพงกั้นปิดปากเลน · บอสเกิด (ตัวเก่ายังไม่ตาย = ฟื้น HP เต็ม) · **ไข่ 6 ฟองชุดใหม่** (ชุดเก่า + ที่ใครถืออยู่หาย) · นับ 59 → 0 ใหม่ · 5B: ใส่ `firstEggKg` (≥ 100) = บังคับน้ำหนักไข่ฟองที่ 1 **ก่อน**ประกาศ — ทดสอบแจ้งเตือนไข่หนัก (> 100,000) โดยไม่ต้องรอดวง |
+| `debugBossNight(firstEggKg?, room?)` | ข้ามไป**ต้นกลางคืน**ทันที: วาป**คนที่อยู่ในสนามรบ**มาหน้าป้อม (ฝั่งลาน · 5B-fix — คนในคอก/ลานอยู่ที่เดิม) · กำแพงกั้นปิดปากเลน · **บอสทั้ง 9 ห้องเกิด** (ตัวเก่ายังไม่ตาย = ฟื้น HP เต็ม) · **ไข่ 6 ฟองชุดใหม่ทุกห้อง** (ชุดเก่า + ที่ใครถืออยู่หาย) · นับ 59 → 0 ใหม่ · ใส่ `firstEggKg` (≥ 100) = บังคับน้ำหนักไข่ฟองที่ 1 **ของห้อง `room`** (ไม่ใส่ห้อง = ห้อง 1) **ก่อน**ประกาศ — ทดสอบประกาศไข่หนัก (> 100,000) โดยไม่ต้องรอดวง |
 | `debugBossDay()` | ข้ามไป**ต้นกลางวัน**ทันที: กำแพงกั้นหาย เข้าไปตีบอสได้ (ไม่มีบอส = ใช้ `debugBossNight` ก่อน) |
-| `debugDamageBoss(player, amount)` | ทำดาเมจ `amount` ในนามผู้เล่นคนนั้น — นับเข้าบันทึกผู้ทำดาเมจเหมือนตีจริง · กติกาเดิม: กลางวัน + บอสยังอยู่ |
-| `debugKillBoss(player)` | ฆ่าบอสในนามผู้เล่นคนนั้น (ดาเมจเท่า HP ที่เหลือ) → "กำจัดบอสแล้ว!" · ปลดล็อกอัญเชิญทุกคน · 5B: ไข่หยิบได้ · **จ่ายเงินบอส**ตามกติกาจริง (ต้องยืนอยู่ในห้องด่าน 1 ถึงได้ — ยืนในลาน = ไม่ได้) |
-| `debugBossStatus()` | ดูสถานะอย่างเดียว ไม่เปลี่ยนอะไร (ท้ายบรรทัดมีสถานะไข่ 5B) |
-| `debugBossEggs()` | 5B: น้ำหนัก · วาง/ถือ/เก็บแล้ว · ใครถือ ของไข่ทุกฟอง + บอกว่าตอนนี้หยิบได้หรือยัง |
+| `debugDamageBoss(player, amount, room?)` | ทำดาเมจ `amount` ใส่บอส**ห้อง `room`** ในนามผู้เล่นคนนั้น — นับเข้าบันทึกผู้ทำดาเมจห้องนั้นเหมือนตีจริง · ต้องกลางวัน + บอสห้องนั้นยังอยู่ |
+| `debugKillBoss(player, room?)` | ฆ่าบอส**ห้อง `room`** ในนามผู้เล่นคนนั้น (ดาเมจเท่า HP ที่เหลือ) → "กำจัดบอสห้อง N แล้ว!" · ปลดล็อกอัญเชิญ**เฉพาะคนที่ติดเพราะห้องนั้น** · ไข่ห้องนั้นหยิบได้ · **จ่ายเงินบอสห้องนั้น**ตามกติกาจริง (`Config.getBossKillReward(ห้อง)` · ต้องยืนอยู่ในห้องนั้นถึงได้) |
+| `debugBossStatus()` | ดูสถานะอย่างเดียว ไม่เปลี่ยนอะไร — บรรทัดแรก phase/เวลา/ล็อก · ตามด้วยบรรทัดละห้อง (HP · ผู้ทำดาเมจ · ไข่) |
+| `debugBossEggs(room?)` | น้ำหนัก · วาง/ถือ/เก็บแล้ว · ใครถือ ของไข่ + บอกว่าหยิบได้หรือยัง · ใส่ห้อง = ห้องเดียว · **ไม่ใส่ = ทุกห้อง** |
 
 ```lua
+local P1 = game.Players:GetPlayers()[1]
 game.ServerStorage.EggServiceDebug:Invoke("debugBossNight")
-game.ServerStorage.EggServiceDebug:Invoke("debugBossNight", 152300)   -- ไข่ฟองที่ 1 หนัก 152,300 → ประกาศทั้งเซิร์ฟ
+game.ServerStorage.EggServiceDebug:Invoke("debugBossNight", 152300)      -- ห้อง 1 ไข่ฟองที่ 1 หนัก 152,300 → ประกาศทั้งเซิร์ฟ
+game.ServerStorage.EggServiceDebug:Invoke("debugBossNight", 152300, 7)   -- ห้อง 7 → "คืนนี้: ห้อง 7 ไข่ 152,300 กก."
 game.ServerStorage.EggServiceDebug:Invoke("debugBossDay")
-game.ServerStorage.EggServiceDebug:Invoke("debugDamageBoss", game.Players:GetPlayers()[1], 300)
-game.ServerStorage.EggServiceDebug:Invoke("debugKillBoss", game.Players:GetPlayers()[1])
+game.ServerStorage.EggServiceDebug:Invoke("debugDamageBoss", P1, 30)      -- ห้อง 1
+game.ServerStorage.EggServiceDebug:Invoke("debugDamageBoss", P1, 300, 3)  -- ห้อง 3
+game.ServerStorage.EggServiceDebug:Invoke("debugKillBoss", P1)            -- ห้อง 1
+game.ServerStorage.EggServiceDebug:Invoke("debugKillBoss", P1, 5)         -- ห้อง 5
 print(game.ServerStorage.EggServiceDebug:Invoke("debugBossStatus"))
-print(game.ServerStorage.EggServiceDebug:Invoke("debugBossEggs"))
+print(game.ServerStorage.EggServiceDebug:Invoke("debugBossEggs"))         -- ทุกห้อง
+print(game.ServerStorage.EggServiceDebug:Invoke("debugBossEggs", 3))      -- ห้อง 3
 ```
 
 - อยากเห็นข้อความคืนมา → ห่อด้วย `print(...)` (Output เห็นบรรทัด `[BossService] ...` อยู่แล้วทุกครั้งที่ phase เปลี่ยน/บอสตาย)
-- ทดสอบล็อกอัญเชิญเร็ว ๆ: `debugBossNight` → `debugBossDay` (บอสอยู่) → `debugSetStageProgress(player, 2, 0, 1)`
-  (ด่าน 2 เหลือ HP 1) → เปิดอัญเชิญ → ทหารพังกำแพงด่าน 2 → ติดล็อก · ขั้นตอนเต็มใน `docs/phase5-test-checklist.md`
+- เลขห้องแปลก (0 · 10 · "abc") → คืนข้อความบอกว่าผิด ไม่ทำอะไร
+- ทดสอบล็อกอัญเชิญเร็ว ๆ: `debugBossNight` → `debugBossDay` (บอสทุกห้องอยู่) → `debugSetStageProgress(player, 2, 0, 1)`
+  (ด่าน 2 เหลือ HP 1) → เปิดอัญเชิญ → ทหารพังกำแพงด่าน 2 → **ติดล็อกเพราะบอสห้อง 2** · `debugKillBoss(P1, 3)` ไม่ปลด ·
+  `debugKillBoss(P1, 2)` ปลด · ขั้นตอนเต็มใน `docs/phase5-test-checklist.md` §14
+- ⚠️ ยังไม่มีคำสั่งตั้ง `weaponLevel` (ร้านอาวุธเป็น 5C) — อาวุธขั้น 1 ตีบอสห้อง 4 ขึ้นไปตายไม่ทันในวันเดียว ใช้ `debugKillBoss` แทนตอนทดสอบ
 
 ---
 

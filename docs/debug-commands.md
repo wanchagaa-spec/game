@@ -144,6 +144,19 @@ EggService.debugSetCurrency(player, 1000000000)  -- พอสำหรับอ�
 - ค่าติดลบถูก clamp เป็น 0
 - print ค่าก่อน/หลังเสมอ
 
+### `EggService.debugSetWeaponTier(player, tier)` (5C)
+
+ตั้งขั้นกระบองตรง ๆ **ไม่หักเงิน** — ทดสอบดาเมจ/หน้าตากระบองแต่ละขั้น หรือทดสอบร้านจากขั้นกลาง ๆ
+
+```lua
+game.ServerStorage.EggServiceDebug:Invoke("debugSetWeaponTier", game.Players:GetPlayers()[1], 5)
+--> "debugSetWeaponTier: <ชื่อ> กระบอง 1 → 5 (กระบองเหล็ก · ดาเมจ 3000/ครั้ง) · ..."
+```
+
+- รับจำนวนเต็ม 1–10 เท่านั้น · ค่าอื่น (0 · 11 · 2.5 · "5") = ปฏิเสธ คืนข้อความ ไม่แตะข้อมูล
+- ตั้งลดลงได้ (ทดสอบซื้อซ้ำ) · sync ทันที (หน้าต่างร้านอัปเดต) · กระบองในมือประกอบใหม่เองภายใน 0.25 วิ (BossService เทียบขั้นทุก tick)
+- `debugResetAll` คืนกระบองเป็นขั้น 1 ด้วย
+
 ### `EggService.debugSimulateReceipt(player, productKey, purchaseId)`
 
 ⚠️ **UI-5** — จำลอง `MarketplaceService.ProcessReceipt` โดยไม่ต้องมี Robux จริง ไม่ต้อง publish จริง
@@ -345,7 +358,7 @@ EggService.debugWipeSavedData(player, player.Name)
 - `EggService.debugFillHatchery(player)` — วางไข่ในกระเป๋าลงสวนฟักจนเต็ม/หมด
 - `EggService.debugClearBag(player)` — ล้างแม่+ไข่ในกระเป๋า (ไม่แตะคอก/สวนฟัก)
 - `EggService.debugResetAll(player)` — ล้างทุกอย่าง (คอก/กระเป๋า/สวนฟัก/stageProgress/
-  wallProgress/ธงรางวัลผ่านด่าน) กลับสู่สภาพเริ่มต้นจริง — ใช้ล้างสภาพที่ตั้งเองผ่าน `debugSetWallProgress`
+  wallProgress/ธงรางวัลผ่านด่าน/**กระบองกลับขั้น 1** (5C)) กลับสู่สภาพเริ่มต้นจริง — ใช้ล้างสภาพที่ตั้งเองผ่าน `debugSetWallProgress`
   หรือตีด่านทดสอบค้างไว้ (⚠️ ไม่แตะ `currency` — ล้างแยกด้วย `debugSetCurrency` · และไม่แตะ
   `children`/`releaseOrder` เลย ยังไม่มีคำสั่ง debug สำหรับสองอย่างนี้)
 

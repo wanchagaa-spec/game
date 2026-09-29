@@ -321,36 +321,39 @@ BLUEPRINTS.monkey = {
 	}),
 }
 
--- ══ C · หมู ══ ตัวกลมสีชมพู จมูกแบน หูตก หางขด
+-- ══ C · หมู ══ บล็อกชมพูทรงกล่อง (ผู้ใช้สั่ง: เลิกทรงกลม — กลมแล้วดูอ้วนไป) · จมูกแบนสี่เหลี่ยม · ตาขาว-ดำ · หูพับไปหน้า · หางขด
 -- rig สี่ขา: ขาหน้า = แขน R6 · ขาหลัง = ขา R6 → ท่าเดิน R6 (แขนขวาไปพร้อมขาซ้าย) = ขาทแยงก้าวพร้อมกัน แบบสัตว์สี่ขาเดินเหยาะ
--- จุดหมุนขา = บนสุดของขา · คอ = รอยต่อหัว-ตัว (jointOverrides — สัดส่วน R6 ปกติใช้กับคนเท่านั้น)
+-- จุดหมุนขา = บนสุดของขา (= ใต้ท้อง) · คอ = รอยต่อหัว-ตัว (jointOverrides — สัดส่วน R6 ปกติใช้กับคนเท่านั้น)
 BLUEPRINTS.pig = {
 	motion = "animated",
 	rig = "R6",
 	animationSet = "basic",
 	walkAnimSpeed = 0.65, -- = 4 ÷ 14.5 × (2 ÷ ขายาว 0.8) ≈ 0.69
 	jointOverrides = {
-		Neck = { point = { 0, 2.45, -0.85 } },
-		["Right Shoulder"] = { point = { 0.7, 0.8, -0.75 } },
-		["Left Shoulder"] = { point = { -0.7, 0.8, -0.75 } },
-		["Right Hip"] = { point = { 0.7, 0.8, 0.85 } },
-		["Left Hip"] = { point = { -0.7, 0.8, 0.85 } },
+		Neck = { point = { 0, 2.2, -1.1 } },
+		["Right Shoulder"] = { point = { 0.65, 0.8, -0.7 } },
+		["Left Shoulder"] = { point = { -0.65, 0.8, -0.7 } },
+		["Right Hip"] = { point = { 0.65, 0.8, 1.3 } },
+		["Left Hip"] = { point = { -0.65, 0.8, 1.3 } },
 	},
 	parts = assemble({
-		rootPart(0, 1.95, 0.25),
-		ball("Torso", 3.0, 0, 1.95, 0.25, COLOR.pink),
-		ball("Head", 2.4, 0, 2.75, -1.35, COLOR.pink),
-		block("Right Arm", 0.6, 0.8, 0.6, 0.7, 0.4, -0.75, COLOR.pinkDark), -- ขาหน้า
-		block("Left Arm", 0.6, 0.8, 0.6, -0.7, 0.4, -0.75, COLOR.pinkDark),
-		block("Right Leg", 0.6, 0.8, 0.6, 0.7, 0.4, 0.85, COLOR.pinkDark), -- ขาหลัง
-		block("Left Leg", 0.6, 0.8, 0.6, -0.7, 0.4, 0.85, COLOR.pinkDark),
-		cyl("Snout", 0.4, 1.0, 0, 2.55, -2.55, COLOR.pinkLight, { rot = FACING, attach = "Head" }),
-		pair(block("Nostril", 0.15, 0.25, 0.06, 0.18, 2.55, -2.77, COLOR.pinkDark, { attach = "Head" })),
-		pair(ball("Eye", 0.32, 0.45, 3.0, -2.4, COLOR.eye, { attach = "Head" })),
-		pair(block("Ear", 0.7, 0.14, 0.6, 0.8, 3.62, -1.25, COLOR.pinkDark, { rot = { -15, 0, -35 }, attach = "Head" })),
-		ball("Tail1", 0.32, 0, 2.2, 1.78, COLOR.pinkDark, { attach = "Torso" }),
-		ball("Tail2", 0.26, 0.16, 2.42, 1.9, COLOR.pinkDark, { attach = "Torso" }),
-		ball("Tail3", 0.2, 0.02, 2.6, 1.86, COLOR.pinkDark, { attach = "Torso" }),
+		rootPart(0, 1.65, 0.3),
+		block("Torso", 2.2, 1.7, 3.0, 0, 1.65, 0.3, COLOR.pink),
+		block("Head", 2.0, 1.8, 1.7, 0, 2.5, -1.75, COLOR.pink),
+		block("Right Arm", 0.6, 0.8, 0.6, 0.65, 0.4, -0.7, COLOR.pinkDark), -- ขาหน้า
+		block("Left Arm", 0.6, 0.8, 0.6, -0.65, 0.4, -0.7, COLOR.pinkDark),
+		block("Right Leg", 0.6, 0.8, 0.6, 0.65, 0.4, 1.3, COLOR.pinkDark), -- ขาหลัง
+		block("Left Leg", 0.6, 0.8, 0.6, -0.65, 0.4, 1.3, COLOR.pinkDark),
+		block("Snout", 1.0, 0.6, 0.3, 0, 2.15, -2.75, COLOR.pinkLight, { attach = "Head" }),
+		pair(block("Nostril", 0.16, 0.26, 0.06, 0.22, 2.15, -2.92, COLOR.pinkDark, { attach = "Head" })),
+		-- ตา: ขาวด้านนอก ดำด้านใน (มองหน้าตรงแล้วตาเหล่เข้าหากันนิด ๆ แบบหมูบล็อก)
+		pair(block("EyeWhite", 0.34, 0.34, 0.06, 0.52, 2.8, -2.63, COLOR.white, { attach = "Head" })),
+		pair(block("Pupil", 0.17, 0.34, 0.07, 0.435, 2.8, -2.64, COLOR.eye, { attach = "Head" })),
+		pair(block("Ear", 0.6, 0.5, 0.14, 0.62, 3.55, -1.45, COLOR.pinkDark, { rot = { -25, 0, -15 }, attach = "Head" })),
+		-- หางขด 3 บล็อกเล็ก
+		block("Tail1", 0.24, 0.24, 0.4, 0, 2.25, 1.95, COLOR.pinkDark, { attach = "Torso" }),
+		block("Tail2", 0.24, 0.4, 0.24, 0.12, 2.45, 2.05, COLOR.pinkDark, { attach = "Torso" }),
+		block("Tail3", 0.24, 0.24, 0.24, 0, 2.62, 2.0, COLOR.pinkDark, { attach = "Torso" }),
 	}),
 }
 
@@ -402,7 +405,8 @@ BLUEPRINTS.horse = {
 	}),
 }
 
--- ══ C · ปลา ══ ลำตัวส้ม ลายขาว ครีบ/หางฟ้า · ลอยตัวขยับขึ้นลงแทนการเดิน (motion "float" + rig)
+-- ══ C · ปลา ══ ลำตัวส้มทรงกล่อง (ผู้ใช้สั่ง: เลิกทรงกลม — กลมแล้วดูอ้วนไป) ลายขาว 2 แถบ ครีบ/หางฟ้า ·
+-- ลอยตัวขยับขึ้นลงแทนการเดิน (motion "float" + rig) · ตาโปนข้างหัว · หางแฉกบน-ล่างต่อจากโคนหาง
 -- rig: ลำตัว = Torso · หัว/ครีบ/หาง = กระดูกใส (hidden) · ครีบติดแขน (พายหน้า-หลังตามท่าเดิน) · หางติดขาขวา
 -- ⚠️ ข้อเดียวในเกมที่เปลี่ยนทิศข้อต่อจาก R6: สะโพกขวาหมุนรอบแกนตั้ง (TAIL_WAG_ROTATION) → ท่าเดินแกว่งขา = **หางส่ายซ้าย-ขวา**
 --   (ทิศ R6 ปกติหางจะพับขึ้นลงแบบโลมา — ครีบหางตั้งของปลาทองต้องส่ายข้าง) · ขาซ้ายเป็นกระดูกเปล่า (ไม่มีอะไรเกาะ)
@@ -412,26 +416,32 @@ BLUEPRINTS.fish = {
 	animationSet = "basic",
 	walkAnimSpeed = 0.7, -- ปลาไม่มีเท้าไถล → เลือกจังหวะส่ายหางที่ดูมีชีวิต
 	jointOverrides = {
-		["Right Hip"] = { point = { 0, 1.3, 1.15 }, rotation = MotherModels.TAIL_WAG_ROTATION },
-		["Left Hip"] = { point = { 0, 1.3, 1.15 } },
+		["Right Hip"] = { point = { 0, 0.95, 1.3 }, rotation = MotherModels.TAIL_WAG_ROTATION },
+		["Left Hip"] = { point = { 0, 0.95, 1.3 } },
 	},
 	parts = assemble({
-		rootPart(0, 1.3, 0),
-		ball("Torso", 2.6, 0, 1.3, 0, COLOR.orange),
-		hidden("Head", 0.3, 0.3, 0.3, 0, 1.3, -0.9),
-		hidden("Right Arm", 0.3, 0.3, 0.3, 1.05, 1.05, 0.1), -- โคนครีบ
-		hidden("Left Arm", 0.3, 0.3, 0.3, -1.05, 1.05, 0.1),
-		hidden("Right Leg", 0.3, 0.3, 0.3, 0, 1.3, 1.15), -- โคนหาง
-		hidden("Left Leg", 0.3, 0.3, 0.3, 0, 1.3, 1.15),
-		cyl("Stripe1", 0.35, 2.64, 0, 1.3, 0.25, COLOR.white, { rot = FACING, attach = "Torso" }),
-		cyl("Stripe2", 0.3, 1.86, 0, 1.3, 0.95, COLOR.white, { rot = FACING, attach = "Torso" }),
-		wedge("TailTop", 0.22, 1.0, 1.1, 0, 1.8, 1.75, COLOR.finBlue, { attach = "Right Leg" }),
-		wedge("TailBottom", 0.22, 1.0, 1.1, 0, 0.8, 1.75, COLOR.finBlue, { rot = { 0, 0, 180 }, attach = "Right Leg" }),
-		wedge("Dorsal", 0.2, 0.9, 1.3, 0, 2.8, 0.3, COLOR.finBlue, { attach = "Torso" }),
-		pair(block("Fin", 0.8, 0.14, 0.55, 1.35, 1.05, 0.1, COLOR.finBlue, { rot = { 0, -25, -30 }, attach = "Right Arm" })),
-		pair(ball("EyeWhite", 0.8, 0.55, 1.7, -1.05, COLOR.white, { attach = "Torso" })),
-		pair(ball("Pupil", 0.42, 0.58, 1.7, -1.38, COLOR.eye, { attach = "Torso" })),
-		block("Mouth", 0.5, 0.14, 0.1, 0, 0.95, -1.24, COLOR.eye, { attach = "Torso" }),
+		rootPart(0, 0.95, 0),
+		block("Torso", 1.2, 1.8, 2.6, 0, 0.95, 0, COLOR.orange),
+		hidden("Head", 0.3, 0.3, 0.3, 0, 0.95, -0.9),
+		hidden("Right Arm", 0.3, 0.3, 0.3, 0.75, 0.7, -0.25), -- โคนครีบ
+		hidden("Left Arm", 0.3, 0.3, 0.3, -0.75, 0.7, -0.25),
+		hidden("Right Leg", 0.3, 0.3, 0.3, 0, 0.95, 1.45), -- โคนหาง
+		hidden("Left Leg", 0.3, 0.3, 0.3, 0, 0.95, 1.45),
+		-- หัว: จมูกบล็อกเล็กกว่าตัวยื่นหน้า (ทรงเรียวลง) + ปาก
+		block("Nose", 1.0, 1.4, 0.35, 0, 0.9, -1.475, COLOR.orange, { attach = "Torso" }),
+		block("Mouth", 0.5, 0.12, 0.06, 0, 0.62, -1.68, COLOR.eye, { attach = "Torso" }),
+		-- ลายขาวคาดรอบตัว (ใหญ่กว่าตัวนิดเดียว ไม่ให้ผิวซ้อนกัน)
+		block("Stripe1", 1.26, 1.9, 0.32, 0, 0.95, -0.45, COLOR.white, { attach = "Torso" }),
+		block("Stripe2", 1.26, 1.9, 0.28, 0, 0.95, 0.65, COLOR.white, { attach = "Torso" }),
+		-- ตาโปนออกข้างหัว · ตาดำอยู่มุมหน้า-นอก (โผล่ทั้งด้านหน้าและด้านข้าง — มองมุมไหนก็เห็นตา)
+		pair(block("EyeWhite", 0.3, 0.62, 0.62, 0.7, 1.22, -0.85, COLOR.white, { attach = "Torso" })),
+		pair(block("Pupil", 0.1, 0.34, 0.24, 0.81, 1.2, -1.07, COLOR.eye, { attach = "Torso" })),
+		wedge("Dorsal", 0.18, 0.7, 1.4, 0, 2.2, 0.25, COLOR.finBlue, { attach = "Torso" }),
+		pair(block("Fin", 0.7, 0.12, 0.5, 0.9, 0.7, -0.25, COLOR.finBlue, { rot = { 0, -25, -30 }, attach = "Right Arm" })),
+		-- หาง: โคนหางส้ม + แฉกบน/ล่าง (ติดขาขวาทั้งชุด → ส่ายไปด้วยกัน)
+		block("TailStalk", 0.5, 0.7, 0.4, 0, 0.95, 1.5, COLOR.orange, { attach = "Right Leg" }),
+		wedge("TailTop", 0.16, 0.8, 1.0, 0, 1.35, 2.1, COLOR.finBlue, { attach = "Right Leg" }),
+		wedge("TailBottom", 0.16, 0.8, 1.0, 0, 0.55, 2.1, COLOR.finBlue, { rot = { 0, 0, 180 }, attach = "Right Leg" }),
 	}),
 }
 

@@ -94,6 +94,25 @@ return function(t, Config)
 	end
 
 	----------------------------------------------------------------------------
+	print("── หมู + ปลาทรงกล่อง (ผู้ใช้สั่ง: เลิกทรงกลม — กลมแล้วดูอ้วน) ──")
+	----------------------------------------------------------------------------
+	do
+		for _, charId in { "pig", "fish" } do
+			local balls = {}
+			for _, part in MotherModels.getBlueprint(charId).parts do
+				if part.shape == "Ball" or part.shape == "Cylinder" then
+					table.insert(balls, part.name)
+				end
+			end
+			check(`{charId}: ไม่มีชิ้นทรงกลม/ทรงกระบอก`, table.concat(balls, ","), "")
+		end
+		local _, _, pigSize = MotherModels.getBounds("pig")
+		local _, _, fishSize = MotherModels.getBounds("fish")
+		check(`หมูยาวกว่ากว้าง (ตัวยาวแบบหมู · {string.format("%.2f × %.2f", pigSize[1], pigSize[3])})`, pigSize[3] > pigSize[1] * 1.5, true)
+		check(`ปลาตัวยาวกว่าสูง 1.5 เท่า (ไม่อ้วนกลม · {string.format("%.2f × %.2f", fishSize[3], fishSize[2])})`, fishSize[3] > fishSize[2] * 1.5, true)
+	end
+
+	----------------------------------------------------------------------------
 	print("── ขนาดตามคลาส: C 1.0 → SS 1.5 · ราชาปีศาจวัวตัวใหญ่สุด ──")
 	----------------------------------------------------------------------------
 	do
@@ -297,7 +316,13 @@ return function(t, Config)
 		check("  สะโพกขวาแกว่งรอบแกนตั้ง (หางส่ายข้าง ไม่ใช่พับขึ้นลง)", `{r[3]},{r[6]},{r[9]}`, "0,1,0")
 		check("  = TAIL_WAG_ROTATION · เป็นการหมุนจริง", table.concat(r, ",") == table.concat(MotherModels.TAIL_WAG_ROTATION, ",")
 			and MotherModels.isRotation(r), true)
-		check("  จุดหมุนหาง = โคนหางหลังลำตัว", vecEq({ hip.c0[1], hip.c0[2], hip.c0[3] }, { 0, 0, 1.15 }), true)
+		local torso
+		for _, part in fish.parts do
+			if part.name == "Torso" then
+				torso = part
+			end
+		end
+		check("  จุดหมุนหาง = กลางผิวหลังลำตัว", vecEq(hip.c0, { 0, 0, torso.size[3] / 2 }), true)
 	end
 
 	----------------------------------------------------------------------------

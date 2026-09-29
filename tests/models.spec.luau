@@ -87,7 +87,7 @@ return function(t, Config)
 		end
 		print(`   จำนวนชิ้น: {table.concat(counts, " · ")}`)
 		check("ปลาลอย (float) แทนการเดิน", MotherModels.getBlueprint("fish").motion, "float")
-		check("  ตัวอื่นกระเด้งตอนเดิน (hop)", MotherModels.getBlueprint("pig").motion, "hop")
+		check("  หมูเล่นอนิเมชันจริง (animated · ไม่กระเด้งเอง)", MotherModels.getBlueprint("pig").motion, "animated")
 		-- ตัวละครที่ถือของ: ของอยู่มือขวา (+X) · หน้าหัน −Z (ส่วนหน้าสุดต้องอยู่ฝั่ง −Z)
 		local lo, hi = MotherModels.getBounds("horse")
 		check("ม้าหันหน้า −Z (จมูกยื่นไปทาง −Z มากกว่าหางไป +Z)", -lo[3] > hi[3], true)
@@ -134,17 +134,17 @@ return function(t, Config)
 	end
 
 	----------------------------------------------------------------------------
-	print("── rig R6 (ลิง): ข้อต่อตรง rig R6 มาตรฐานของ Roblox · อนิเมชันตั้งต้นของ Roblox ──")
+	print("── rig R6: ข้อต่อตรง rig R6 มาตรฐานของ Roblox · อนิเมชันตั้งต้นของ Roblox ──")
 	----------------------------------------------------------------------------
+	local function vecEq(a, b)
+		return math.abs(a[1] - b[1]) < 1e-9 and math.abs(a[2] - b[2]) < 1e-9 and math.abs(a[3] - b[3]) < 1e-9
+	end
 	do
-		local function vecEq(a, b)
-			return math.abs(a[1] - b[1]) < 1e-9 and math.abs(a[2] - b[2]) < 1e-9 and math.abs(a[3] - b[3]) < 1e-9
-		end
 		-- rig R6 ขนาดจริงของ Roblox (ยืนตรง · กลางลำตัว Y = 3) → ต้องได้ C0/C1 เท่ากับ rig R6 ตั้งต้นทุกข้อ
 		local function rigPart(name, sx, sy, sz, x, y)
 			return { name = name, shape = "Block", size = { sx, sy, sz }, pos = { x, y, 0 }, color = { 0, 0, 0 } }
 		end
-		local standard = MotherModels.computeR6Joints({
+		local standardParts = {
 			rigPart("HumanoidRootPart", 2, 2, 1, 0, 3),
 			rigPart("Torso", 2, 2, 1, 0, 3),
 			rigPart("Head", 2, 1, 1, 0, 4.5),
@@ -152,7 +152,8 @@ return function(t, Config)
 			rigPart("Left Arm", 1, 2, 1, -1.5, 3),
 			rigPart("Right Leg", 1, 2, 1, 0.5, 1),
 			rigPart("Left Leg", 1, 2, 1, -0.5, 1),
-		})
+		}
+		local standard = MotherModels.computeR6Joints(standardParts)
 		-- ค่าจาก rig R6 ตั้งต้นของ Roblox (C0 / C1 ตำแหน่ง)
 		local expected = {
 			RootJoint = { { 0, 0, 0 }, { 0, 0, 0 } },
@@ -175,36 +176,144 @@ return function(t, Config)
 			local want = expected[joint.name]
 			check(`  {joint.name}: C0/C1 ตรง rig R6 ของ Roblox`, want ~= nil and vecEq(joint.c0, want[1]) and vecEq(joint.c1, want[2]), true)
 			check(`  {joint.name}: ทิศข้อต่อตรง R6`, table.concat(joint.rotation, ","), table.concat(rotations[joint.name], ","))
+			check(`  {joint.name}: ทิศ R6 เป็นการหมุนจริง`, MotherModels.isRotation(joint.rotation), true)
 		end
 		check("ขาดชิ้น rig → nil", MotherModels.computeR6Joints({ rigPart("Torso", 2, 2, 1, 0, 3) }), nil)
-
-		local monkey = MotherModels.getBlueprint("monkey")
-		check("ลิงเป็น rig R6", monkey.rig, "R6")
-		check("  motion = animated (ไม่กระเด้งเอง)", monkey.motion, "animated")
-		local byName = {}
-		for _, part in monkey.parts do
-			byName[part.name] = part
+		-- jointOverrides: แทนเฉพาะข้อที่ระบุ · ท่ายืนยังตรง
+		local moved = MotherModels.computeR6Joints(standardParts, { ["Right Hip"] = { point = { 0.5, 2, 0.3 } } })
+		local byJoint = {}
+		for _, joint in moved or {} do
+			byJoint[joint.name] = joint
 		end
-		local joints = MotherModels.computeR6Joints(monkey.parts)
-		check("  ข้อต่อครบ 6", joints and #joints, 6)
-		local consistent = true
-		for _, joint in joints or {} do
-			-- ท่ายืน: กลาง part1 = กลาง part0 + c0 − c1 (ชิ้นวางตรงข้อต่อพอดี ไม่มีอะไรกระโดดตอนต่อข้อ)
-			local p0, p1 = byName[joint.part0].pos, byName[joint.part1].pos
-			local want = { p0[1] + joint.c0[1] - joint.c1[1], p0[2] + joint.c0[2] - joint.c1[2], p0[3] + joint.c0[3] - joint.c1[3] }
-			if not vecEq(want, p1) then
-				consistent = false
+		check("override จุดหมุนสะโพกขวา → C0 = จุดใหม่ − กลางลำตัว", vecEq(byJoint["Right Hip"].c0, { 0.5, -1, 0.3 }), true)
+		check("  C1 = จุดใหม่ − กลางขา", vecEq(byJoint["Right Hip"].c1, { 0, 1, 0.3 }), true)
+		check("  ข้ออื่นไม่เปลี่ยน", vecEq(byJoint["Left Hip"].c0, { -1, -1, 0 }), true)
+		check("  ทิศเดิม (ไม่ได้ override)", table.concat(byJoint["Right Hip"].rotation, ","), "0,0,1,0,1,0,-1,0,0")
+		check("isRotation: กระจกเงา (det −1) = ไม่ใช่", MotherModels.isRotation({ -1, 0, 0, 0, 1, 0, 0, 0, 1 }), false)
+		check("isRotation: ไม่ครบ 9 ค่า = ไม่ใช่", MotherModels.isRotation({ 1, 0, 0 }), false)
+	end
+
+	----------------------------------------------------------------------------
+	print("── ทุกตัวเป็น rig R6 (ผู้ใช้สั่ง \"ใส่อนิเมชันให้ทุกตัว\") · ท่ายืนตรงข้อต่อ · ชุดท่าถูกตัว ──")
+	----------------------------------------------------------------------------
+	local BIPEDS = { "monkey", "bajie", "wujing", "tang", "wukong", "guanyin", "jade_emperor", "yulai" }
+	local QUADRUPEDS = { "pig", "horse", "dragon_horse" }
+	do
+		local rigCount = 0
+		for _, charId in Config.CharacterOrder do
+			local blueprint = MotherModels.getBlueprint(charId)
+			if blueprint and blueprint.rig == "R6" then
+				rigCount += 1
+			end
+			local byName = {}
+			for _, part in blueprint.parts do
+				byName[part.name] = part
+			end
+			local joints = MotherModels.getJoints(charId)
+			check(`{charId}: rig R6 ข้อต่อครบ 6`, joints and #joints, 6)
+			local consistent = true
+			for _, joint in joints or {} do
+				-- ท่ายืน: กลาง part1 = กลาง part0 + c0 − c1 (ชิ้นวางตรงข้อต่อพอดี ไม่มีอะไรกระโดดตอนต่อข้อ)
+				local p0, p1 = byName[joint.part0].pos, byName[joint.part1].pos
+				local want = { p0[1] + joint.c0[1] - joint.c1[1], p0[2] + joint.c0[2] - joint.c1[2], p0[3] + joint.c0[3] - joint.c1[3] }
+				if not vecEq(want, p1) or not MotherModels.isRotation(joint.rotation) then
+					consistent = false
+				end
+			end
+			check(`  ท่ายืนตรงกับข้อต่อทุกข้อ · ทิศเป็นการหมุนจริง`, consistent, true)
+			local root = byName.HumanoidRootPart
+			check(`  HumanoidRootPart = PrimaryPart ใส (ไม่เห็น) อยู่กลางลำตัว`,
+				root.primary == true and root.transparency == 1 and vecEq(root.pos, byName.Torso.pos), true)
+			check(`  ความเร็วท่าเดิน 0.3–0.8 (แม่เดินช้ากว่าคน Roblox มาก)`,
+				blueprint.walkAnimSpeed ~= nil and blueprint.walkAnimSpeed >= 0.3 and blueprint.walkAnimSpeed <= 0.8, true)
+		end
+		check("rig R6 ครบ 12 ตัว", rigCount, 12)
+
+		for _, charId in BIPEDS do
+			local animations = MotherModels.getAnimations(charId)
+			check(`{charId} (คน): เดิน/ยืน/เหวี่ยงแขน`, animations and animations.walk == 180426354 and animations.idle == 180435571
+				and animations.punch == 129967390, true)
+			check(`  motion = animated`, MotherModels.getBlueprint(charId).motion, "animated")
+		end
+		for _, charId in { "pig", "horse", "dragon_horse", "fish" } do
+			local animations = MotherModels.getAnimations(charId)
+			check(`{charId} (สัตว์): เดิน/ยืน ไม่มีเหวี่ยงแขน (ขาหน้า/ครีบยกทะลุหัว)`,
+				animations and animations.walk == 180426354 and animations.idle == 180435571 and animations.punch == nil, true)
+		end
+		check("ไม่มีตัวไหนใส่ท่านั่ง (R6 ต้องมีที่นั่ง ไม่งั้นขาลอย)", MotherModels.R6_ANIMATIONS.sit == nil and MotherModels.R6_BASIC_ANIMATIONS.sit == nil, true)
+		check("charId ไม่มีแบบ → ไม่มีอนิเมชัน", MotherModels.getAnimations("ghost_char"), nil)
+		check("  ไม่มีข้อต่อ", MotherModels.getJoints("ghost_char"), nil)
+
+		local _, _, monkeySize = MotherModels.getBounds("monkey")
+		check(`ลิงสูง {string.format("%.2f", monkeySize[2])} ≈ 5 (เท่าลิง mesh เดิม · MOTHER_MESH_BASE_HEIGHT)`, monkeySize[2] > 4.5 and monkeySize[2] < 5.5, true)
+	end
+
+	----------------------------------------------------------------------------
+	print("── สัตว์สี่ขา: ขาหน้า = แขน · ขาหลัง = ขา · หมุนจากบนสุดของขา · ขาทแยงก้าวพร้อมกัน ──")
+	----------------------------------------------------------------------------
+	do
+		for _, charId in QUADRUPEDS do
+			local byName = {}
+			for _, part in MotherModels.getBlueprint(charId).parts do
+				byName[part.name] = part
+			end
+			check(`{charId}: ขาหน้า (แขน) อยู่หน้า −Z · ขาหลัง (ขา) อยู่หลัง +Z`,
+				byName["Right Arm"].pos[3] < 0 and byName["Left Arm"].pos[3] < 0 and byName["Right Leg"].pos[3] > 0 and byName["Left Leg"].pos[3] > 0, true)
+			for _, joint in MotherModels.getJoints(charId) do
+				if joint.name ~= "RootJoint" and joint.name ~= "Neck" then
+					local limb = byName[joint.part1]
+					local pivotY = limb.pos[2] + joint.c1[2]
+					check(`  {joint.name}: หมุนจากบนสุดของขา (Y {string.format("%.2f", pivotY)})`,
+						math.abs(pivotY - (limb.pos[2] + limb.size[2] / 2)) < 1e-6 and math.abs(joint.c1[1]) < 1e-6 and math.abs(joint.c1[3]) < 1e-6, true)
+					-- ทิศยังเป็น R6 เดิม → แกว่งหน้า-หลังรอบแกน X · ท่าเดิน R6 = แขนขวาไปพร้อมขาซ้าย = ขาทแยง (เดินเหยาะ)
+					check(`  {joint.name}: ทิศ R6 เดิม (แกว่งหน้า-หลัง)`, math.abs(joint.rotation[3]) + math.abs(joint.rotation[7]), 2)
+				end
 			end
 		end
-		check("  ท่ายืนตรงกับข้อต่อทุกข้อ", consistent, true)
-		check("  HumanoidRootPart = PrimaryPart ใส (ไม่เห็น)", byName.HumanoidRootPart.primary == true and byName.HumanoidRootPart.transparency == 1, true)
-		local _, _, size = MotherModels.getBounds("monkey")
-		check(`  สูง {string.format("%.2f", size[2])} ≈ 5 (เท่าลิง mesh เดิม · MOTHER_MESH_BASE_HEIGHT)`, size[2] > 4.5 and size[2] < 5.5, true)
-		local animations = MotherModels.getAnimations("monkey")
-		check("อนิเมชันของ Roblox: เดิน 180426354", animations and animations.walk, 180426354)
-		check("  ยืน 180435571", animations and animations.idle, 180435571)
-		check("  เหวี่ยงแขน (punch) 129967390", animations and animations.punch, 129967390)
-		check("  ไม่ใส่ท่านั่ง (R6 ต้องมีที่นั่ง ไม่งั้นขาลอย)", animations and animations.sit, nil)
-		check("ตัวที่ไม่มี rig → ไม่มีอนิเมชัน", MotherModels.getAnimations("pig"), nil)
+	end
+
+	----------------------------------------------------------------------------
+	print("── ปลา: ลอย + rig · ครีบพายตามแขน · หางส่ายซ้าย-ขวาตามขาขวา ──")
+	----------------------------------------------------------------------------
+	do
+		local fish = MotherModels.getBlueprint("fish")
+		check("ปลา motion = float + rig R6 (ลอยขึ้นลง + อนิเมชันซ้อน)", fish.motion == "float" and fish.rig == "R6", true)
+		local attached = {}
+		for _, part in fish.parts do
+			if part.attach then
+				attached[part.name] = part.attach
+			end
+		end
+		check("  ครีบติดแขน (ขวา/ซ้าย)", attached.FinR == "Right Arm" and attached.FinL == "Left Arm", true)
+		check("  หางบน/ล่างติดขาขวาทั้งคู่ (ไม่แยกกรรไกร)", attached.TailTop == "Right Leg" and attached.TailBottom == "Right Leg", true)
+		local hip
+		for _, joint in MotherModels.getJoints("fish") do
+			if joint.name == "Right Hip" then
+				hip = joint
+			end
+		end
+		local r = hip.rotation
+		-- แกน Z ของข้อต่อ (คอลัมน์ที่ 3: R02, R12, R22) = แกนที่อนิเมชันแกว่ง → ต้องเป็นแกนตั้งของโลก
+		check("  สะโพกขวาแกว่งรอบแกนตั้ง (หางส่ายข้าง ไม่ใช่พับขึ้นลง)", `{r[3]},{r[6]},{r[9]}`, "0,1,0")
+		check("  = TAIL_WAG_ROTATION · เป็นการหมุนจริง", table.concat(r, ",") == table.concat(MotherModels.TAIL_WAG_ROTATION, ",")
+			and MotherModels.isRotation(r), true)
+		check("  จุดหมุนหาง = โคนหางหลังลำตัว", vecEq({ hip.c0[1], hip.c0[2], hip.c0[3] }, { 0, 0, 1.15 }), true)
+	end
+
+	----------------------------------------------------------------------------
+	print("── ชุดยาว (พระถัง · องค์หญิงพัดเหล็ก · เง็กเซียน): ขาใสในกระโปรง · รองเท้าติดขา · กระโปรงติดลำตัว ──")
+	----------------------------------------------------------------------------
+	do
+		for _, charId in { "tang", "guanyin", "jade_emperor" } do
+			local byName = {}
+			for _, part in MotherModels.getBlueprint(charId).parts do
+				byName[part.name] = part
+			end
+			check(`{charId}: ขาใส (มองไม่เห็น)`, byName["Right Leg"].transparency == 1 and byName["Left Leg"].transparency == 1, true)
+			check(`  รองเท้าติดขาของตัวเอง`, byName.ShoeR.attach == "Right Leg" and byName.ShoeL.attach == "Left Leg", true)
+			local skirt = byName.Skirt or byName.Robe
+			check(`  กระโปรงติดลำตัว (ไม่แกว่งตามขา)`, skirt.attach, "Torso")
+			check(`  ≤ 40 ชิ้นหลังเพิ่มชิ้น rig`, MotherModels.getPartCount(charId) <= 40, true)
+		end
 	end
 end

@@ -50,7 +50,8 @@ type Roamer = {
 	from: Vector3, -- ⚠️ Y = baseY เสมอ (ระดับยืนบนพื้น) — ท่าขยับขึ้นลงบวกทีหลังตอนวาด ไม่สะสมเข้าตำแหน่ง
 	to: Vector3,
 	baseY: number, -- Y ของ pivot ตอนยืนบนพื้นพอดี
-	-- ท่าขยับของโมเดลที่ประกอบจาก Part (ไม่มีอนิเมชัน): "hop" กระเด้งตอนเดิน · "float" ลอยขึ้นลงตลอด (ปลา) · nil = ไม่ขยับ
+	-- ท่าขยับของโมเดลที่ประกอบจาก Part: "float" ลอยขึ้นลงตลอด (ปลา · rig เล่นอนิเมชันซ้อนไปด้วย) ·
+	-- "hop" กระเด้งตอนเดิน (แบบที่ไม่มี rig — ตอนนี้ไม่มีตัวไหนใช้) · "animated"/nil = ไม่ขยับเอง
 	motion: MotherModels.Motion?,
 	hover: number, -- float: ลอยเหนือพื้นเท่านี้ (studs)
 	bob: number, -- ระยะขยับ (studs) — hop: กระเด้งสูงสุด · float: ขึ้นลง ±
@@ -76,7 +77,7 @@ type Roamer = {
 local POSE_FADE_SECONDS = 0.25
 
 -- ลำดับวนท่าตอนหยุดพัก — ตัวละครไหนไม่มีท่าไหนก็ข้ามไป
--- (กอริลลาเดิม = ยืน→นั่ง · ลิง = ยืน→ต่อย · มีครบ = ยืน→นั่ง→ต่อย)
+-- (กอริลลาเดิม = ยืน→นั่ง · rig คน = ยืน→เหวี่ยงแขน · rig สัตว์สี่ขา/ปลา = ยืนอย่างเดียว · มีครบ = ยืน→นั่ง→ต่อย)
 local REST_POSE_ORDER = { "idle", "sit", "punch" }
 
 local function getRestPoses(tracks: { [string]: AnimationTrack }?): { string }
@@ -885,12 +886,16 @@ end
 --------------------------------------------------------------------------------
 -- วางกลางทางเดินกลาง (Config.getSpawnPoint) เรียงตามลำดับดัชนี · ขนาด tier 1 (100 kg) × คลาส = ขนาดเดียวกับในคอก
 -- หันหน้า −Z · ป้ายชื่อ/คลาส/จำนวนชิ้นตั้งอยู่หน้าเท้า (อ่านจากฝั่ง −Z) · ภาพล้วน ไม่แตะข้อมูลผู้เล่น
--- เรียกซ้ำ = ลบแถวเดิมแล้ววางใหม่ (เช่น หลังโมเดลลิงโหลดเสร็จ) · ลิงยังโหลดไม่เสร็จ = กล่องสีสำรอง (ป้ายบอก)
+-- เรียกซ้ำ = ลบแถวเดิมแล้ววางใหม่ · ตัวที่ไม่มีโมเดล/mesh ยังโหลดไม่เสร็จ = กล่องสีสำรอง (ป้ายบอก)
+-- rig ทุกตัววนท่า เดิน → ยืน → เหวี่ยงแขน (เท่าที่มี) ยืนอยู่กับที่ — ไว้ดูอนิเมชันทีละตัว
 
 local SHOWCASE_NAME = "ModelShowcase" -- Folder ใน Workspace
 local SHOWCASE_SPACING = 11 -- studs ระหว่างกลางตัว (ราชาปีศาจวัว tier 1 กว้าง ≈ 7.9)
 local SHOWCASE_WEIGHT = 100 -- kg = tier 1
 local SHOWCASE_SIGN_SIZE = Vector3.new(9, 1.6, 0.3)
+-- rig: วนท่าที่ตัวนั้นมี เดิน → ยืน → เหวี่ยงแขน ท่าละกี่วินาที (ดูอนิเมชันครบทุกท่าโดยไม่ต้องรอแม่เดินในคอก)
+local SHOWCASE_POSE_ORDER = { "walk", "idle", "punch" }
+local SHOWCASE_POSE_SECONDS = 3
 
 function PenService.debugClearShowcase(): (boolean, string?)
 	local existing = Workspace:FindFirstChild(SHOWCASE_NAME)
@@ -1008,18 +1013,51 @@ function PenService.debugShowcaseModels(): (boolean, string?)
 	end
 
 	folder.Parent = Workspace
-	-- rig: เล่นท่ายืนของ Roblox วนไปเรื่อย ๆ (LoadAnimation ต้องหลังเข้า Workspace) · ท่าไม่วนในตัว = เล่นใหม่ตอนจบ
+	-- rig: วนท่าเดิน → ยืน → เหวี่ยงแขน (เท่าที่ตัวนั้นมี · LoadAnimation ต้องหลังเข้า Workspace) · ท่าไม่วนในตัว = เล่นใหม่ตอนจบ
+	-- ท่าเดินใช้ความเร็วเดียวกับในคอกที่ tier 1 (walkAnimSpeed) · ลบ showcase = model หลุดจาก Workspace → ลูปจบเอง
 	for _, entry in animated do
 		local tracks = loadPoseTracks(entry.model, MotherModels.getAnimations(entry.charId) :: any)
-		local idle = tracks and tracks.idle
-		if idle then
-			idle.Stopped:Connect(function()
-				if entry.model.Parent ~= nil and idle.Length > 0 then
-					idle:Play(0)
+		if not tracks then
+			continue
+		end
+		local blueprint = MotherModels.getBlueprint(entry.charId)
+		local walkSpeed = if blueprint and blueprint.walkAnimSpeed then blueprint.walkAnimSpeed else 1
+		local function speedOf(track: AnimationTrack): number
+			return if track == tracks.walk then walkSpeed else 1
+		end
+		local model: Model = entry.model
+		local function alive(): boolean
+			return model.Parent ~= nil
+		end
+		local current: AnimationTrack? = nil
+		for _, track in tracks do
+			track.Stopped:Connect(function()
+				if track == current and alive() and track.Length > 0 then
+					track:Play(0, 1, speedOf(track))
 				end
 			end)
-			idle:Play()
 		end
+		task.spawn(function()
+			while alive() do
+				local played = false
+				for _, pose in SHOWCASE_POSE_ORDER do
+					local track = tracks[pose]
+					if track and alive() then
+						local previous = current
+						current = track -- ตั้งก่อนหยุดท่าเก่า (ตัวเล่นซ้ำจะไม่ดึงท่าเก่ากลับ)
+						if previous then
+							previous:Stop(POSE_FADE_SECONDS)
+						end
+						track:Play(POSE_FADE_SECONDS, 1, speedOf(track))
+						played = true
+						task.wait(SHOWCASE_POSE_SECONDS)
+					end
+				end
+				if not played then
+					break
+				end
+			end
+		end)
 	end
 	local text = table.concat(summary, " · ")
 	print(`[PenService] debugShowcaseModels: วาง {#summary} ตัวที่ทางเดินกลาง (ยืนฝั่ง −Z หันหน้าเข้าหา) — {text}`)

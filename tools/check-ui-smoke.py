@@ -1580,7 +1580,7 @@ do
 	IndexWindow.close()
 end
 
-print("\n━━ โมเดลตัวละครประกอบจาก Part (12 ตัว · ลิง = rig R6): ประกอบได้ · ชิ้นไม่ชน · การ์ดจัดกรอบไม่ล้น · เงาดำทำงาน ━━")
+print("\n━━ โมเดลตัวละครประกอบจาก Part (12 ตัว · ทุกตัว rig R6): ประกอบได้ · ชิ้นไม่ชน · การ์ดจัดกรอบไม่ล้น · เงาดำทำงาน ━━")
 do
 	local MotherModels = loaded.MotherModels
 	local IndexWindow = loaded.IndexWindow
@@ -1590,7 +1590,7 @@ do
 	if oldMonkey then
 		oldMonkey:Destroy()
 	end
-	local built = 0
+	local built, rigs = 0, 0
 	local allParts, badParts, primaries = 0, 0, 0
 	for _, charId in Config.CharacterOrder do
 		if MotherModels.hasBlueprint(charId) then
@@ -1609,6 +1609,7 @@ do
 					end
 				end
 				if isRig then
+					rigs += 1
 					-- ข้อต่อ R6 6 ตัว (ชื่อ + ชิ้นตรง rig R6) · ชิ้นตกแต่งทุกชิ้นมี Weld
 					local motors, welds, wrong = {}, 0, 0
 					for _, part in model:GetChildren() do
@@ -1645,6 +1646,7 @@ do
 		end
 	end
 	check("ประกอบได้ครบ 12 ตัว (ลิงด้วย)", built, 12)
+	check("  เป็น rig R6 ครบ 12 ตัว (Motor6D + Weld · เล่นอนิเมชันของ Roblox)", rigs, 12)
 	check("  ทุกชิ้น CanCollide/CanTouch/CanQuery ปิด · Massless · Anchored ตามแบบ (rig = แค่ราก)", badParts, 0)
 	check("  ทุกตัวมี PrimaryPart อยู่ในโมเดล", primaries, 12)
 	check("  charId ไม่มีแบบ → คืน nil (ใช้กล่องสีสำรอง)", MotherModels.build("ghost_char") == nil, true)

@@ -689,7 +689,8 @@ function PenService.clearVisuals(pen: Pen)
 	dropRoamersUnder(pen.mothersFolder)
 	pen.mothersFolder:ClearAllChildren()
 	pen.eggsFolder:ClearAllChildren()
-	-- ⚠️ 5B-2 รอบแก้ป้าย (ผู้ใช้เลือก): ป้ายลอย "คอก N · ชื่อเจ้าของ/ว่าง" เหนือป้ายไม้ลบแล้ว — ไม่มีข้อความให้อัปเดต
+	-- ชื่อเจ้าของเขียนอยู่บนป้ายไม้คอก (ไม่ใช่ป้ายลอย) — คืนคอกแล้วกลับเป็น "ว่าง"
+	MapBuilder.setPenOwnerName(pen.index, nil)
 end
 
 --------------------------------------------------------------------------------
@@ -708,6 +709,7 @@ function PenService.assign(player: Player): Pen?
 			-- ⚠️ UI-2: client ต้องรู้ว่าคอกไหนเป็นของตัวเอง — ติดจุดกด E เฉพาะป้ายค่าวิ่ง/อัปคอกของคอกนี้
 			-- (แค่ซ่อนปุ่มให้ไม่งง · remote ซื้อไม่ได้อ่านค่านี้ ซื้อได้เหมือนเดิมทุกประการ)
 			player:SetAttribute(Config.PEN_INDEX_ATTRIBUTE, pen.index)
+			MapBuilder.setPenOwnerName(pen.index, player.DisplayName)
 			return pen
 		end
 	end

@@ -132,6 +132,8 @@ export type PenPlot = {
 	model: Model,
 	base: Part,
 	center: Vector3,
+	-- บรรทัดชื่อเจ้าของบนป้ายไม้ (หน้า + หลัง) — PenService เขียนผ่าน MapBuilder.setPenOwnerName
+	ownerLabels: { TextLabel },
 }
 
 -- ⚠️ 5B: ไม่มี eggSpots แล้ว — แผ่นวางไข่ 5 จุดวงกลมของดีไซน์ "บอสด่านละตัว" ลบแล้ว
@@ -239,7 +241,41 @@ end
 -- ป้ายชื่อคอก — **ปักข้างประตู ไม่ใช่กลางประตู** (กันเดินชน)
 -- ปักบนหญ้าด้านนอกคอก ใกล้ประตู · ยกสูงให้อ่านได้จากมุมกล้องผู้เล่นทั่วไป
 -- ⚠️ ตำแหน่งมาจาก Config.getPenNameSignSpot — ป้ายอัปเกรดข้างประตู (UI-2) เว้นระยะจากจุดนี้
-local function buildPenSign(plot: Model, index: number)
+-- ตัวหนังสือบนป้ายไม้คอก — **เขียนลงผิวป้าย (SurfaceGui) ไม่ใช่ป้ายลอย**
+-- ขนาดผูกกับแผ่นไม้ (PixelsPerStud) จึงเล็กลงตามระยะเหมือนของจริง · สีน้ำตาลเข้มเหมือนตัวอักษรสลักบนไม้
+local PEN_SIGN_PIXELS_PER_STUD = 50
+local PEN_SIGN_TEXT_COLOR = Color3.fromRGB(62, 38, 18)
+
+-- ใส่ตัวหนังสือลงหน้าเดียวของป้าย · คืนบรรทัดชื่อเจ้าของ (บรรทัดล่าง) ให้ PenService อัปเดต
+local function writePenSignFace(board: Part, face: Enum.NormalId, index: number): TextLabel
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = `Text{face.Name}`
+	gui.Face = face
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = PEN_SIGN_PIXELS_PER_STUD
+	gui.LightInfluence = 1
+	gui.Parent = board
+
+	local function line(name: string, text: string, y: number, height: number): TextLabel
+		local label = Instance.new("TextLabel")
+		label.Name = name
+		label.AnchorPoint = Vector2.new(0.5, 0)
+		label.Position = UDim2.fromScale(0.5, y)
+		label.Size = UDim2.fromScale(0.92, height)
+		label.BackgroundTransparency = 1
+		label.TextColor3 = PEN_SIGN_TEXT_COLOR
+		label.TextScaled = true
+		label.Font = Enum.Font.SourceSansBold
+		label.Text = text
+		label.Parent = gui
+		return label
+	end
+
+	line("PenNumber", `คอก {index}`, 0.06, 0.36)
+	return line("Owner", "ว่าง", 0.44, 0.5)
+end
+
+local function buildPenSign(plot: Model, index: number): { TextLabel }
 	local spot = Config.getPenNameSignSpot(index)
 	local signX, signZ = spot.X, spot.Z
 
@@ -262,8 +298,12 @@ local function buildPenSign(plot: Model, index: number)
 	board.Material = Enum.Material.WoodPlanks
 	board.CanCollide = false
 	board.CastShadow = false
-	-- ⚠️ 5B-2 รอบแก้ป้าย (ผู้ใช้เลือก): เอาตัวหนังสือลอย "คอก N" เหนือป้ายออกแล้ว — เหลือตัวป้ายไม้เปล่า ๆ
-	--   (คอกของตัวเองดูได้จากป้ายค่าวิ่ง/อัปคอกข้างประตู ที่แต่ละคนเห็นเฉพาะคอกตัวเอง — MapSigns)
+	-- ⚠️ 5B-2 รอบแก้ป้าย (ผู้ใช้เลือก): ตัวหนังสือลอย "คอก N" เหนือป้ายลบแล้ว → **เขียนลงบนป้ายไม้แทน**
+	--   "คอก N" + ชื่อเจ้าของ (ว่าง = "ว่าง") · ทั้งสองหน้า อ่านได้จากทางเดินและจากในคอก
+	return {
+		writePenSignFace(board, Enum.NormalId.Front, index),
+		writePenSignFace(board, Enum.NormalId.Back, index),
+	}
 end
 
 function MapBuilder.buildPlaza(parent: Folder)
@@ -329,9 +369,9 @@ function MapBuilder.buildPlaza(parent: Folder)
 		model.PrimaryPart = base
 
 		buildFence(model, index, center, sizeX, sizeZ)
-		buildPenSign(model, index)
+		local ownerLabels = buildPenSign(model, index)
 
-		penPlots[index] = { index = index, model = model, base = base, center = center }
+		penPlots[index] = { index = index, model = model, base = base, center = center, ownerLabels = ownerLabels }
 	end
 end
 
@@ -1084,6 +1124,17 @@ end
 
 function MapBuilder.getPenPlot(index: number): PenPlot?
 	return penPlots[index]
+end
+
+-- เขียนชื่อเจ้าของลงป้ายไม้คอก (nil = ว่าง) · PenService เรียกตอนจอง/คืนคอก
+function MapBuilder.setPenOwnerName(index: number, ownerName: string?)
+	local plot = penPlots[index]
+	if not plot then
+		return
+	end
+	for _, label in plot.ownerLabels do
+		label.Text = ownerName or "ว่าง"
+	end
 end
 
 function MapBuilder.getBossRoom(stage: number): BossRoom?

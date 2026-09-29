@@ -78,12 +78,88 @@ return function(t, Config)
 		return total < 2e12
 	end)(), true)
 
-	print("── อาวุธ vs บอส: ต้องตี 10 ครั้งทุกด่าน ──")
-	for stage = 1, 9 do
-		check(`ด่าน {stage}`, Config.getBossHp(stage) / Config.getWeaponDamage(stage), 10)
-	end
-	check("อาวุธขั้น 1 = 10", Config.getWeaponDamage(1), 10)
+	-- ⚠️ 5C: สูตรอาวุธเดิม "×10 ต่อขั้น ตี 10 ครั้งพอดี" ยกเลิกแล้ว (ผู้ใช้กำหนดใหม่: ขั้น N ตีห้อง N คนเดียว ~3 นาที)
+	print("── 5C กระบอง: ดาเมจคำนวณจาก HP บอส × คูลดาวน์ ÷ เวลาเป้า (ปัดขึ้นเลขนัยสำคัญ 1 ตัว) ──")
+	local W = Config.Balance.Weapon
+	local COOLDOWN = Config.Balance.BossCycle.PLAYER_ATTACK_COOLDOWN
 	check("บอสด่าน 1 = 100 HP", Config.getBossHp(1), 100)
+	check("กระบองมี 10 ขั้น (9 ห้อง + ขั้นพิเศษ)", W.MAX_LEVEL, 10)
+	local expectedDamage = { 1, 3, 30, 300, 3000, 30000, 300000, 3000000, 30000000, 90000000 }
+	for tier = 1, W.MAX_LEVEL do
+		check(`ขั้น {tier} ดาเมจ {expectedDamage[tier]}/ครั้ง ตามตาราง`, Config.getClubDamage(tier), expectedDamage[tier])
+		check(`  getWeaponDamage (ชื่อเดิมที่ BossService ใช้) = getClubDamage`, Config.getWeaponDamage(tier), Config.getClubDamage(tier))
+	end
+	local rises = true
+	for tier = 2, W.MAX_LEVEL do
+		if Config.getClubDamage(tier) <= Config.getClubDamage(tier - 1) then rises = false end
+	end
+	check("ดาเมจทุกขั้นมากกว่าขั้นก่อนหน้า", rises, true)
+	check("ดาเมจไม่ได้เดา: ขั้น 5 = HP ห้อง 5 × คูลดาวน์ ÷ 180 ปัดขึ้น",
+	      Config.getClubDamage(5), Config.roundSignificant(Config.getBossHp(5) * COOLDOWN / W.TARGET_SOLO_KILL_SECONDS, 1, true))
+
+	print("── 5C: ขั้น N ตีบอสห้อง N คนเดียวตายภายในกลางวัน (กันติดล็อกอัญเชิญ) ──")
+	local day = Config.Balance.BossCycle.DAY_SECONDS
+	for room = 1, Config.Balance.Stage.COUNT do
+		local seconds = Config.getClubSoloKillSeconds(room, room)
+		check(`ห้อง {room}: ขั้น {room} คนเดียว {seconds} วิ ≤ กลางวัน {day} วิ`, seconds <= day, true)
+		check(`  และไม่เกินเป้า 3 นาที`, seconds <= W.TARGET_SOLO_KILL_SECONDS, true)
+		if room >= 2 then
+			check(`  ห้อง 2–9 "ราว 3 นาที" (≥ 2.5 นาที)`, seconds >= 150, true)
+		end
+	end
+	check("ห้อง 1: ขั้น 1 เร็วกว่าได้ (100 ครั้ง = 50 วิ)", Config.getClubSoloKillSeconds(1, 1), 50)
+	check("ห้อง 2–9: 334 ครั้ง = 167 วิ", Config.getClubSoloKillSeconds(4, 4), 167)
+	local tier9 = Config.getClubSoloKillSeconds(9, 9)
+	local tier10 = Config.getClubSoloKillSeconds(10, 9)
+	check(`ขั้น 10 ตีห้อง 9 เร็วกว่าขั้น 9 ชัดเจน ({tier10} วิ vs {tier9} วิ)`, tier10 * 2 <= tier9, true)
+	check("ขั้น 10 ตีห้อง 9 = 112 ครั้ง = 56 วิ", tier10, 56)
+	check("ขั้น N ตีห้อง N+1 ไม่ทันกลางวัน (ต้องซื้อขั้นถัดไป)", Config.getClubSoloKillSeconds(3, 4) > day, true)
+
+	print("── 5C: ราคา = รายได้ 5 นาทีของผู้เล่นอ้างอิงด่าน N · ขั้น 10 = รายได้ 3 ชม. ของด่าน 9 ──")
+	local expectedPrice = { 0, 17000, 170000, 1800000, 18000000, 180000000, 1800000000, 18000000000, 180000000000, 6500000000000 }
+	for tier = 1, W.MAX_LEVEL do
+		check(`ขั้น {tier} ราคา {expectedPrice[tier]}`, Config.getClubPrice(tier), expectedPrice[tier])
+	end
+	check("ขั้น 1 ฟรี", Config.getClubPrice(1), 0)
+	near("ขั้น 4 ≈ รายได้ 5 นาทีของด่าน 4 (ปัดเลขนัยสำคัญ 2 ตัว)",
+	     Config.getClubPrice(4) / (Config.getReferenceIncomePerHour(4) * 5 / 60), 1, 0.05)
+	near("ขั้น 10 ≈ รายได้ 180 นาทีของด่าน 9",
+	     Config.getClubPrice(10) / (Config.getReferenceIncomePerHour(9) * 180 / 60), 1, 0.05)
+	check("ขั้น 10 แพงกว่าขั้น 9 มาก (≥ 30 เท่า)", Config.getClubPrice(10) >= Config.getClubPrice(9) * 30, true)
+	check("getWeaponUpgradeCost(ขั้น N) = ราคาขั้น N+1 (ชื่อเดิม)", Config.getWeaponUpgradeCost(4), Config.getClubPrice(5))
+	check("เต็มเพดานแล้วไม่มีราคาอัปต่อ", Config.getWeaponUpgradeCost(10), nil)
+	near("getReferenceStageIncome ยังเท่าเดิม (แยก perHour ออกมาแล้วผลไม่เปลี่ยน · ด่าน 1 = 1 ชม.)",
+	     Config.getReferenceStageIncome(1), Config.getReferenceIncomePerHour(1), 1e-6)
+
+	print("── 5C: ค่าเก่านอกช่วง clamp ไม่ crash ──")
+	check("0 → 1", Config.clampClubTier(0), 1)
+	check("-5 → 1", Config.clampClubTier(-5), 1)
+	check("15 → 10", Config.clampClubTier(15), 10)
+	check("3.7 → 3", Config.clampClubTier(3.7), 3)
+	check("nil → ขั้นเริ่มต้น", Config.clampClubTier(nil), W.START_TIER)
+	check("string → ขั้นเริ่มต้น", Config.clampClubTier("9"), W.START_TIER)
+	check("NaN → ขั้นเริ่มต้น", Config.clampClubTier(0 / 0), W.START_TIER)
+	check("ดาเมจของค่าเกินเพดาน = ขั้น 10", Config.getClubDamage(99), Config.getClubDamage(10))
+	check("ดาเมจของค่าแปลก = ขั้น 1", Config.getClubDamage(-3), Config.getClubDamage(1))
+
+	print("── 5C: ซื้อได้ทีละขั้นเท่านั้น (planClubPurchase ไม่รับเลขขั้น) ──")
+	local okBuy, reason, nextTier, price = Config.planClubPurchase(1, 17000)
+	check("ขั้น 1 + เงินพอดี → ซื้อขั้น 2 ได้", okBuy and nextTier == 2 and price == 17000 and reason == nil, true)
+	okBuy, reason, nextTier = Config.planClubPurchase(1, 1e15)
+	check("เงินล้นมือก็ได้แค่ขั้นถัดไป (ข้ามขั้นไม่ได้)", okBuy and nextTier == 2, true)
+	okBuy, reason = Config.planClubPurchase(1, 16999)
+	check("เงินขาด 1 → ไม่ได้ · เงินไม่พอ", not okBuy and reason == "เงินไม่พอ", true)
+	okBuy, reason = Config.planClubPurchase(10, 1e18)
+	check("ขั้น 10 แล้ว → ซื้อต่อไม่ได้", not okBuy and reason == "มีกระบองขั้นสูงสุดแล้ว", true)
+	okBuy, reason = Config.planClubPurchase(42, 1e18)
+	check("ค่าเซฟเกินเพดาน (clamp เป็น 10) → ซื้อต่อไม่ได้ ไม่ crash", not okBuy and reason == "มีกระบองขั้นสูงสุดแล้ว", true)
+	okBuy, _, nextTier = Config.planClubPurchase(-7, 1e6)
+	check("ค่าเซฟติดลบ (clamp เป็น 1) → ขั้นถัดไป = 2", okBuy and nextTier == 2, true)
+	okBuy = Config.planClubPurchase(1, 0 / 0)
+	check("เงินเป็น NaN → ไม่ได้", okBuy, false)
+	check("ข้อความสำเร็จ", Config.formatClubBoughtMessage(3), "ได้กระบองขั้น 3")
+	check("ClubVisuals ครบ 10 ขั้น", #Config.ClubVisuals, 10)
+	check("ขั้น 1 = กระบองไม้", Config.getClubVisual(1).name, "กระบองไม้")
 
 	print("── อัตราผลิต ──")
 	check("ยังไม่อัป = ×1", Config.getProductionMultiplier(0), 1)
@@ -398,7 +474,10 @@ return function(t, Config)
 		local need = Config.getStageDamageUpgradeTotal(st)
 			+ (Config.getPenUpgradeCost(st) or 0)
 			+ (Config.getProductionUpgradeCost(st - 1) or 0)
-			+ (Config.getWeaponUpgradeCost(st) or 0)
+			-- ⚠️ 5C: กระบองที่ต้องซื้อระหว่างด่าน st = **ขั้น st** (ตีบอสห้อง st · ราคาอิงรายได้ด่าน st)
+			-- เดิมอ่าน getWeaponUpgradeCost(st) = ราคาอัป st → st+1 (ล่วงหน้า 1 ขั้น) ซึ่งตอนราคาเป็น ×10 คงที่ไม่ต่างนัก
+			-- แต่ราคาใหม่อิงรายได้รายด่าน → อ่านแบบเดิม = คิดราคาขั้นของด่านถัดไป (แพงกว่า 10 เท่า) ลงบัญชีด่านนี้ (ส่วนเกิน 0.78)
+			+ Config.getClubPrice(st)
 		local surplus = Config.getReferenceStageIncome(st) / need
 		if surplus < worstSurplus then worstSurplus = surplus end
 		if surplus > bestSurplus then bestSurplus = surplus end

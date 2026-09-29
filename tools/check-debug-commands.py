@@ -599,6 +599,79 @@ do
 \t\t\tand ids["receipt-rush-1"] and ids["receipt-rush-2"], true)
 end
 
+print("\\n━━ 5C ร้านกระบอง: ซื้อผ่าน remote จริง · ทีละขั้น · เงินไม่พอ · เพดาน 10 · กดรัวไม่ซื้อเกิน ━━")
+do
+\tlocal player, data = freshPlayer("Club1")
+\tlocal buyHandler = capturedHandlers[Config.RemoteNames.BUY_CLUB_TIER_REQUEST]
+\tcheck("remote BuyClubTierRequest ถูกผูก handler", buyHandler ~= nil, true)
+\tcheck("ผู้เล่นใหม่ได้กระบองขั้น 1", data.weaponLevel, 1)
+
+\t-- เงินไม่พอ → ไม่ได้ ไม่หักเงิน
+\tdata.currency.coins = Config.getClubPrice(2) - 1
+\tbuyHandler(player)
+\tcheck("เงินขาด 1 → ยังขั้น 1", data.weaponLevel, 1)
+\tcheck("  ไม่หักเงิน", data.currency.coins, Config.getClubPrice(2) - 1)
+
+\t-- เงินพอดี → ได้ขั้น 2 เงินเหลือ 0 · client ส่งเลขขั้นมาก็ไม่มีผล (ข้ามขั้นไม่ได้)
+\tdata.currency.coins = Config.getClubPrice(2)
+\tbuyHandler(player, 9)
+\tcheck("เงินพอดี → ขั้น 2 (ส่งเลข 9 มาก็ได้แค่ขั้นถัดไป)", data.weaponLevel, 2)
+\tcheck("  เงินเหลือ 0 พอดี", data.currency.coins, 0)
+
+\t-- กดรัว 50 ครั้งด้วยเงินพอซื้อแค่ขั้น 3 + 4 → ได้แค่ 2 ขั้น · เงินไม่ติดลบ
+\tlocal budget = Config.getClubPrice(3) + Config.getClubPrice(4) + 5
+\tdata.currency.coins = budget
+\tfor _ = 1, 50 do
+\t\tbuyHandler(player)
+\tend
+\tcheck("กดรัว 50 ครั้ง → ได้แค่ขั้นที่เงินพอ (ขั้น 4)", data.weaponLevel, 4)
+\tcheck("  เงินเหลือ 5 ไม่ติดลบ", data.currency.coins, 5)
+
+\t-- เงินล้นมือ กดรัว → ไปถึงขั้น 10 แล้วหยุด (ไม่เกินเพดาน)
+\tdata.currency.coins = 1e16
+\tfor _ = 1, 30 do
+\t\tbuyHandler(player)
+\tend
+\tcheck("เงินล้นมือ กดรัว → หยุดที่ขั้น 10", data.weaponLevel, Config.Balance.Weapon.MAX_LEVEL)
+\tlocal spent = 0
+\tfor tier = 5, Config.Balance.Weapon.MAX_LEVEL do
+\t\tspent += Config.getClubPrice(tier)
+\tend
+\tcheck("  หักเงินเท่าราคาขั้น 5–10 พอดี (ไม่หักซ้ำหลังเต็ม)", data.currency.coins, 1e16 - spent)
+\tlocal ok, reason = EggService.buyClubTier(player)
+\tcheck("ขั้น 10 แล้วซื้อต่อ → ปฏิเสธ", ok, false)
+\tcheck("  เหตุผล", reason, "มีกระบองขั้นสูงสุดแล้ว")
+\tcheck("ข้อความสำเร็จ", Config.formatClubBoughtMessage(4), "ได้กระบองขั้น 4")
+
+\t-- ค่าเซฟนอกช่วง → clamp ไม่ crash
+\tdata.weaponLevel = 0
+\tdata.currency.coins = Config.getClubPrice(2)
+\tlocal okLow = EggService.buyClubTier(player)
+\tcheck("weaponLevel เก่า = 0 (clamp เป็น 1) → ซื้อได้ขั้น 2", okLow and data.weaponLevel == 2, true)
+\tdata.weaponLevel = 57
+\tlocal okHigh, reasonHigh = EggService.buyClubTier(player)
+\tcheck("weaponLevel เก่า = 57 (clamp เป็น 10) → ซื้อต่อไม่ได้ ไม่ crash", okHigh == false and reasonHigh == "มีกระบองขั้นสูงสุดแล้ว", true)
+end
+
+print("\\n━━ 5C debugSetWeaponTier + debugResetAll กลับขั้น 1 ━━")
+do
+\tlocal player, data = freshPlayer("Club2")
+\tlocal message = EggService.debugSetWeaponTier(player, 7)
+\tcheck("ตั้งขั้น 7", data.weaponLevel, 7)
+\tcheck("  คืนข้อความบอกดาเมจ", string.find(message, tostring(Config.getClubDamage(7)), 1, true) ~= nil, true)
+\tlocal coinsBefore = data.currency.coins
+\tEggService.debugSetWeaponTier(player, 3)
+\tcheck("ตั้งลดลงได้ (ขั้น 3)", data.weaponLevel, 3)
+\tcheck("  ไม่หักเงิน", data.currency.coins, coinsBefore)
+\tfor _, bad in { 0, 11, 2.5, "5", -1 } do
+\t\tEggService.debugSetWeaponTier(player, bad)
+\tend
+\tcheck("ค่าแปลก (0 · 11 · 2.5 · \\"5\\" · -1) → ปฏิเสธ ไม่แตะข้อมูล", data.weaponLevel, 3)
+\tEggService.debugSetWeaponTier(player, 9)
+\tEggService.debugResetAll(player)
+\tcheck("debugResetAll → กระบองกลับขั้น 1", data.weaponLevel, Config.Balance.Weapon.START_TIER)
+end
+
 print(string.format("\\n=== ผ่าน %d / ตก %d ===", passCount, failCount))
 if failCount > 0 then
 \terror(`มีเทสต์ตก {failCount} เคส`, 0)

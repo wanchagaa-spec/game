@@ -19,6 +19,9 @@
 -- ══ 5B-2: server จับเวลากดค้างเอง ══ prompt เป็นของ client → server ไม่เห็นการกดค้าง
 --   จึงยิง BossEggHoldRequest(i, true) ตอนเริ่มกด (PromptButtonHoldBegan) · (i, false) ตอนปล่อย (PromptButtonHoldEnded)
 --   server จดเวลาของตัวเองแล้วเทียบตอนหยิบ — ยิงหยิบตรง ๆ โดยไม่กดค้างครบ = ถูกปฏิเสธ
+-- ══ 5C: เลขดาเมจเด้งเหนือบอสตอนโดน ══ เทียบ Attribute BossHp{ห้อง} (server ตั้งทุกครั้งที่ตีโดน) กับค่าก่อนหน้า
+--   ลดลง = มีคนตีโดน → onBossHit(ห้อง, ดาเมจ) (Main วาดเลขลอยด้วย CombatEffects) · เพิ่มขึ้น (บอสเกิด/ฟื้นกลางคืน) = ไม่เด้ง
+--   ภาพล้วน ไม่ตัดสินอะไร · ตีโดนหลายครั้งในรอบ replicate เดียวกัน = รวมเป็นเลขเดียว (ยอมรับ · แบบเดียวกับ CombatEffects)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -55,6 +58,21 @@ local countLabel: TextLabel? = nil
 type EggPrompt = { part: BasePart, room: number, prompt: ProximityPrompt }
 local eggPrompts: { [BasePart]: EggPrompt } = {}
 local carrying = false
+-- 5C: HP ล่าสุดที่เห็นของบอสแต่ละห้อง (เทียบหาดาเมจที่เพิ่งโดน)
+local lastBossHp: { [number]: number } = {}
+
+-- 5C: HP บอสห้องนี้เปลี่ยน → คืนดาเมจที่เพิ่งโดน (ลดลงจากค่าก่อนหน้า) · ค่าแรก/เพิ่มขึ้น/ค่าแปลก = nil (ไม่เด้งเลข)
+function BossHud.onBossHpChanged(room: number, hp: any): number?
+	if type(hp) ~= "number" or hp ~= hp then
+		return nil
+	end
+	local before = lastBossHp[room]
+	lastBossHp[room] = hp
+	if before ~= nil and hp < before then
+		return before - hp
+	end
+	return nil
+end
 
 -- สร้างตัวเลขติดผิวหน้ากำแพงกั้น — เรียกครั้งเดียว (เทสต์เรียกตรงด้วยกำแพงปลอม)
 function BossHud.attach(playerGui: Instance, barrier: BasePart)
@@ -167,10 +185,12 @@ end
 
 -- ต่อสายของจริง (Main.client.lua) — รอของจาก server เบื้องหลัง ไม่บล็อกสคริปต์หลัก
 -- onPickEgg(index) = ยิง PickUpBossEggRequest (5B) · onHoldEgg(index, holding) = ยิง BossEggHoldRequest (5B-2)
+-- 5C: onBossHit(ห้อง, ดาเมจ) = เด้งเลขดาเมจเหนือบอสห้องนั้น (optional — ไม่ส่ง = ไม่เด้ง)
 function BossHud.start(
 	playerGui: Instance,
 	onPickEgg: (index: number) -> (),
-	onHoldEgg: (index: number, holding: boolean) -> ()
+	onHoldEgg: (index: number, holding: boolean) -> (),
+	onBossHit: ((room: number, damage: number) -> ())?
 )
 	task.spawn(function()
 		local folder = ReplicatedStorage:WaitForChild(Config.BOSS_STATE_FOLDER)
@@ -209,10 +229,23 @@ function BossHud.start(
 			})
 		end
 		readState()
+		-- 5C: จำ HP ตั้งต้นของทุกห้อง (ค่าแรกไม่เด้งเลข)
+		for room = 1, Config.Balance.Stage.COUNT do
+			BossHud.onBossHpChanged(room, folder:GetAttribute(Config.getBossStateAttribute("BossHp", room)))
+		end
 		-- อ่านใหม่เฉพาะค่าที่ใช้จริง (phase · เวลา · บอสห้องไหนตาย) — HP เปลี่ยนทุกครั้งที่มีคนตี ไม่ต้องไล่ 54 ฟองใหม่
 		folder.AttributeChanged:Connect(function(name: string)
 			if name == "Phase" or name == "PhaseEndsAt" or string.sub(name, 1, #"BossAlive") == "BossAlive" then
 				readState()
+				return
+			end
+			-- 5C: HP ห้องไหนลด → เด้งเลขดาเมจเหนือบอสห้องนั้น ("BossHp3" · ไม่ใช่ "BossMaxHp3")
+			local room = tonumber(string.match(name, "^BossHp(%d+)$"))
+			if room then
+				local damage = BossHud.onBossHpChanged(room, folder:GetAttribute(name))
+				if damage and onBossHit then
+					onBossHit(room, damage)
+				end
 			end
 		end)
 

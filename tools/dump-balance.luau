@@ -122,6 +122,14 @@ end
 for lvl = 0, Config.Balance.Production.UPGRADE_MAX_LEVEL do
 	row("PRODUP", lvl, Config.getProductionMultiplier(lvl), Config.getProductionUpgradeCost(lvl) or 0)
 end
+-- 5C: กระบอง — ขั้น · ดาเมจ/ครั้ง · ราคา · นาทีรายได้ของด่านเป้าหมาย · วิ ตีห้องเป้าหมายคนเดียว · วิ ตีห้องถัดไปคนเดียว
+for tier = 1, Config.Balance.Weapon.MAX_LEVEL do
+	local room = Config.getClubTargetRoom(tier)
+	local nextRoom = if tier < Config.Balance.Stage.COUNT then tier + 1 else nil
+	row("CLUB", tier, Config.getClubVisual(tier).name, Config.getClubDamage(tier), Config.getClubPrice(tier),
+		Config.getClubPrice(tier) / Config.getReferenceIncomePerHour(room) * 60,
+		Config.getClubSoloKillSeconds(tier, room), if nextRoom then Config.getClubSoloKillSeconds(tier, nextRoom) else 0)
+end
 
 -- ── ตารางหลักต่อด่าน (ผู้เล่นชั้นกลาง) ──
 for stage = 1, 9 do
@@ -185,7 +193,7 @@ for stage = 2, 9 do
 	local total = (penIncome + bossPerHour) * hrs + killTotal
 	local need = (Config.getPenUpgradeCost(stage) or 0)
 		+ (Config.getProductionUpgradeCost(stage - 1) or 0)
-		+ (Config.getWeaponUpgradeCost(stage) or 0)
+		+ Config.getClubPrice(stage) -- 5C: กระบองขั้น N ซื้อระหว่างด่าน N
 	local upg = Config.getStageDamageUpgradeTotal(stage)
 	row("INCOME", stage, hrs, penIncome, killTotal / hrs, bossPerHour,
 		Config.getReferenceStageIncome(stage), need + upg, upg,
@@ -325,7 +333,7 @@ end
 for stage = 1, 9 do
 	local income = Config.getReferenceStageIncome(stage)
 	local dmg = Config.getStageDamageUpgradeTotal(stage)
-	local weapon = Config.getWeaponUpgradeCost(stage) or 0
+	local weapon = Config.getClubPrice(stage) -- 5C: กระบองขั้น N
 	local pen = Config.getPenUpgradeCost(stage) or 0
 	local prod = Config.getProductionUpgradeCost(stage - 1) or 0
 	local speed = if stage <= Config.Balance.SpeedUpgrade.MAX_LEVEL
@@ -344,7 +352,7 @@ do
 	for stage = 1, 9 do
 		local income = Config.getReferenceStageIncome(stage)
 		local spend = Config.getStageDamageUpgradeTotal(stage)
-			+ (Config.getWeaponUpgradeCost(stage) or 0)
+			+ Config.getClubPrice(stage) -- 5C: กระบองขั้น N ซื้อระหว่างด่าน N
 			+ (Config.getPenUpgradeCost(stage) or 0)
 			+ (Config.getProductionUpgradeCost(stage - 1) or 0)
 		bank += income - spend
@@ -372,7 +380,7 @@ do
 		+ (3600 / Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS) * Config.getBossKillReward(1) / check.PLAYERS_PER_SERVER
 	local needed = Config.getSpeedUpgradeCost(0) or 0
 	local others = Config.getStageDamageUpgradeTotal(1)
-		+ (Config.getWeaponUpgradeCost(1) or 0)
+		+ Config.getClubPrice(1) -- 5C: ขั้น 1 ฟรี
 		+ (Config.getPenUpgradeCost(1) or 0)
 		+ (Config.getProductionUpgradeCost(0) or 0)
 	row("FIRSTSPEED", perHour, needed, needed / perHour, others, (needed + others) / perHour)

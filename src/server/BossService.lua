@@ -9,6 +9,10 @@
 --   ตีบอส = อาวุธ (Tool) ที่ server ใส่ Backpack ให้ · ถือ/เก็บอัตโนมัติตามห้องบอสที่มีสิทธิ์ (Backpack เดิมของ Roblox ปิดอยู่)
 --   ⚠️ ระบบ personal combat ของ Phase 4 **ยังไม่มีในโค้ด** — รอบนี้ทำขั้นต่ำเท่าที่ต้องใช้ตีบอส (ผู้ใช้เลือก)
 --     ดาเมจ = Config.getWeaponDamage(weaponLevel) ตัวเดิม · ยังไม่มี PvP · บอสตีกลับปิดไว้ใน config
+--   ⚠️ 5C: อาวุธ = **กระบอง 10 ขั้น** — ดาเมจ Config.getClubDamage(weaponLevel) (getWeaponDamage = ชื่อเดิมของตัวเดียวกัน)
+--     หน้าตาในมือประกอบจาก Part ตามขั้น (Config.ClubVisuals · applyClub) · ซื้อขั้นใหม่แล้วประกอบใหม่เองภายใน 1 tick
+--     ท่าเหวี่ยง = StringValue "toolanim" = "Slash" (สคริปต์ Animate มาตรฐานของตัวละครเล่นท่าฟันให้เอง)
+--     ระยะ/คูลดาวน์เดิม (BossCycle) · ป้ายอัปดาเมจ + โบนัส Robux **ไม่มีผล**กับกระบอง
 --
 -- ══ 5B-2: บอสทุกห้อง (ผู้ใช้ยืนยันแล้ว · แผนเต็ม docs/boss-plan.md) ══
 --   ห้อง N = ช่วงเลนหลังกำแพงด่าน N ถึงกำแพงด่าน N+1 (Config.getStageRoomRangeX) · ห้อง 1 = ปากเลน → กำแพงด่าน 2
@@ -319,7 +323,8 @@ function BossService.tryAttack(
 		return "range", 0, false
 	end
 	state.lastAttackAt[userId] = now
-	local dealt, killed = BossService.applyDamage(state, roomState.room, userId, Config.getWeaponDamage(weaponLevel), now)
+	-- 5C: ดาเมจกระบองขั้นนี้ (clamp ค่าเซฟแปลก ๆ ใน Config) · ป้ายอัปดาเมจ/โบนัส Robux ไม่เกี่ยว
+	local dealt, killed = BossService.applyDamage(state, roomState.room, userId, Config.getClubDamage(weaponLevel), now)
 	return "ok", dealt, killed
 end
 
@@ -720,21 +725,91 @@ local PICKUP_FAIL_KIND: { [string]: string } = {
 -- ทางเข้ากระเป๋าไข่ของ EggService (inject ผ่าน start — กัน BossService require EggService ตรง ๆ)
 export type GrantBossEgg = (player: Player, eggId: string, weight: number) -> (boolean, string?)
 
-local function makeWeapon(): Tool
+-- ══ 5C: กระบองในมือ ══ ด้าม (Handle — ส่วนที่มือจับ) + หัวกระบอง (ClubHead) เชื่อมด้วย Weld · ขนาด/วัสดุ/สีตามขั้น
+local CLUB_HEAD_NAME = "ClubHead"
+local CLUB_GRIP_FROM_END = 0.6 -- มือจับห่างปลายล่างของด้ามเท่านี้ (studs) → ด้ามยื่นออกจากมือ หัวกระบองอยู่ปลายอีกข้าง
+local CLUB_HEAD_SINK = 0.2 -- หัวกระบองสวมทับปลายด้ามลงมาเท่านี้ (ไม่ให้เห็นรอยต่อลอย)
+local CLUB_GLOW_RANGE = 8 -- ระยะไฟของขั้นเรืองแสง (studs)
+local SWING_VALUE_LIFETIME = 1 -- วินาที ก่อนลบ StringValue "toolanim" ฝั่ง server (client อ่านแล้วถอดเองในเฟรมเดียว)
+
+local function materialOf(name: string): Enum.Material
+	local ok, material = pcall(function()
+		return (Enum.Material :: any)[name]
+	end)
+	return if ok and material then material else Enum.Material.SmoothPlastic
+end
+
+-- ประกอบกระบองขั้นนี้ลงใน Tool — ใช้ Handle เดิมเสมอ (ถือค้างในมืออยู่ก็เปลี่ยนได้ ไม่หลุดมือ) · หัวกระบองสร้างใหม่ทุกครั้ง
+-- ⚠️ Tool.Grip เลื่อนจุดจับไปใกล้ปลายด้าม · Attribute ClubTier = ขั้นที่ประกอบไว้ (updateWeapons เทียบกับ weaponLevel)
+local function applyClub(tool: Tool, tier: number)
+	local visual = Config.getClubVisual(tier)
+	local handle = tool:FindFirstChild("Handle") :: BasePart?
+	if not handle then
+		local part = Instance.new("Part")
+		part.Name = "Handle"
+		part.CanCollide = false
+		part.CanTouch = false
+		part.Massless = true
+		part.Parent = tool
+		handle = part
+	end
+	local grip = handle :: BasePart
+	grip.Size = Vector3.new(visual.handleThickness, visual.handleLength, visual.handleThickness)
+	grip.Color = visual.handleColor
+	grip.Material = materialOf(visual.handleMaterial)
+	tool.Grip = CFrame.new(0, -visual.handleLength / 2 + CLUB_GRIP_FROM_END, 0)
+
+	local old = tool:FindFirstChild(CLUB_HEAD_NAME)
+	if old then
+		old:Destroy()
+	end
+	local head = Instance.new("Part")
+	head.Name = CLUB_HEAD_NAME
+	head.Size = visual.headSize
+	head.Color = visual.headColor
+	head.Material = materialOf(visual.headMaterial)
+	head.CanCollide = false
+	head.CanTouch = false
+	head.CanQuery = false
+	head.Massless = true
+	head.CastShadow = true
+	-- Weld (C0 คงที่) ไม่ใช่ WeldConstraint — ไม่ขึ้นกับตำแหน่งตอนประกอบ (Tool อาจอยู่ใน Backpack หรือในมือ)
+	head.CFrame = grip.CFrame * CFrame.new(0, visual.handleLength / 2 + visual.headSize.Y / 2 - CLUB_HEAD_SINK, 0)
+	local weld = Instance.new("Weld")
+	weld.Part0 = grip
+	weld.Part1 = head
+	weld.C0 = CFrame.new(0, visual.handleLength / 2 + visual.headSize.Y / 2 - CLUB_HEAD_SINK, 0)
+	weld.Parent = head
+	if visual.glow > 0 then
+		local light = Instance.new("PointLight")
+		light.Brightness = visual.glow
+		light.Range = CLUB_GLOW_RANGE
+		light.Color = visual.headColor
+		light.Parent = head
+	end
+	head.Parent = tool
+
+	tool.ToolTip = `{visual.name} (ขั้น {Config.clampClubTier(tier)}) — คลิกเพื่อตีบอส`
+	tool:SetAttribute(Config.CLUB_TIER_ATTRIBUTE, Config.clampClubTier(tier))
+end
+
+local function makeWeapon(tier: number): Tool
 	local tool = Instance.new("Tool")
 	tool.Name = Config.WEAPON_TOOL_NAME
-	tool.ToolTip = "อาวุธ — คลิกเพื่อตีบอส"
 	tool.CanBeDropped = false
 	tool.RequiresHandle = true
-	local handle = Instance.new("Part")
-	handle.Name = "Handle"
-	handle.Size = Vector3.new(0.4, 4, 0.4) -- blockout ดาบ
-	handle.Color = Color3.fromRGB(200, 205, 215)
-	handle.Material = Enum.Material.Metal
-	handle.CanCollide = false
-	handle.Massless = true
-	handle.Parent = tool
+	applyClub(tool, tier)
 	return tool
+end
+
+-- ท่าเหวี่ยง: สคริปต์ Animate มาตรฐานของตัวละคร (R15/R6) เล่นท่าฟันเมื่อเจอ StringValue ชื่อ "toolanim" = "Slash"
+-- ใน Tool ที่ถืออยู่ (วิธีเดียวกับดาบคลาสสิกของ Roblox) · ไม่ต้องมี asset อนิเมชันของตัวเอง
+local function playSwing(tool: Tool)
+	local anim = Instance.new("StringValue")
+	anim.Name = "toolanim"
+	anim.Value = "Slash"
+	anim.Parent = tool
+	game:GetService("Debris"):AddItem(anim, SWING_VALUE_LIFETIME)
 end
 
 -- grantBossEgg = EggService.grantBossEgg (ทางเพิ่มไข่เดิม) · syncPlayer = EggService.sync (ส่งเงิน/ไข่ใหม่ให้ client ทันที)
@@ -1020,8 +1095,11 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 		print(`[BossService] กำจัดบอสห้อง {room} แล้ว · {BossService.describeRoom(state, room)}`)
 	end
 
+	-- 5C: ท่าเหวี่ยงจำกัดจังหวะเท่าคูลดาวน์ตี (คลิกรัวไม่ทำให้ท่าสั่น) · แยกจาก lastAttackAt (ตีพลาดระยะก็ยังเหวี่ยง)
+	local lastSwingAt: { [number]: number } = {}
+
 	-- 5B-2: ห้องไหน = ห้องที่ยืนอยู่ (ตำแหน่งที่ server เห็น) · สิทธิ์ = wallProgress (tryAttack ตรวจ)
-	local function onAttack(player: Player)
+	local function onAttack(player: Player, tool: Tool)
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
@@ -1034,13 +1112,20 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 		local distance = if room
 			then BossService.horizontalDistance(root.Position, Config.getBossCornerCenter(room))
 			else math.huge
+		local now = serverNow()
+		local lastSwing = lastSwingAt[player.UserId]
+		if lastSwing == nil or now - lastSwing >= cycleConfig().PLAYER_ATTACK_COOLDOWN then
+			lastSwingAt[player.UserId] = now
+			playSwing(tool)
+		end
+		-- ⚠️ ดาเมจจาก weaponLevel ที่เซฟไว้เท่านั้น (clamp ใน Config.getClubDamage) — ไม่รับอะไรจาก client
 		local result, _, killed = BossService.tryAttack(
 			state,
 			player.UserId,
-			serverNow(),
+			now,
 			room,
 			distance,
-			data.weaponLevel or 1,
+			data.weaponLevel,
 			data.wallProgress
 		)
 		if result ~= "ok" or room == nil then
@@ -1059,9 +1144,10 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 		if not backpack or backpack:FindFirstChild(Config.WEAPON_TOOL_NAME) then
 			return
 		end
-		local tool = makeWeapon()
+		local data = DataService.getCached(player.UserId)
+		local tool = makeWeapon(Config.clampClubTier(data and data.weaponLevel))
 		tool.Activated:Connect(function()
-			onAttack(player)
+			onAttack(player, tool)
 		end)
 		tool.Parent = backpack
 	end
@@ -1192,13 +1278,31 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 		state.lastAttackAt[player.UserId] = nil
 		state.holds[player.UserId] = nil
 		lastPickupAt[player.UserId] = nil
+		lastSwingAt[player.UserId] = nil
 		-- 5B: ออกเกมระหว่างถือไข่ → ไข่กลับจุดเดิม หยิบใหม่ได้
 		dropEgg(player.UserId, "ออกเกม")
 	end)
 
+	-- 5C: กระบองในมือ/ในกระเป๋าไม่ตรงขั้นที่เซฟไว้ (เพิ่งซื้อ · debug ตั้งขั้น · รีเซ็ต) → ประกอบใหม่ทันที
+	local function refreshClub(player: Player)
+		local data = DataService.getCached(player.UserId)
+		if not data then
+			return
+		end
+		local tier = Config.clampClubTier(data.weaponLevel)
+		local character = player.Character
+		local backpack = player:FindFirstChildOfClass("Backpack")
+		local tool = (character and character:FindFirstChild(Config.WEAPON_TOOL_NAME))
+			or (backpack and backpack:FindFirstChild(Config.WEAPON_TOOL_NAME))
+		if tool and tool:IsA("Tool") and tool:GetAttribute(Config.CLUB_TIER_ATTRIBUTE) ~= tier then
+			applyClub(tool, tier)
+		end
+	end
+
 	-- ถือ/เก็บอาวุธอัตโนมัติ: กลางวัน + ยืนในห้องที่มีสิทธิ์ + บอสห้องนั้นยังอยู่ = ถือ · นอกนั้นเก็บ (5B-2)
 	local function updateWeapons()
 		for _, player in Players:GetPlayers() do
+			refreshClub(player)
 			local character = player.Character
 			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 			local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?

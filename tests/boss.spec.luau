@@ -270,6 +270,51 @@ return function(t, Config)
 	end
 
 	----------------------------------------------------------------------------
+	print("── 5C กระบอง: ดาเมจจาก weaponLevel ตามตาราง · ขั้น N ตีห้อง N คนเดียวตายภายในกลางวันจริง (จำลองทีละครั้ง) ──")
+	----------------------------------------------------------------------------
+	do
+		local W = Config.Balance.Weapon
+		for tier = 1, W.MAX_LEVEL do
+			local s = BossService.newState(0)
+			BossService.step(s, 540)
+			BossService.step(s, 600)
+			local room = Config.getClubTargetRoom(tier)
+			local _, dealt = BossService.tryAttack(s, 77, 600, room, 5, tier, room)
+			check(`ขั้น {tier} ที่ห้อง {room} → ดาเมจ {Config.getClubDamage(tier)} ตามตาราง`, dealt,
+				math.min(Config.getClubDamage(tier), Config.getBossHp(room)))
+		end
+		-- ⚠️ กันปัญหาล็อกอัญเชิญ: ตีจริงทีละครั้งตามคูลดาวน์ จนบอสตาย · ต้องจบก่อนหมดกลางวัน ทุกห้อง
+		for room = 1, Config.Balance.Stage.COUNT do
+			local s = BossService.newState(0)
+			BossService.step(s, 540)
+			BossService.step(s, 600)
+			local t0, now, killed, allOk = 600, 600, false, true
+			while now < 600 + cycle.DAY_SECONDS and not killed do
+				local result, _, k = BossService.tryAttack(s, 5, now, room, 5, room, room)
+				killed = k
+				now += cycle.PLAYER_ATTACK_COOLDOWN
+				if result ~= "ok" then
+					allOk = false
+					break
+				end
+			end
+			check(`ห้อง {room}: ทุกครั้งที่ครบคูลดาวน์ตีเข้า (ok)`, allOk, true)
+			check(`ห้อง {room}: กระบองขั้น {room} คนเดียวตีตายก่อนหมดกลางวัน ({now - t0} วิ)`, killed, true)
+		end
+		local s = BossService.newState(0)
+		BossService.step(s, 540)
+		BossService.step(s, 600)
+		local _, tooWeak = BossService.tryAttack(s, 6, 600, 9, 5, 99, 9)
+		check("weaponLevel เซฟเกินเพดาน (99) → ดาเมจขั้น 10 (clamp)", tooWeak, Config.getClubDamage(10))
+		local s2 = BossService.newState(0)
+		BossService.step(s2, 540)
+		BossService.step(s2, 600)
+		local _, weird = BossService.tryAttack(s2, 6, 600, 1, 5, -3, 1)
+		check("weaponLevel เซฟติดลบ → ดาเมจขั้น 1 (clamp) ไม่ crash", weird, Config.getClubDamage(1))
+		check("damageLevel (ป้ายอัปดาเมจ) ไม่อยู่ในสูตรกระบองเลย — tryAttack ไม่รับค่านี้", Config.getClubDamage(5), Config.getWeaponDamage(5))
+	end
+
+	----------------------------------------------------------------------------
 	print("── 5A บอสตีกลับ: ปิดไว้ใน config → ไม่เลือกใครเลย ──")
 	----------------------------------------------------------------------------
 	do

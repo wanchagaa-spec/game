@@ -10,6 +10,7 @@
 --   SummonWindow — UI-3: หน้าต่างแท่นอัญเชิญ (แท็บแม่/ลูก · ติ๊กเรียงลำดับ · ส่งไปรบ/หยุดอัญเชิญ)
 --   IndexWindow — UI-4: หน้าต่างดัชนี (แท็บคลาส · เคยได้ = รูป / ยังไม่ได้ = เงา · จุดแดงบนปุ่มเมื่อได้ตัวใหม่)
 --   RobuxShopWindow — UI-5: ร้านค้า Robux (ไข่ตำนาน · ทะลุเพดานดาเมจ/ความเร็ว · เร่งฟักไข่ทั้งหมด)
+--   WeaponShopWindow — 5C: ร้านกระบอง 10 ขั้น (กด E ที่แผง "ซื้ออาวุธ" · ซื้อได้แค่ขั้นถัดไป)
 --   ที่เหลืออยู่ในไฟล์นี้: ปุ่มกระเป๋าแถบบน · ปุ่มร้านค้า · ปุ่มดัชนี · เลเวลมุมล่างซ้าย ·
 --   ข้อความแจ้งผล (toast) · HUD การรบ · popup ผ่านด่าน
 --
@@ -53,6 +54,8 @@ local SummonWindow = require(script.Parent:WaitForChild("SummonWindow"))
 local IndexWindow = require(script.Parent:WaitForChild("IndexWindow"))
 -- UI-5
 local RobuxShopWindow = require(script.Parent:WaitForChild("RobuxShopWindow"))
+-- 5C: ร้านกระบอง 10 ขั้น (เปิดจากจุดกด E ที่แผง "ซื้ออาวุธ")
+local WeaponShopWindow = require(script.Parent:WaitForChild("WeaponShopWindow"))
 -- Phase 5A: ตัวเลขนับถอยหลังบนกำแพงกั้นบอส (อ่านสถานะจาก Attribute ที่ server ตั้ง ไม่ผ่าน FarmStateSync)
 local BossHud = require(script.Parent:WaitForChild("BossHud"))
 
@@ -93,6 +96,8 @@ local bossEventNotify = Remotes.waitFor(Config.RemoteNames.BOSS_EVENT_NOTIFY)
 local pickUpBossEggRequest = Remotes.waitFor(Config.RemoteNames.PICK_UP_BOSS_EGG_REQUEST)
 -- ⚠️ 5B-2: บอก server ว่าเริ่มกด/ปล่อย E ที่ไข่บอส — server จับเวลากดค้างเอง (ยิงหยิบตรง ๆ โดยไม่กดค้างครบ = ถูกปฏิเสธ)
 local bossEggHoldRequest = Remotes.waitFor(Config.RemoteNames.BOSS_EGG_HOLD_REQUEST)
+-- ⚠️ 5C: ซื้อกระบองขั้นถัดไป — **ไม่ส่งเลขขั้น** (server ซื้อขั้นถัดไปเอง ตรวจเงิน/เพดานเอง) · ผลกลับทาง actionResult
+local buyClubTierRequest = Remotes.waitFor(Config.RemoteNames.BUY_CLUB_TIER_REQUEST)
 
 --------------------------------------------------------------------------------
 -- สี / ค่าคงที่
@@ -511,7 +516,7 @@ end
 -- ⚠️ UI-5: หน้าต่าง "เร็วๆ นี้" (placeholder ของร้านค้า) ปิดไปแล้ว — แทนที่ด้วย RobuxShopWindow จริง
 --------------------------------------------------------------------------------
 
-type WindowName = "bag" | "shop" | "index" | "sell" | "summon"
+type WindowName = "bag" | "shop" | "index" | "sell" | "summon" | "weapon"
 
 local function isWindowOpen(name: WindowName): boolean
 	if name == "bag" then
@@ -524,6 +529,8 @@ local function isWindowOpen(name: WindowName): boolean
 		return IndexWindow.isOpen()
 	elseif name == "shop" then
 		return RobuxShopWindow.isOpen()
+	elseif name == "weapon" then
+		return WeaponShopWindow.isOpen()
 	end
 	return false
 end
@@ -534,6 +541,7 @@ local function closeAllWindows()
 	SummonWindow.close()
 	IndexWindow.close()
 	RobuxShopWindow.close()
+	WeaponShopWindow.close()
 end
 
 -- กดปุ่มเดิมซ้ำ = ปิด · กดปุ่มอื่น = ปิดอันเก่าแล้วเปิดอันใหม่
@@ -553,6 +561,8 @@ local function toggleWindow(name: WindowName)
 		IndexWindow.open() -- ล้างจุดแดงบนปุ่มดัชนีด้วย
 	elseif name == "shop" then
 		RobuxShopWindow.open()
+	elseif name == "weapon" then
+		WeaponShopWindow.open()
 	end
 end
 
@@ -727,6 +737,14 @@ SellWindow.create(hud, {
 	notify = showToast,
 })
 
+-- 5C: ร้านกระบอง — ปุ่มซื้อยิง remote ไม่มีพารามิเตอร์ (server ซื้อขั้นถัดไปเอง) · ผล "ได้กระบองขั้น N" กลับทาง toast
+WeaponShopWindow.create(hud, {
+	buyNext = function()
+		buyClubTierRequest:FireServer()
+	end,
+	notify = showToast,
+})
+
 --------------------------------------------------------------------------------
 -- UI-3: หน้าต่างแท่นอัญเชิญ
 --------------------------------------------------------------------------------
@@ -767,6 +785,17 @@ MapSigns.start(playerGui, {
 		end
 	end,
 	isSellShopOpen = SellWindow.isOpen,
+	openWeaponShop = function()
+		if not WeaponShopWindow.isOpen() then
+			toggleWindow("weapon")
+		end
+	end,
+	closeWeaponShop = function()
+		if WeaponShopWindow.isOpen() then
+			WeaponShopWindow.close()
+		end
+	end,
+	isWeaponShopOpen = WeaponShopWindow.isOpen,
 	openSummon = function()
 		if not SummonWindow.isOpen() then
 			toggleWindow("summon")
@@ -923,6 +952,7 @@ farmStateSync.OnClientEvent:Connect(function(payload)
 	SummonWindow.setPayload(payload)
 	IndexWindow.setPayload(payload)
 	RobuxShopWindow.setPayload(payload)
+	WeaponShopWindow.setPayload(payload)
 	MapSigns.setPayload(payload)
 
 	-- ⚠️ Phase 3B-1: กำแพง (WallRenderer) กับโมเดลทหาร (TroopRenderer) อ่านจากของจริงที่ sync
@@ -965,10 +995,15 @@ TroopRenderer.start()
 -- ⚠️ Phase 5A: ตัวเลข 59 → 0 บนกำแพงกั้นกลางคืน (รอของจาก server เบื้องหลัง ไม่บล็อกบรรทัดถัดไป)
 -- ⚠️ 5B: + จุดกด E ค้างที่ไข่บอส — ยิงแค่ "ฟองที่ i" · server ตัดสินทุกอย่างเอง (บอสตายไหม · ระยะ · ถืออยู่แล้วไหม)
 -- ⚠️ 5B-2: + บอกจังหวะเริ่มกด/ปล่อย (server จับเวลากดค้างเอง) · ห้องไหน server ดูจากตำแหน่งตัวละครเอง
+-- ⚠️ 5C: + เลขดาเมจเด้งเหนือบอสตอนโดน (BossHud เทียบ HP ห้องนั้นกับค่าก่อนหน้า · ภาพล้วน)
+local BOSS_HIT_COLOR = Color3.fromRGB(255, 235, 90)
 BossHud.start(playerGui, function(index: number)
 	pickUpBossEggRequest:FireServer(index)
 end, function(index: number, holding: boolean)
 	bossEggHoldRequest:FireServer(index, holding)
+end, function(room: number, damage: number)
+	local top = Config.getBossCornerCenter(room) + Vector3.new(0, Config.MapDimensions.BossArena.BossSize.Y, 0)
+	CombatEffects.floatingText(top, `-{UiKit.formatShort(damage)}`, BOSS_HIT_COLOR)
 end)
 
 print("[egg-army-game] client พร้อมแล้ว")

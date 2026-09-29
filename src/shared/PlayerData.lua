@@ -303,6 +303,20 @@ function PlayerData.addRobuxSpeedSteps(data: Data, steps: number)
 	data.robuxSpeedBonus += steps
 end
 
+-- 5C: ซื้อกระบอง**ขั้นถัดไป**หนึ่งขั้น — ตรวจ (Config.planClubPurchase) + หักเงิน + เพิ่มขั้น ในก้อนเดียวไม่มี yield คั่น
+-- ⚠️ ไม่มีพารามิเตอร์ขั้น (ข้ามขั้นไม่ได้โดยโครงสร้าง) · กดรัวก็ได้ทีละขั้นตามเงินที่มีจริง เงินไม่ติดลบ
+-- ค่า weaponLevel เดิมที่แปลก/นอกช่วง ถูก clamp ก่อนเสมอ แล้วเขียนค่าใหม่ที่ถูกต้องทับ (ไม่แตะ schema — ฟิลด์มีตั้งแต่ v1)
+-- คืน (สำเร็จไหม, เหตุผลถ้าไม่สำเร็จ, ขั้นใหม่, ราคาที่จ่าย)
+function PlayerData.buyNextClubTier(data: Data): (boolean, string?, number?, number?)
+	local ok, reason, nextTier, price = Config.planClubPurchase(data.weaponLevel, data.currency.coins)
+	if not ok or nextTier == nil or price == nil then
+		return false, reason, nil, nil
+	end
+	data.currency.coins -= price
+	data.weaponLevel = nextTier
+	return true, nil, nextTier, price
+end
+
 -- เร่งไข่ที่กำลังฟักอยู่ **ทุกฟอง** ให้ครบเวลาทันที (ตั้ง hatchAt = now) — คืนจำนวนฟองที่เร่งจริง
 -- ⚠️ ฟังก์ชันนี้ **ไม่** สร้างตัวแม่ให้ — แค่ทำให้ nowValue >= hatchAt เป็นจริง แล้วให้ผู้เรียก
 -- (EggService.processReadyHatchSlots) เดินตรรกะฟักเดิมต่อ ไม่เขียน logic ฟักซ้ำที่นี่

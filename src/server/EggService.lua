@@ -85,6 +85,7 @@ local sendMothersToBattleBatchRequest: RemoteEvent
 local autoFillPenRequest: RemoteEvent
 local buyDamageUpgradeRequest: RemoteEvent
 local buySpeedUpgradeRequest: RemoteEvent
+local buyClubTierRequest: RemoteEvent
 local eggHatched: RemoteEvent
 local farmStateSync: RemoteEvent
 local actionResult: RemoteEvent
@@ -389,6 +390,9 @@ local function buildSyncPayload(data: Data, bossLocked: boolean?)
 		robuxDamageBonus = data.robuxDamageBonus,
 		robuxSpeedBonus = data.robuxSpeedBonus,
 		robuxSpeedHardCap = Config.getRobuxSpeedHardCap(), -- client เช็คว่า "ซื้อต่อไปก็ไม่มีผลแล้ว"
+		-- 5C: ขั้นกระบองปัจจุบัน (clamp แล้ว — ค่าเซฟแปลก ๆ ไม่หลุดถึง client) · ดาเมจ/ราคา/ชื่อ client อ่านจาก Config เอง
+		clubTier = Config.clampClubTier(data.weaponLevel),
+		clubMaxTier = Config.Balance.Weapon.MAX_LEVEL,
 		children = children,
 		waitingStacks = waitingStacks, -- UI-3: กองที่ติ๊กไว้แต่หมดชั่วคราว (count 0 · แม่ในคอกผลิตเติมอยู่)
 		-- UI-4: ตัวละครที่เคยได้ (ดัชนี) — array ของ charId เรียงแล้ว (ข้อมูลเล็ก ≤ จำนวนตัวละคร)
@@ -1190,6 +1194,23 @@ function EggService.buySpeedUpgrade(player: Player): (boolean, string?)
 	return true, nil
 end
 
+-- 5C: ร้านกระบอง — ซื้อได้แค่ขั้นถัดไป (ไม่มีพารามิเตอร์จาก client) · ตรวจ/หักเงิน/เพิ่มขั้นในก้อนเดียว (PlayerData.buyNextClubTier)
+-- ⚠️ ไม่แตะ data.weaponLevel นอกจากที่นี่ + debugSetWeaponTier + debugResetAll · BossService อ่านอย่างเดียว
+--   (ประกอบกระบองในมือใหม่เองภายใน 1 tick เมื่อเห็นขั้นเปลี่ยน — ไม่ต้องเรียกข้ามโมดูล)
+function EggService.buyClubTier(player: Player): (boolean, string?, number?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น", nil
+	end
+	local ok, reason, tier, price = PlayerData.buyNextClubTier(data)
+	if not ok then
+		return false, reason, nil
+	end
+	EggService.sync(player)
+	print(`[EggService] {player.Name} ซื้อกระบองขั้น {tier}/{Config.Balance.Weapon.MAX_LEVEL} (จ่าย {price} coins)`)
+	return true, nil, tier
+end
+
 --------------------------------------------------------------------------------
 -- ร้าน Robux (UI-5)
 --------------------------------------------------------------------------------
@@ -1322,6 +1343,7 @@ end
 --     EggService.debugGrantEggWithWeight(game.Players.<ชื่อ>, "egg_stage5", 100000000)
 --     EggService.debugSetWallProgress(game.Players.<ชื่อ>, 7)
 --     EggService.debugSetCurrency(game.Players.<ชื่อ>, 1000000)
+--     EggService.debugSetWeaponTier(game.Players.<ชื่อ>, 5)   -- 5C: ตั้งขั้นกระบอง 1–10 (ไม่หักเงิน)
 --     EggService.debugSnapshot(game.Players.<ชื่อ>)
 --     EggService.debugWipeSavedData(game.Players.<ชื่อ>, "<ชื่อ>")  -- 🔴 ลบถาวร ดูคำเตือนด้านล่าง
 -- 📄 รายละเอียด + ตัวอย่างใช้ทดสอบครบทุก tier น้ำหนัก อยู่ใน docs/debug-commands.md
@@ -1452,6 +1474,9 @@ function EggService.debugResetAll(player: Player)
 		data.stageClearBonusGranted[stage] = false
 	end
 	data.wallProgress = Config.Balance.NewPlayer.wallProgress
+	-- 5C: กระบองกลับเป็นขั้นเริ่มต้น (ขั้น 1 ฟรี) — ทดสอบร้านกระบองซ้ำได้ · กระบองในมือเปลี่ยนเองใน 1 tick (BossService)
+	local weaponBefore = data.weaponLevel
+	data.weaponLevel = Config.Balance.Weapon.START_TIER
 
 	-- ⚠️ แม่ในคอกก็มีโมเดลเดินอยู่จริง ต้อง refreshMothers ให้คอกว่างตามข้อมูล
 	PenService.refreshMothers(player, data.mothersInPen)
@@ -1463,6 +1488,7 @@ function EggService.debugResetAll(player: Player)
 			.. `ไข่ที่กำลังฟัก {hatchingRemoved} ฟอง · `
 			.. `stageProgress ที่ล้าง {stageProgressCleared}/{Config.Balance.Stage.COUNT} ด่าน · `
 			.. `wallProgress {wallProgressBefore} → {data.wallProgress} · `
+			.. `กระบอง {weaponBefore} → {data.weaponLevel} · `
 			.. debugSaveNow(player)
 	)
 end
@@ -1725,6 +1751,29 @@ function EggService.debugSetCurrency(player: Player, coins: number)
 	print(`[EggService] debugSetCurrency: {player.Name} เงิน {before} → {clamped} coins · ` .. debugSaveNow(player))
 end
 
+-- 5C: ตั้งขั้นกระบองตรง ๆ (ไม่หักเงิน) — ทดสอบดาเมจ/หน้าตากระบองแต่ละขั้น · รับ 1..MAX_LEVEL จำนวนเต็มเท่านั้น
+-- คืนข้อความผลลัพธ์ (ค่าแปลก = ปฏิเสธ ไม่แตะข้อมูล) · กระบองในมือเปลี่ยนเองใน 1 tick (BossService เทียบขั้นทุก tick)
+function EggService.debugSetWeaponTier(player: Player, rawTier: any): string
+	local data = dataOf(player)
+	if not data then
+		return `debugSetWeaponTier: {player.Name} ยังไม่มีข้อมูลผู้เล่น`
+	end
+	local maxTier = Config.Balance.Weapon.MAX_LEVEL
+	if type(rawTier) ~= "number" or rawTier % 1 ~= 0 or rawTier < 1 or rawTier > maxTier then
+		local message = `debugSetWeaponTier: ขั้นต้องเป็นจำนวนเต็ม 1–{maxTier} (ได้ {tostring(rawTier)}) — ไม่แตะข้อมูล`
+		warn(`[EggService] {message}`)
+		return message
+	end
+	local before = data.weaponLevel
+	data.weaponLevel = rawTier
+	EggService.sync(player)
+	local message = `debugSetWeaponTier: {player.Name} กระบอง {before} → {rawTier} `
+		.. `({Config.getClubVisual(rawTier).name} · ดาเมจ {Config.getClubDamage(rawTier)}/ครั้ง) · `
+		.. debugSaveNow(player)
+	print(`[EggService] {message}`)
+	return message
+end
+
 -- ⚠️ UI-5: จำลอง MarketplaceService.ProcessReceipt โดยไม่ต้องมี Robux จริง/publish จริง
 -- ใช้ทดสอบ idempotency ตรง ๆ: เรียกซ้ำด้วย purchaseId เดิม → ครั้งที่สองต้องไม่ให้ของซ้ำ (docs/data-schema.md §8.7)
 -- productKey = "legendary_egg" | "robux_damage_step" | "robux_speed_step" | "robux_hatch_rush"
@@ -1896,6 +1945,7 @@ function EggService.start()
 	autoFillPenRequest = Remotes.waitFor(Config.RemoteNames.AUTO_FILL_PEN_REQUEST)
 	buyDamageUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_DAMAGE_UPGRADE_REQUEST)
 	buySpeedUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_SPEED_UPGRADE_REQUEST)
+	buyClubTierRequest = Remotes.waitFor(Config.RemoteNames.BUY_CLUB_TIER_REQUEST)
 	eggHatched = Remotes.waitFor(Config.RemoteNames.EGG_HATCHED)
 	farmStateSync = Remotes.waitFor(Config.RemoteNames.FARM_STATE_SYNC)
 	actionResult = Remotes.waitFor(Config.RemoteNames.ACTION_RESULT)
@@ -2030,6 +2080,17 @@ function EggService.start()
 			local data = dataOf(player)
 			local level = if data then data.speedLevel else nil
 			reportResult(player, true, `ซื้อความเร็วสำเร็จ → ขั้น {level}`)
+		end
+	end)
+
+	-- 5C: ร้านกระบอง — ไม่รับพารามิเตอร์ใด ๆ จาก client (ค่าที่ส่งมาถูกทิ้ง) · ซื้อได้แค่ขั้นถัดไป
+	buyClubTierRequest.OnServerEvent:Connect(function(player)
+		local ok, reason, tier = EggService.buyClubTier(player)
+		if not ok or tier == nil then
+			print(`[EggService] ปฏิเสธคำขอซื้อกระบองของ {player.Name}: {reason}`)
+			reportResult(player, false, reason or "ซื้อกระบองไม่สำเร็จ")
+		else
+			reportResult(player, true, Config.formatClubBoughtMessage(tier))
 		end
 	end)
 

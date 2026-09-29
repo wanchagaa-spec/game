@@ -9,6 +9,7 @@
 --   คอกคนอื่น + คอกที่ยังไม่มีเจ้าของ: ซ่อนทั้งป้าย (syncVisibility) ไม่มีจุดกด · ป้ายชื่อ "คอก N" ไม่ถูกแตะ
 --   ค่าวิ่งเป็นของบัญชีก็จริง แต่ให้ซื้อที่คอกตัวเองที่เดียวกันงง
 -- ⚠️ client ไม่ตัดสินอะไร: ราคา/เพดานอ่านจาก sync · server ตรวจเงิน/เพดานซ้ำเองทุกครั้ง
+-- 5C: ร้านกระบอง = แผง WeaponStallIndex (ป้าย "ซื้ออาวุธ") — จุดกด E ที่เคาน์เตอร์ → WeaponShopWindow · เดินห่างแล้วปิดเอง
 -- UI-3: แท่นอัญเชิญ (server สร้างใน MapBuilder · Config.SUMMON_PEDESTAL_NAME) — จุดกด E **ค้าง** ที่แกนเรืองแสง
 --   เปิดหน้าต่างอัญเชิญ (SummonWindow.lua) · เดินออกห่างเกิน SummonPedestal.CloseDistance แล้วปิดเอง
 --   5B-fix: แท่นอยู่ในเลน (สนามรบ) · ข้อความบนจุดกดสลับ "อัญเชิญ" ↔ "ปิดอัญเชิญ" ตาม summonEnabled จาก sync
@@ -31,6 +32,10 @@ export type Actions = {
 	openSellShop: () -> (),
 	closeSellShop: () -> (),
 	isSellShopOpen: () -> boolean,
+	-- 5C: ร้านกระบอง (แผง "ซื้ออาวุธ") — เปิด/ปิดหน้าต่าง WeaponShopWindow
+	openWeaponShop: () -> (),
+	closeWeaponShop: () -> (),
+	isWeaponShopOpen: () -> boolean,
 	openSummon: () -> (),
 	closeSummon: () -> (),
 	isSummonOpen: () -> boolean,
@@ -311,6 +316,29 @@ local function attachSellShop()
 	end)
 end
 
+-- 5C: ร้านกระบอง — จุดกด E ที่เคาน์เตอร์แผง WeaponStallIndex (ป้าย "ซื้ออาวุธ") แบบเดียวกับร้านขายแม่
+local function attachWeaponShop()
+	task.spawn(function()
+		local map = Workspace:WaitForChild("Map")
+		local shop = map and map:WaitForChild("Shop")
+		local stall = shop and shop:WaitForChild(`Stall{Config.MapDimensions.MapSign.WeaponStallIndex}`)
+		local counter = stall and stall:WaitForChild(SELL_COUNTER_NAME)
+		if not (counter and counter:IsA("BasePart")) then
+			return
+		end
+		local prompt = UiKit.prompt({
+			Name = "WeaponShopPrompt",
+			ActionText = "เปิดร้าน",
+			ObjectText = "ร้านกระบอง",
+			MaxActivationDistance = Config.MapDimensions.MapSign.WeaponPromptDistance,
+		})
+		prompt.Triggered:Connect(function()
+			actions.openWeaponShop()
+		end)
+		prompt.Parent = counter
+	end)
+end
+
 -- ⚠️ โพลระยะแทน Heartbeat — แค่ปิดหน้าต่าง ไม่ต้องละเอียดระดับเฟรม
 -- ใช้ร่วมกันทั้งร้านขายแม่และแท่นอัญเชิญ: หน้าต่างเปิดอยู่ + ยืนห่างจากจุด (แนวราบ) เกิน limit → ปิด
 local function watchDistance(spot: Vector3, limit: number, isOpen: () -> boolean, close: () -> ())
@@ -398,6 +426,13 @@ function MapSigns.start(parent: Instance, signActions: Actions)
 		Config.MapDimensions.MapSign.SellCloseDistance,
 		actions.isSellShopOpen,
 		actions.closeSellShop
+	)
+	attachWeaponShop()
+	watchDistance(
+		Config.getWeaponShopSpot(),
+		Config.MapDimensions.MapSign.WeaponCloseDistance,
+		actions.isWeaponShopOpen,
+		actions.closeWeaponShop
 	)
 	attachSummonPedestal()
 	watchDistance(

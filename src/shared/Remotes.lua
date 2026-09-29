@@ -37,6 +37,7 @@ local EVENT_NAMES: { string } = {
 	NAMES.BOSS_EVENT_NOTIFY,
 	NAMES.PICK_UP_BOSS_EGG_REQUEST,
 	NAMES.BOSS_EGG_HOLD_REQUEST,
+	NAMES.BUY_CLUB_TIER_REQUEST,
 }
 
 -- เรียกจากฝั่ง server ตอนบูตเท่านั้น สร้าง Folder + RemoteEvent ให้ครบ

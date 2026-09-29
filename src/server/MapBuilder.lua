@@ -412,7 +412,9 @@ function MapBuilder.buildShop(parent: Folder)
 		-- ⚠️ UI-2: แผง SellStallIndex = ร้านขายแม่ (เดิม "ขายของ · ซื้อไข่" — เงินในเกมซื้อไข่ไม่ได้ จึงเปลี่ยนป้าย)
 		-- client ติดจุดกด E ที่ Counter ของแผงนี้ (src/client/MapSigns.lua) → Persistent ให้หาเจอเสมอ
 		local isSellShop = index == MAP.MapSign.SellStallIndex
-		if isSellShop then
+		-- 5C: แผง WeaponStallIndex = ร้านกระบอง (ป้าย "ซื้ออาวุธ" เดิม) — client ติดจุดกด E ที่ Counter เหมือนร้านขายแม่
+		local isWeaponShop = index == MAP.MapSign.WeaponStallIndex
+		if isSellShop or isWeaponShop then
 			model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
 		end
 		-- ป้ายลอยเดียวที่เหลือในแมพ (ผู้ใช้เลือกเก็บ) · กว้างเท่าแผง ขนาดติดโลก
@@ -424,7 +426,7 @@ function MapBuilder.buildShop(parent: Folder)
 	-- และไม่มีแท่นวาปไปรังบอสด้วย — วาปไปรังได้เมื่อไหร่ การแย่งไข่ก็หมดความหมาย
 	--
 	-- ⚠️ UI-2: อัปเกรด (ดาเมจ · ความเร็ว · คอก) ย้ายจากปุ่มติดตัวไปเป็น**ป้ายบนแมพ กด E** (buildMapSigns)
-	-- แผงร้านเหลือ ร้านขายแม่ (แผง SellStallIndex) · ซื้ออาวุธ (Phase 5)
+	-- แผงร้านเหลือ ร้านขายแม่ (แผง SellStallIndex) · ร้านกระบอง "ซื้ออาวุธ" (แผง WeaponStallIndex · Phase 5C)
 end
 
 --------------------------------------------------------------------------------

@@ -524,6 +524,10 @@ Config.MapDimensions = {
 		SellStallIndex = 1,
 		SellPromptDistance = 14, -- วัดจากกึ่งกลางแผง (แผงกว้าง 12) จึงต้องไกลกว่าป้าย
 		SellCloseDistance = 20, -- เดินออกห่างจากกึ่งกลางแผงเกินนี้ หน้าต่างขายปิดเอง
+		-- 5C: แผงร้านที่เป็นร้านกระบอง (ป้าย "ซื้ออาวุธ" เดิม) — ระยะเดียวกับร้านขายแม่ (แผงขนาดเท่ากัน)
+		WeaponStallIndex = 2,
+		WeaponPromptDistance = 14,
+		WeaponCloseDistance = 20,
 	},
 
 	-- ══ ขอบแมพ ══ แท่นลอย ตกได้ → กั้นด้วยกำแพงใส
@@ -642,6 +646,11 @@ Config.RemoteNames = {
 	-- client → server : FireServer() — ไม่มีพารามิเตอร์ ซื้อขั้นถัดไปเสมอ (data.speedLevel + 1)
 	-- ⚠️ ซื้อสำเร็จแล้วต้องมีผลกับ Humanoid.WalkSpeed ทันที ไม่ต้องรอ respawn
 	BUY_SPEED_UPGRADE_REQUEST = "BuySpeedUpgradeRequest",
+
+	-- client → server : FireServer() — ไม่มีพารามิเตอร์ (Phase 5C · ร้านกระบอง)
+	-- ⚠️ ซื้อได้แค่ "ขั้นถัดไป" เสมอ (weaponLevel + 1) · **ไม่รับเลขขั้นจาก client** · ราคา/เงิน/เพดานตรวจฝั่ง server
+	--   (Config.planClubPurchase → PlayerData.buyNextClubTier) · สำเร็จ = ActionResult "ได้กระบองขั้น N" + sync
+	BUY_CLUB_TIER_REQUEST = "BuyClubTierRequest",
 
 	-- server → client : { slotIndex, eggId, charId, charName, class, weight, placedIn }
 	EGG_HATCHED = "EggHatched",
@@ -1573,8 +1582,9 @@ Balance.BossCycle = {
 	DAY_SECONDS = 540, -- 9 นาที
 	NIGHT_SECONDS = 60, -- 1 นาที (ตัวเลขนับถอยหลัง 59 → 0 บนกำแพงกั้น)
 
-	-- สเกล HP บอสต่อด่าน (ย้ายจาก Balance.Boss) — HP ด่าน N = BASE × MULTIPLIER^(N-1) ต้องโตเท่าอาวุธ ×10 ต่อขั้น
-	-- (อาวุธขั้น N ตีบอสด่าน N ตาย 10 ครั้งพอดี · validate() ผูก) · 5B-2: บอสห้อง N ใช้ค่านี้จริงแล้ว (Config.getBossHp)
+	-- สเกล HP บอสต่อด่าน (ย้ายจาก Balance.Boss) — HP ด่าน N = BASE × MULTIPLIER^(N-1) · 5B-2: บอสห้อง N ใช้ค่านี้จริงแล้ว (Config.getBossHp)
+	-- ⚠️ 5C: ดาเมจกระบอง**คำนวณจาก HP นี้** (Balance.Weapon · Config.getClubDamage) — แก้ HP แล้วกระบองขยับตามเอง
+	--   (เดิม "อาวุธ ×10 ต่อขั้น ตี 10 ครั้งพอดี" ยกเลิกแล้ว → ขั้น N ตีห้อง N คนเดียวราว 3 นาที)
 	BOSS_HP_BASE = 100,
 	BOSS_HP_MULTIPLIER = 10,
 
@@ -1587,7 +1597,7 @@ Balance.BossCycle = {
 	MODEL_EGGS_PER_SPAWN = 5,
 
 	-- ⚠️ ค่าชั่วคราวทั้งหมดข้างล่าง — จูนจริง Phase 6
-	-- ผู้เล่นตีบอส (อาวุธขั้นต่ำ — ดาเมจจาก Config.getWeaponDamage(weaponLevel) ที่มีอยู่แล้ว)
+	-- ผู้เล่นตีบอสด้วยกระบอง (5C) — ดาเมจ Config.getClubDamage(weaponLevel) · ⚠️ คูลดาวน์นี้เป็นตัวตั้งของตารางดาเมจกระบองด้วย
 	PLAYER_ATTACK_COOLDOWN = 0.5, -- วินาทีต่อครั้ง (server นับเอง ห้ามเชื่อ client)
 	PLAYER_ATTACK_RANGE = 14, -- ระยะแนวราบจากกึ่งกลางบอสถึงตัวผู้เล่น (บอสกว้าง 10 → ยืนชิดตัวได้ 9)
 
@@ -1967,21 +1977,50 @@ Config.PurchaseLog = {
 }
 
 --------------------------------------------------------------------------------
--- อาวุธของผู้เล่น (ใช้ตีบอส ไม่เกี่ยวกับกองทัพ)
+-- อาวุธของผู้เล่น = กระบอง 10 ขั้น (Phase 5C · ใช้ตีบอส ไม่เกี่ยวกับกองทัพ)
 --------------------------------------------------------------------------------
--- damage ขั้น N = DAMAGE_BASE × DAMAGE_MULTIPLIER ^ (N-1)
--- ราคาขั้น N → N+1 = UPGRADE_BASE_COST × UPGRADE_COST_MULTIPLIER ^ (N-1)
+-- ✅ ผู้ใช้ยืนยัน (5C): อาวุธชนิดเดียว = กระบองฟาดระยะใกล้ · ซื้อด้วยเงินในเกม · ซื้อเรียงขั้น (ต้องมี N-1 ก่อน N)
+--   ไม่ผูกด่าน · ขั้น 1–9 จับคู่บอสห้อง 1–9 · ขั้น 10 = ขั้นพิเศษหลังผ่านด่าน 9 (แพงมาก · ตีห้อง 9 เร็วขึ้นชัด)
+--   ⚠️ ป้ายอัปดาเมจ (damageLevel) **ไม่มีผลกับกระบอง** · ดาเมจกระบองขึ้นกับขั้นกระบองอย่างเดียว
+--   ⚠️ โบนัส Robux ดาเมจ (robuxDamageBonus · UI-5) ก็ไม่มีผล — คูณเฉพาะกองทัพ (computeBattlePower)
 --
--- สเกลนี้ตั้งใจให้ "อาวุธขั้น N ตีบอสด่าน N ตายใน 10 ครั้งพอดี" ทุกด่าน
--- (HP บอส 100×10^(N-1) ÷ damage 10×10^(N-1) = 10 เสมอ)
--- ห้ามแก้ DAMAGE_BASE หรือ BossCycle.BOSS_HP_BASE ข้างเดียว ไม่งั้นความรู้สึกจะเพี้ยนทั้งเกม
+-- ⚠️ **ไม่มีตารางตัวเลขดิบ** (บทเรียนเดียวกับ TURRET_TOLL — เก็บเลขดิบแล้วต้องคำนวณมือใหม่ทุกครั้งที่แก้อย่างอื่น)
+--   ดาเมจขั้น N = HP บอสห้องเป้าหมาย (Config.getBossHp) × คูลดาวน์ตีจริง (BossCycle.PLAYER_ATTACK_COOLDOWN)
+--                 ÷ เวลาเป้าหมาย → **ปัดขึ้น**เป็นเลขนัยสำคัญ DAMAGE_SIGNIFICANT_DIGITS ตัว (อย่างน้อย 1)
+--     ปัดขึ้น = ตีตายไม่ช้ากว่าเป้าเสมอ · ขั้น 1–9 เป้า = ห้องเดียวกัน · ขั้น 10 เป้า = ห้องสุดท้าย เร็วกว่า
+--   ราคาขั้น N = รายได้/ชม. ของผู้เล่นอ้างอิงด่าน N (Config.getReferenceIncomePerHour · โมเดลสมดุลเดิม)
+--                × PRICE_INCOME_MINUTES ÷ 60 → ปัดเลขนัยสำคัญ PRICE_SIGNIFICANT_DIGITS ตัว · ขั้น 1 ฟรี (START_TIER)
+--     ขั้น 10 อิงรายได้ด่านสุดท้าย × CAPSTONE_PRICE_INCOME_MINUTES
+--   → แก้ HP บอส / คูลดาวน์ / รายได้ในโมเดล แล้วตารางกระบองขยับตามเอง · validate() ตรวจทุกขั้น
+--   ดูตารางจริง: Config.getClubDamage / getClubPrice / getClubSoloKillSeconds (หรือ luau tools/dump-balance.luau)
+--
+-- ⚠️ ขั้นที่ซื้อเก็บใน PlayerData.weaponLevel (มีตั้งแต่ schema v1 · ไม่แตะ schema) · ค่านอกช่วง clamp ตอนอ่าน (clampClubTier)
 
 Balance.Weapon = {
-	MAX_LEVEL = 10,
-	DAMAGE_BASE = 10,
-	DAMAGE_MULTIPLIER = 10,
-	UPGRADE_BASE_COST = 1000,
-	UPGRADE_COST_MULTIPLIER = 10,
+	MAX_LEVEL = 10, -- ขั้น 1..จำนวนด่าน จับคู่ห้องบอส + ขั้นพิเศษ 1 ขั้น (validate() บังคับ = Stage.COUNT + 1)
+	START_TIER = 1, -- ผู้เล่นใหม่ได้ฟรี · debugResetAll กลับมาที่ขั้นนี้
+
+	-- ขั้น N ตีบอสห้อง N คนเดียวตายใน ~เท่านี้ (วินาที · ปัดดาเมจขึ้น จึงไม่เกินค่านี้)
+	-- ⚠️ ต้องไม่เกินกลางวัน (BossCycle.DAY_SECONDS) — ไม่งั้นพังกำแพง N ขณะบอสห้อง N อยู่ = ติดล็อกอัญเชิญถาวร
+	TARGET_SOLO_KILL_SECONDS = 180,
+	-- ขั้นพิเศษ (ขั้นสุดท้าย) ตีบอสห้องสุดท้ายคนเดียวตายใน ~เท่านี้ (ขั้นก่อนหน้า ~TARGET_SOLO_KILL_SECONDS)
+	CAPSTONE_SOLO_KILL_SECONDS = 60,
+	DAMAGE_SIGNIFICANT_DIGITS = 1, -- 27.8 → 30 · 2.78 → 3 (อ่านง่าย · ขั้น 2–9 โต ×10 เท่ากันพอดี)
+
+	-- ราคา = รายได้กี่นาทีของผู้เล่นอ้างอิงด่านนั้น
+	-- ⚠️ เพดานจากเทสต์สมดุลเดิม "ส่วนเกิน ≥ 1.5 เท่า": ด่าน 4 ตึงสุด → ไม่เกิน ~10 นาที · ตั้ง 5 (ส่วนเกินต่ำสุด 1.70)
+	PRICE_INCOME_MINUTES = 5,
+	-- ขั้นพิเศษ: รายได้ด่านสุดท้ายกี่นาที (แพงมาก — ของเก็บเงินหลังผ่านเกม ไม่อยู่ในโมเดลรายด่าน)
+	CAPSTONE_PRICE_INCOME_MINUTES = 180,
+	PRICE_SIGNIFICANT_DIGITS = 2, -- 17,334 → 17,000
+}
+
+-- 5C: สูตรอาวุธเดิม (×10 ต่อขั้น · ตี 10 ครั้งพอดี · ราคา ×10) ลบแล้ว — validate() กันไม่ให้เติมกลับ
+local REMOVED_WEAPON_KEYS = {
+	DAMAGE_BASE = "Config.getClubDamage(ขั้น) — คำนวณจาก HP บอส",
+	DAMAGE_MULTIPLIER = "Config.getClubDamage(ขั้น) — คำนวณจาก HP บอส",
+	UPGRADE_BASE_COST = "Config.getClubPrice(ขั้น) — คำนวณจากรายได้",
+	UPGRADE_COST_MULTIPLIER = "Config.getClubPrice(ขั้น) — คำนวณจากรายได้",
 }
 
 -- ปิดชุด Balance — ตั้งแต่บรรทัดนี้ลงไปอ่านผ่าน `Config.Balance.<กลุ่ม>` ได้แล้ว
@@ -3248,6 +3287,62 @@ Config.BOSS_ARENA_NAME = "BossArena" -- Model ใต้ Workspace.Map
 Config.BOSS_BARRIER_NAME = "BossBarrier" -- Part ใน BossArena (กำแพงกั้นกลางคืน)
 Config.BOSS_MODEL_NAME = "CycleBoss" -- Model ใน BossArena (ตัวบอส) · 5B-2: ชื่อจริง "CycleBoss{ห้อง}" (Config.getBossModelName)
 Config.WEAPON_TOOL_NAME = "Weapon" -- Tool ที่ server ใส่ Backpack ให้ทุกคน (ถือ/เก็บอัตโนมัติในห้องบอสที่มีสิทธิ์)
+-- 5C: Attribute บน Tool = ขั้นกระบองที่ประกอบไว้ (server เทียบกับ weaponLevel ทุกจังหวะ tick แล้วประกอบใหม่ถ้าไม่ตรง)
+Config.CLUB_TIER_ATTRIBUTE = "ClubTier"
+
+-- ══ 5C: หน้าตากระบองแต่ละขั้น ══ (ของสวย ๆ ไม่ใช่ลูกบิดสมดุล จึงไม่อยู่ใน Balance)
+-- ไม้ → หิน → เหล็ก → ทอง → เรืองแสง · ขนาดโตตามขั้น · handle = ด้าม (ยาวตามแกน Y) · head = หัวกระบองปลายด้าม
+-- material เป็นชื่อ Enum.Material (Config เทสต์นอก Studio ได้ ไม่มี Enum) · glow = ความสว่างไฟ (0 = ไม่มี)
+-- ⚠️ server ประกอบ Part จริงใน Tool (BossService) · client วาดรูปเล็ก 2D ในร้าน (WeaponShopWindow) จากสีชุดเดียวกัน
+export type ClubVisual = {
+	name: string,
+	handleLength: number,
+	handleThickness: number,
+	handleColor: Color3,
+	handleMaterial: string,
+	headSize: Vector3,
+	headColor: Color3,
+	headMaterial: string,
+	glow: number,
+}
+local function club(
+	name: string,
+	handleLength: number,
+	handleColor: Color3,
+	handleMaterial: string,
+	headWidth: number,
+	headLength: number,
+	headColor: Color3,
+	headMaterial: string,
+	glow: number
+): ClubVisual
+	return {
+		name = name,
+		handleLength = handleLength,
+		handleThickness = 0.35,
+		handleColor = handleColor,
+		handleMaterial = handleMaterial,
+		headSize = vec3(headWidth, headLength, headWidth),
+		headColor = headColor,
+		headMaterial = headMaterial,
+		glow = glow,
+	}
+end
+local WOOD = rgb(120, 80, 45)
+local DARK_WOOD = rgb(85, 55, 32)
+local GRIP = rgb(60, 40, 30)
+Config.ClubVisuals = {
+	club("กระบองไม้", 2.6, WOOD, "Wood", 0.9, 1.3, rgb(150, 105, 60), "Wood", 0),
+	club("กระบองไม้แกร่ง", 2.7, DARK_WOOD, "Wood", 1.0, 1.45, rgb(105, 68, 38), "WoodPlanks", 0),
+	club("กระบองหิน", 2.8, WOOD, "Wood", 1.1, 1.55, rgb(125, 125, 130), "Slate", 0),
+	club("กระบองหินแกรนิต", 2.9, DARK_WOOD, "Wood", 1.2, 1.65, rgb(95, 92, 105), "Granite", 0),
+	club("กระบองเหล็ก", 3.0, GRIP, "Fabric", 1.3, 1.75, rgb(150, 155, 165), "Metal", 0),
+	club("กระบองเหล็กกล้า", 3.1, GRIP, "Fabric", 1.4, 1.85, rgb(185, 190, 200), "DiamondPlate", 0),
+	club("กระบองทอง", 3.2, GRIP, "Fabric", 1.5, 1.95, rgb(225, 180, 60), "Metal", 0),
+	club("กระบองทองคำแท้", 3.3, rgb(120, 30, 30), "Fabric", 1.6, 2.05, rgb(255, 205, 70), "Foil", 0.6),
+	club("กระบองเรืองแสง", 3.4, rgb(30, 40, 70), "Metal", 1.7, 2.15, rgb(90, 220, 255), "Neon", 1.5),
+	club("กระบองเทพ", 3.6, rgb(255, 225, 140), "Neon", 1.9, 2.35, rgb(255, 245, 190), "Neon", 3),
+} :: { ClubVisual }
 -- ══ 5B: ไข่บอส ══
 Config.BOSS_EGG_FOLDER = "BossEggs" -- Folder ใน BossArena · Part ไข่อยู่ตลอด ซ่อน/โชว์ตามสถานะ
 --   5B-2: ชื่อ Part = Config.getBossEggPartName(ห้อง, i) = "BossEgg{ห้อง}_{i}" (i = 1..EGGS_PER_NIGHT) · 9 × 6 = 54 ฟอง
@@ -3477,6 +3572,11 @@ function Config.getDamageSignSpot(): (Vector3, Vector3)
 end
 
 -- ร้านขายแม่ = กึ่งกลางแผงร้าน SellStallIndex (ใช้วางจุดกด E และวัดระยะปิดหน้าต่าง)
+-- 5C: ร้านกระบอง = กึ่งกลางแผงร้าน WeaponStallIndex (ป้าย "ซื้ออาวุธ") — วางจุดกด E + วัดระยะปิดหน้าต่าง
+function Config.getWeaponShopSpot(): Vector3
+	return Config.getShopStallCenter(Config.MapDimensions.MapSign.WeaponStallIndex)
+end
+
 function Config.getSellShopSpot(): Vector3
 	return Config.getShopStallCenter(Config.MapDimensions.MapSign.SellStallIndex)
 end
@@ -3510,19 +3610,111 @@ function Config.getPenUpgradeCost(level: number): number?
 end
 
 --------------------------------------------------------------------------------
--- อาวุธ
+-- อาวุธ = กระบอง 10 ขั้น (Phase 5C) — สูตรทั้งหมดอยู่ที่นี่ ตัวเลขตั้งต้นอยู่ใน Balance.Weapon
 --------------------------------------------------------------------------------
 
-function Config.getWeaponDamage(level: number): number
-	local clamped = math.clamp(math.floor(level), 1, Config.Balance.Weapon.MAX_LEVEL)
-	return Config.Balance.Weapon.DAMAGE_BASE * Config.Balance.Weapon.DAMAGE_MULTIPLIER ^ (clamped - 1)
+-- ปัดเป็นเลขนัยสำคัญ `digits` ตัว · roundUp = ปัดขึ้น (ไม่งั้นปัดใกล้สุด) · ≤ 0 = 0
+-- (เผื่อทศนิยมลอยนิดหน่อย: 3.0000000001 ปัดขึ้นไม่กลายเป็น 4)
+function Config.roundSignificant(value: number, digits: number, roundUp: boolean?): number
+	if value <= 0 then
+		return 0
+	end
+	local scale = 10 ^ (math.floor(math.log10(value)) - digits + 1)
+	local scaled = value / scale
+	local rounded = if roundUp then math.ceil(scaled - 1e-9) else math.floor(scaled + 0.5)
+	return rounded * scale
 end
 
+-- ขั้นกระบองจากค่าที่เซฟไว้ (weaponLevel) — **ค่าแปลก/นอกช่วง clamp ไม่ crash**
+-- ไม่ใช่ตัวเลข/NaN = ขั้นเริ่มต้น · ทศนิยมปัดลง · ต่ำกว่า 1 = 1 · เกินเพดาน = เพดาน
+function Config.clampClubTier(raw: any): number
+	local weapon = Config.Balance.Weapon
+	if type(raw) ~= "number" or raw ~= raw then
+		return weapon.START_TIER
+	end
+	return math.clamp(math.floor(raw), 1, weapon.MAX_LEVEL)
+end
+
+-- ห้องบอสที่ขั้นนี้ออกแบบมาตี: ขั้น 1–9 = ห้องเดียวกัน · ขั้นพิเศษ = ห้องสุดท้าย
+function Config.getClubTargetRoom(tier: number): number
+	return math.min(Config.clampClubTier(tier), Config.Balance.Stage.COUNT)
+end
+
+-- ขั้นพิเศษ = ขั้นที่เกินจำนวนห้อง (ขั้น 10)
+function Config.isCapstoneClubTier(tier: number): boolean
+	return Config.clampClubTier(tier) > Config.Balance.Stage.COUNT
+end
+
+-- ดาเมจต่อครั้งของกระบองขั้นนี้ = HP บอสห้องเป้าหมาย × คูลดาวน์ ÷ เวลาเป้าหมาย → ปัดขึ้น (≥ 1)
+-- ⚠️ เป็นจำนวนเต็มเสมอ (≥ 1) — ส่วนแบ่งเงินบอสนับคนที่ทำดาเมจ ≥ BOSS_REWARD_MIN_DAMAGE
+function Config.getClubDamage(tier: number): number
+	local weapon = Config.Balance.Weapon
+	local clamped = Config.clampClubTier(tier)
+	local target = if Config.isCapstoneClubTier(clamped)
+		then weapon.CAPSTONE_SOLO_KILL_SECONDS
+		else weapon.TARGET_SOLO_KILL_SECONDS
+	local raw = Config.getBossHp(Config.getClubTargetRoom(clamped))
+		* Config.Balance.BossCycle.PLAYER_ATTACK_COOLDOWN
+		/ target
+	return math.max(1, Config.roundSignificant(raw, weapon.DAMAGE_SIGNIFICANT_DIGITS, true))
+end
+
+-- ราคาขั้นนี้ (เงินในเกม) · ขั้นเริ่มต้น = 0 (ได้ฟรี) · ขั้นอื่น = รายได้ X นาทีของผู้เล่นอ้างอิงด่านเป้าหมาย
+function Config.getClubPrice(tier: number): number
+	local weapon = Config.Balance.Weapon
+	local clamped = Config.clampClubTier(tier)
+	if clamped <= weapon.START_TIER then
+		return 0
+	end
+	local minutes = if Config.isCapstoneClubTier(clamped)
+		then weapon.CAPSTONE_PRICE_INCOME_MINUTES
+		else weapon.PRICE_INCOME_MINUTES
+	local raw = Config.getReferenceIncomePerHour(Config.getClubTargetRoom(clamped)) * minutes / 60
+	return Config.roundSignificant(raw, weapon.PRICE_SIGNIFICANT_DIGITS)
+end
+
+-- วินาทีที่คนเดียวตีบอสห้องนั้นตายด้วยกระบองขั้นนี้ (จำนวนครั้ง × คูลดาวน์ · นับครั้งแรกเป็นเต็มคูลดาวน์ = ประเมินเผื่อ)
+function Config.getClubSoloKillSeconds(tier: number, room: number): number
+	local hits = math.ceil(Config.getBossHp(room) / Config.getClubDamage(tier))
+	return hits * Config.Balance.BossCycle.PLAYER_ATTACK_COOLDOWN
+end
+
+function Config.getClubVisual(tier: number): ClubVisual
+	return Config.ClubVisuals[Config.clampClubTier(tier)]
+end
+
+function Config.formatClubBoughtMessage(tier: number): string
+	return `ได้กระบองขั้น {tier}`
+end
+
+-- ซื้อกระบองขั้นถัดไปได้ไหม (pure · server เรียกผ่าน PlayerData.buyNextClubTier · เทสต์นอก Studio ได้)
+-- ⚠️ **ไม่มีพารามิเตอร์ขั้น** — ขั้นที่ซื้อ = ขั้นปัจจุบัน (clamp แล้ว) + 1 เสมอ → ข้ามขั้นไม่ได้โดยโครงสร้าง
+-- คืน (ซื้อได้ไหม, เหตุผลถ้าไม่ได้, ขั้นถัดไป, ราคา)
+function Config.planClubPurchase(rawTier: any, coins: any): (boolean, string?, number?, number?)
+	local current = Config.clampClubTier(rawTier)
+	if current >= Config.Balance.Weapon.MAX_LEVEL then
+		return false, "มีกระบองขั้นสูงสุดแล้ว", nil, nil
+	end
+	local nextTier = current + 1
+	local price = Config.getClubPrice(nextTier)
+	if type(coins) ~= "number" or coins ~= coins or coins < price then
+		return false, "เงินไม่พอ", nextTier, price
+	end
+	return true, nil, nextTier, price
+end
+
+-- ⚠️ ชื่อเดิม (5A) — BossService ใช้ดาเมจจากตัวนี้ · ตอนนี้ = ดาเมจกระบอง
+function Config.getWeaponDamage(level: number): number
+	return Config.getClubDamage(level)
+end
+
+-- ราคาอัปจากขั้น level → level + 1 (ชื่อเดิม) · เต็มเพดานแล้ว = nil
 function Config.getWeaponUpgradeCost(level: number): number?
-	if level >= Config.Balance.Weapon.MAX_LEVEL then
+	local current = Config.clampClubTier(level)
+	if current >= Config.Balance.Weapon.MAX_LEVEL then
 		return nil
 	end
-	return Config.Balance.Weapon.UPGRADE_BASE_COST * Config.Balance.Weapon.UPGRADE_COST_MULTIPLIER ^ (level - 1)
+	return Config.getClubPrice(current + 1)
 end
 
 --------------------------------------------------------------------------------
@@ -3726,14 +3918,11 @@ end
 -- รายได้รวมที่ผู้เล่นอ้างอิงได้ "ตลอดการตีด่านนั้น"
 -- = (เงินจากคอก + เงินจากบอส) × เวลาตี + เงินจากการกวาดทหารทั้งด่าน
 -- ด่านที่ไม่มีกำแพง (ด่าน 1) ใช้รายได้ 1 ชั่วโมงแรกเป็นฐานแทน เพราะไม่มี "เวลาตี"
-function Config.getReferenceStageIncome(stage: number): number
+-- รายได้ต่อชั่วโมงของผู้เล่นอ้างอิงที่ด่านนั้น = เงินจากคอก + ส่วนแบ่งเงินบอส (ไม่รวมเงินกวาดทหาร ซึ่งเป็นก้อนเดียวต่อด่าน)
+-- ⚠️ 5C: แยกออกมาจาก getReferenceStageIncome (ตัวเลขเดิมเป๊ะ) — ราคากระบอง (getClubPrice) อ่านตัวนี้
+function Config.getReferenceIncomePerHour(stage: number): number
 	local check = Config.Balance.BalanceCheck
 	local weight = check.REFERENCE_WEIGHT[stage]
-
-	local hours = Config.getReferenceClearHours(stage)
-	if hours <= 0 then
-		hours = 1
-	end
 
 	local penPerHour = Config.getPenCapacity(stage) * Config.getCoinsPerMinute(weight, stage) * 60
 	-- ⚠️ 5B: อัตราบอสของ "โมเดลสมดุล" (BossCycle.MODEL_BOSS_SPAWN_SECONDS = ตัวเลขเดิมของ Balance.Boss ที่ลบแล้ว)
@@ -3742,7 +3931,15 @@ function Config.getReferenceStageIncome(stage: number): number
 		* Config.getBossKillReward(stage)
 		/ check.PLAYERS_PER_SERVER
 
-	return (penPerHour + bossPerHour) * hours + Config.getStageDefenderRewardTotal(stage)
+	return penPerHour + bossPerHour
+end
+
+function Config.getReferenceStageIncome(stage: number): number
+	local hours = Config.getReferenceClearHours(stage)
+	if hours <= 0 then
+		hours = 1
+	end
+	return Config.getReferenceIncomePerHour(stage) * hours + Config.getStageDefenderRewardTotal(stage)
 end
 
 -- ชั่วโมงที่ใช้ตีกำแพงด่านนั้นจนพัง (0 = ด่านที่ไม่มีกำแพง)
@@ -4352,6 +4549,16 @@ function Config.validate()
 	assert(
 		sign.SellCloseDistance > sign.SellPromptDistance,
 		"Config: MapSign.SellCloseDistance ต้องไกลกว่า SellPromptDistance ไม่งั้นกดเปิดร้านแล้วหน้าต่างปิดเองทันที"
+	)
+	-- 5C: ร้านกระบอง = อีกแผงหนึ่ง (ไม่ใช่แผงเดียวกับร้านขายแม่ — จุดกด E สองอันบนเคาน์เตอร์เดียวจะแย่งกัน)
+	assert(
+		sign.WeaponStallIndex >= 1 and sign.WeaponStallIndex <= dim.Shop.StallCount and sign.WeaponStallIndex % 1 == 0,
+		`Config: MapSign.WeaponStallIndex = {sign.WeaponStallIndex} ไม่มีแผงร้านนี้ (มี {dim.Shop.StallCount} แผง)`
+	)
+	assert(sign.WeaponStallIndex ~= sign.SellStallIndex, "Config: ร้านกระบองกับร้านขายแม่ต้องอยู่คนละแผง")
+	assert(
+		sign.WeaponCloseDistance > sign.WeaponPromptDistance,
+		"Config: MapSign.WeaponCloseDistance ต้องไกลกว่า WeaponPromptDistance ไม่งั้นกดเปิดร้านแล้วหน้าต่างปิดเองทันที"
 	)
 	local signHalf = sign.BoardSize.X / 2
 	for penIndex = 1, Config.World.MAX_PENS do
@@ -5108,13 +5315,68 @@ function Config.validate()
 
 	-- (5B: ค่ารีเกิด/จำนวนไข่/เวลากดค้างของ Balance.Boss เดิมย้ายไป BossCycle แล้ว — ตรวจในบล็อกลานบอสข้างบน)
 
-	-- สเกลที่ทำให้ "อาวุธขั้น N ตีบอสด่าน N ตายในจำนวนครั้งเท่ากันทุกด่าน"
-	-- ถ้าตัวคูณสองตัวนี้ไม่เท่ากัน ความรู้สึกตอนสู้บอสจะเพี้ยนไปเรื่อย ๆ ตามด่าน
-	assert(
-		Config.Balance.Weapon.DAMAGE_MULTIPLIER == Config.Balance.BossCycle.BOSS_HP_MULTIPLIER,
-		"Config: ตัวคูณ damage อาวุธกับตัวคูณ HP บอสต้องเท่ากัน ไม่งั้นจำนวนครั้งที่ตีบอสจะเพี้ยนตามด่าน"
-	)
-	assert(Config.Balance.Weapon.MAX_LEVEL >= stage.COUNT, "Config: ขั้นอาวุธต้องมีอย่างน้อยเท่าจำนวนด่าน")
+	-- ══ 5C: กระบอง 10 ขั้น ══ ตารางคำนวณจาก HP บอส/คูลดาวน์/รายได้ — ตรวจผลทุกขั้นตรงนี้
+	do
+		local weapon = Config.Balance.Weapon
+		local cycle = Config.Balance.BossCycle
+		for key, replacement in REMOVED_WEAPON_KEYS do
+			assert(
+				(weapon :: any)[key] == nil,
+				`Config: Balance.Weapon.{key} ลบแล้วใน 5C (สูตรอาวุธเดิม ×10) — ใช้ {replacement} แทน ห้ามเติมกลับ`
+			)
+		end
+		assert(
+			weapon.MAX_LEVEL == stage.COUNT + 1,
+			`Config: กระบองต้องมี {stage.COUNT + 1} ขั้น (ขั้นละห้องบอส + ขั้นพิเศษ 1) — ได้ {weapon.MAX_LEVEL}`
+		)
+		assert(weapon.START_TIER == 1, "Config: กระบองขั้นเริ่มต้นต้องเป็น 1 (ผู้เล่นใหม่ได้ฟรี · PlayerData ตั้ง weaponLevel = 1)")
+		assert(#Config.ClubVisuals == weapon.MAX_LEVEL, `Config: ClubVisuals ต้องมีครบ {weapon.MAX_LEVEL} ขั้น (มี {#Config.ClubVisuals})`)
+		assert(
+			weapon.TARGET_SOLO_KILL_SECONDS > 0 and weapon.TARGET_SOLO_KILL_SECONDS <= cycle.DAY_SECONDS,
+			"Config: TARGET_SOLO_KILL_SECONDS ต้อง > 0 และไม่เกินกลางวัน (ไม่งั้นติดล็อกอัญเชิญ)"
+		)
+		assert(
+			weapon.CAPSTONE_SOLO_KILL_SECONDS > 0 and weapon.CAPSTONE_SOLO_KILL_SECONDS < weapon.TARGET_SOLO_KILL_SECONDS,
+			"Config: CAPSTONE_SOLO_KILL_SECONDS ต้องเร็วกว่า TARGET_SOLO_KILL_SECONDS (ขั้นพิเศษต้องตีห้องสุดท้ายเร็วขึ้น)"
+		)
+		assert(weapon.PRICE_INCOME_MINUTES > 0, "Config: PRICE_INCOME_MINUTES ต้องมากกว่า 0")
+		assert(
+			weapon.CAPSTONE_PRICE_INCOME_MINUTES > weapon.PRICE_INCOME_MINUTES,
+			"Config: ขั้นพิเศษต้องแพงกว่าขั้นปกติ (CAPSTONE_PRICE_INCOME_MINUTES > PRICE_INCOME_MINUTES)"
+		)
+		assert(Config.getClubPrice(weapon.START_TIER) == 0, "Config: กระบองขั้นเริ่มต้นต้องฟรี")
+		for tier = 1, weapon.MAX_LEVEL do
+			local damage = Config.getClubDamage(tier)
+			local visual = Config.ClubVisuals[tier]
+			assert(
+				damage >= 1 and damage % 1 == 0 and damage >= Config.Balance.Economy.BOSS_REWARD_MIN_DAMAGE,
+				`Config: ดาเมจกระบองขั้น {tier} ต้องเป็นจำนวนเต็ม ≥ 1 (ได้ {damage})`
+			)
+			assert(type(visual.name) == "string" and visual.name ~= "", `Config: กระบองขั้น {tier} ไม่มีชื่อ`)
+			if tier > 1 then
+				assert(damage > Config.getClubDamage(tier - 1), `Config: ดาเมจกระบองขั้น {tier} ต้องมากกว่าขั้น {tier - 1}`)
+				local price = Config.getClubPrice(tier)
+				assert(price > 0 and price % 1 == 0, `Config: ราคากระบองขั้น {tier} ต้องเป็นจำนวนเต็มบวก (ได้ {price})`)
+				assert(price > Config.getClubPrice(tier - 1), `Config: ราคากระบองขั้น {tier} ต้องแพงกว่าขั้น {tier - 1}`)
+			end
+		end
+		-- ⚠️ หัวใจของ 5C: ขั้น N ตีบอสห้อง N คนเดียวตาย**ภายในกลางวัน** — ไม่งั้นพังกำแพง N ขณะบอสอยู่ = ติดล็อกถาวร
+		for room = 1, stage.COUNT do
+			local seconds = Config.getClubSoloKillSeconds(room, room)
+			assert(
+				seconds <= weapon.TARGET_SOLO_KILL_SECONDS and seconds <= cycle.DAY_SECONDS,
+				`Config: กระบองขั้น {room} ตีบอสห้อง {room} คนเดียว {seconds} วิ เกินเป้า {weapon.TARGET_SOLO_KILL_SECONDS} วิ `
+					.. `/ กลางวัน {cycle.DAY_SECONDS} วิ — ติดล็อกอัญเชิญ`
+			)
+		end
+		-- ขั้นพิเศษตีห้องสุดท้ายเร็วกว่าขั้นก่อนหน้า**ชัดเจน** (อย่างน้อยครึ่งหนึ่งของเวลาเดิม)
+		local capstone = Config.getClubSoloKillSeconds(weapon.MAX_LEVEL, stage.COUNT)
+		local previous = Config.getClubSoloKillSeconds(weapon.MAX_LEVEL - 1, stage.COUNT)
+		assert(
+			capstone <= weapon.CAPSTONE_SOLO_KILL_SECONDS and capstone * 2 <= previous,
+			`Config: กระบองขั้นพิเศษตีห้อง {stage.COUNT} {capstone} วิ ไม่เร็วกว่าขั้นก่อน ({previous} วิ) ชัดเจนพอ`
+		)
+	end
 
 	----------------------------------------------------------------------------
 	-- แหล่งที่มาของไข่ + Developer Product
@@ -5478,10 +5740,10 @@ function Config.validate()
 	----------------------------------------------------------------------------
 	-- ราคาของทุกอย่างโต ×10 ต่อขั้น ถ้าบ่อเงินโตช้ากว่านั้น มันจะกลายเป็นเศษเงิน
 	-- กลางเกม แล้วผู้เล่นจะกลับไปติดปัญหาเดิม: มีบ่อเงินแต่ซื้ออะไรไม่ได้
+	-- ⚠️ 5C: กระบองไม่อยู่ในนี้แล้ว — ราคากระบองคำนวณจากรายได้ด่านนั้น (getClubPrice) จึงโตเท่ารายได้โดยโครงสร้าง
 	local priceGrowth = math.max(
 		Config.Balance.Pen.UPGRADE_COST_MULTIPLIER,
-		Config.Balance.Production.UPGRADE_COST_MULTIPLIER,
-		Config.Balance.Weapon.UPGRADE_COST_MULTIPLIER
+		Config.Balance.Production.UPGRADE_COST_MULTIPLIER
 	)
 
 	assert(economy.KILL_DEFENDER_BASE > 0, "Config: KILL_DEFENDER_BASE ต้องมากกว่า 0")

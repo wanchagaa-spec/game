@@ -265,4 +265,52 @@ return function(t, Config)
 			Config.getWalkSpeed(2)
 		)
 	end
+	print("── 5C กระบอง: PlayerData.buyNextClubTier (ตรวจ + หักเงิน + เพิ่มขั้นก้อนเดียว) ──")
+	do
+		local W = Config.Balance.Weapon
+		local data = freshData()
+		check("ผู้เล่นใหม่ weaponLevel = ขั้นเริ่มต้น (ฟรี)", data.weaponLevel, W.START_TIER)
+		data.currency.coins = 0
+		local ok, reason = PlayerData.buyNextClubTier(data)
+		check("เงิน 0 → ซื้อไม่ได้", ok, false)
+		check("  เหตุผล เงินไม่พอ", reason, "เงินไม่พอ")
+		check("  ขั้นไม่เปลี่ยน", data.weaponLevel, 1)
+
+		data.currency.coins = Config.getClubPrice(2) + Config.getClubPrice(3) - 1
+		local okA, _, tierA, priceA = PlayerData.buyNextClubTier(data)
+		check("ซื้อทีละขั้น: ได้ขั้น 2", okA and tierA == 2 and data.weaponLevel == 2, true)
+		check("  จ่ายราคาขั้น 2", priceA, Config.getClubPrice(2))
+		local okB = PlayerData.buyNextClubTier(data)
+		check("เงินขาด 1 สำหรับขั้น 3 → ไม่ได้ (ข้ามไปขั้นถูกกว่าไม่ได้)", okB == false and data.weaponLevel == 2, true)
+		check("  เงินไม่ติดลบ", data.currency.coins >= 0, true)
+
+		-- กดรัว: ซื้อต่อเนื่องจนเงินหมด — ได้เรียงขั้น ไม่ข้าม ไม่เกินเพดาน เงินไม่ติดลบ
+		data.currency.coins = 1e18
+		local seen = {}
+		for _ = 1, 40 do
+			local okLoop, _, tierLoop = PlayerData.buyNextClubTier(data)
+			if okLoop then
+				table.insert(seen, tierLoop)
+			end
+		end
+		local sequential = #seen == W.MAX_LEVEL - 2
+		for i, tier in seen do
+			if tier ~= i + 2 then
+				sequential = false
+			end
+		end
+		check("ซื้อรัว 40 ครั้ง → ได้ขั้น 3..10 เรียงทีละขั้น ครั้งละขั้นเดียว", sequential, true)
+		check("  หยุดที่เพดาน 10", data.weaponLevel, W.MAX_LEVEL)
+		check("  เงินไม่ติดลบ", data.currency.coins >= 0, true)
+
+		-- ค่าเก่าแปลก ๆ ในเซฟ
+		data.weaponLevel = -4
+		data.currency.coins = Config.getClubPrice(2)
+		local okC, _, tierC = PlayerData.buyNextClubTier(data)
+		check("weaponLevel เก่าติดลบ → clamp เป็น 1 → ได้ขั้น 2 (เขียนค่าถูกทับ)", okC and tierC == 2 and data.weaponLevel == 2, true)
+		data.weaponLevel = 0 / 0
+		data.currency.coins = Config.getClubPrice(2)
+		local okD = PlayerData.buyNextClubTier(data)
+		check("weaponLevel เก่าเป็น NaN → clamp เป็น 1 → ได้ขั้น 2 ไม่ crash", okD and data.weaponLevel == 2, true)
+	end
 end

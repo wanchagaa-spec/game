@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Smoke test ของ UI ฝั่ง client (UI-1 · UI-2 · UI-3 · UI-4 · UI-5 · Phase 5A): Hotbar · BagWindow · SidePanels · UiKit · SellWindow
-· MapSigns · SummonWindow · IndexWindow · RobuxShopWindow · BossHud
+"""Smoke test ของ UI ฝั่ง client (UI-1 · UI-2 · UI-3 · UI-4 · UI-5 · Phase 5A · 5C): Hotbar · BagWindow · SidePanels · UiKit · SellWindow
+· MapSigns · SummonWindow · IndexWindow · RobuxShopWindow · BossHud · WeaponShopWindow
 
     python3 tools/check-ui-smoke.py
 
@@ -18,7 +18,7 @@ LUAU = os.environ.get('LUAU') or shutil.which('luau')
 if not LUAU:
     sys.exit('หา luau CLI ไม่เจอ — ติดตั้งแล้วใส่ใน PATH หรือสั่ง LUAU=/path/to/luau python3 ...')
 
-MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns', 'SummonWindow', 'IndexWindow', 'RobuxShopWindow', 'BossHud']
+MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns', 'SummonWindow', 'IndexWindow', 'RobuxShopWindow', 'BossHud', 'WeaponShopWindow']
 
 MOCK = r'''--!nocheck
 local Config = require("./src/shared/Config")
@@ -930,6 +930,13 @@ do
 	local counter = newInstance("Part")
 	counter.Name = "Counter"
 	counter.Parent = stall
+	-- 5C: แผงร้านกระบอง (ป้าย "ซื้ออาวุธ" · MapSign.WeaponStallIndex)
+	local weaponStall = newInstance("Model")
+	weaponStall.Name = `Stall{Config.MapDimensions.MapSign.WeaponStallIndex}`
+	weaponStall.Parent = shopFolder
+	local weaponCounter = newInstance("Part")
+	weaponCounter.Name = "Counter"
+	weaponCounter.Parent = weaponStall
 	-- UI-3: แท่นอัญเชิญ (MapBuilder.buildSummonPedestal · Config.SUMMON_PEDESTAL_NAME)
 	local pedestal = newInstance("Model")
 	pedestal.Name = Config.SUMMON_PEDESTAL_NAME
@@ -942,7 +949,15 @@ do
 	local playerGui = newInstance("PlayerGui")
 	local shopOpen = false
 	local summonOpen = false
+	local weaponOpen = false
 	local signActions = {
+		openWeaponShop = function()
+			weaponOpen = true
+		end,
+		closeWeaponShop = record("closeWeaponShop"),
+		isWeaponShopOpen = function()
+			return weaponOpen
+		end,
 		buy = record("buy"),
 		openSellShop = function()
 			shopOpen = true
@@ -1056,6 +1071,16 @@ do
 	check("  props อื่นยังใช้ได้", forced.ActionText, "ทดสอบ")
 	sellPrompt.Triggered:Fire(localPlayer)
 	check("  กด E → เปิดร้าน", shopOpen, true)
+
+	-- 5C: ร้านกระบอง — จุดกด E ที่เคาน์เตอร์แผง "ซื้ออาวุธ" (UiKit.prompt · OnePerButton)
+	local weaponPrompt = findDescendant(weaponCounter, "WeaponShopPrompt")
+	check("แผงร้านกระบอง (ซื้ออาวุธ) มีจุดกด E", weaponPrompt ~= nil)
+	check("  ชื่อร้าน \"ร้านกระบอง\"", weaponPrompt.ObjectText, "ร้านกระบอง")
+	check("  ขึ้นเฉพาะอันที่ใกล้สุด (OnePerButton)", weaponPrompt.Exclusivity, "Enum.ProximityPromptExclusivity.OnePerButton")
+	check("  ไม่ติดซ้ำบนเคาน์เตอร์ร้านขายแม่", findDescendant(counter, "WeaponShopPrompt") == nil)
+	check("  กดครั้งเดียวเปิด (ไม่ต้องกดค้าง)", weaponPrompt.HoldDuration or 0, 0)
+	weaponPrompt.Triggered:Fire(localPlayer)
+	check("  กด E → เปิดร้านกระบอง", weaponOpen, true)
 
 	-- UI-3: แท่นอัญเชิญ — กด E ค้าง (ไม่ใช่กดครั้งเดียว) · ผ่าน UiKit.prompt (OnePerButton)
 	local summonPrompt = findDescendant(pedestalCore, "SummonPrompt")
@@ -1623,6 +1648,107 @@ do
 
 	RobuxShopWindow.close()
 	check("ปิดหน้าต่าง", RobuxShopWindow.isOpen(), false)
+end
+
+print("\n━━ WeaponShopWindow: ร้านกระบอง 10 ขั้น (Phase 5C) ━━")
+do
+	local WeaponShopWindow = loaded.WeaponShopWindow
+	local shopPayload = makePayload()
+	shopPayload.clubTier = 3
+	shopPayload.clubMaxTier = Config.Balance.Weapon.MAX_LEVEL
+	shopPayload.coins = Config.getClubPrice(4) - 1 -- ขาดอีก 1 ถึงจะซื้อขั้น 4 ได้
+	WeaponShopWindow.create(gui, { buyNext = record("buyNext"), notify = record("notify") })
+	check("setPayload ตอนหน้าต่างปิดไม่ error", pcall(WeaponShopWindow.setPayload, shopPayload))
+	check("เปิดหน้าต่างไม่ error", pcall(WeaponShopWindow.open))
+	check("isOpen", WeaponShopWindow.isOpen())
+	local win = findDescendant(gui, "WeaponShopWindow")
+	local rowCount = 0
+	for tier = 1, 20 do
+		if findDescendant(win, `ClubRow{tier}`) then
+			rowCount += 1
+		end
+	end
+	check("มีครบ 10 แถว", rowCount, 10)
+
+	-- ══ 3 สถานะของแถว ══
+	local function rowPart(tier, name)
+		return findDescendant(findDescendant(win, `ClubRow{tier}`), name)
+	end
+	local ownedOk, lockedOk = true, true
+	for tier = 1, 3 do
+		if WeaponShopWindow.getRowState(tier) ~= "owned" or rowPart(tier, "Status").Text ~= "✔ มีแล้ว"
+			or rowPart(tier, "Buy").Visible or rowPart(tier, "LockedShade").Visible then
+			ownedOk = false
+		end
+	end
+	check("สถานะ 1 — ขั้น 1–3 (มีแล้ว): ✔ มีแล้ว · ไม่มีปุ่มซื้อ · ไม่มีม่านเทา", ownedOk)
+	check("สถานะ 2 — ขั้น 4 (ถัดไป): ปุ่มซื้อโผล่", WeaponShopWindow.getRowState(4) == "next" and rowPart(4, "Buy").Visible, true)
+	local buyColor = rowPart(4, "Buy").BackgroundColor3
+	check("  ปุ่มซื้อสีเขียว (มาตรฐาน ซื้อ = เขียว)", buyColor.G > buyColor.R and buyColor.G > buyColor.B, true)
+	check("  ไม่มีม่านเทา", rowPart(4, "LockedShade").Visible, false)
+	for tier = 5, 10 do
+		if WeaponShopWindow.getRowState(tier) ~= "locked" or rowPart(tier, "Status").Text ~= "ซื้อขั้นก่อนหน้าก่อน"
+			or rowPart(tier, "Buy").Visible or not rowPart(tier, "LockedShade").Visible then
+			lockedOk = false
+		end
+	end
+	check("สถานะ 3 — ขั้น 5–10 (ล็อก): เห็นแต่เทา + \"ซื้อขั้นก่อนหน้าก่อน\" · ไม่มีปุ่มซื้อ", lockedOk)
+
+	-- ══ ราคาแดงเมื่อเงินไม่พอ ══
+	local price4 = rowPart(4, "Price")
+	check("เงินไม่พอ → ราคาขั้นถัดไปสีแดง", price4.TextColor3.R > 0.8 and price4.TextColor3.G < 0.4, true)
+	check("  describeRow บอก poor", WeaponShopWindow.describeRow(4, shopPayload).priceTone, "poor")
+	check("  ราคาแสดงจาก Config", price4.Text, `฿{UiKit.formatShort(Config.getClubPrice(4))}`)
+	shopPayload.coins = Config.getClubPrice(4)
+	WeaponShopWindow.setPayload(shopPayload)
+	check("เงินพอดี → ราคาไม่แดง (สีทอง)", price4.TextColor3.R > 0.9 and price4.TextColor3.G > 0.8, true)
+	check("  describeRow บอก price", WeaponShopWindow.describeRow(4, shopPayload).priceTone, "price")
+	check("ขั้น 1 ราคา \"ฟรี\"", rowPart(1, "Price").Text, "ฟรี")
+	check("ดาเมจขั้น 5 จาก Config", rowPart(5, "Damage").Text, `⚔ {UiKit.formatShort(Config.getClubDamage(5))} / ครั้ง`)
+	check("ชื่อขั้น 1", rowPart(1, "ClubName").Text, Config.getClubVisual(1).name)
+	check("มีรูปกระบองเล็ก (หัว + ด้าม)", rowPart(9, "Head") ~= nil and rowPart(9, "Handle") ~= nil, true)
+
+	-- ══ กดซื้อ = ยิง action ไม่มีพารามิเตอร์ (server ซื้อขั้นถัดไปเอง) ══
+	rowPart(4, "Buy").Activated:Fire()
+	check("กดซื้อ → buyNext()", lastCall().name, "buyNext")
+	check("  ไม่ส่งเลขขั้น", lastCall().args.n, 0)
+	shopPayload.clubTier = 4
+	WeaponShopWindow.setPayload(shopPayload)
+	check("sync หลังซื้อ → ขั้น 4 มีแล้ว · ขั้น 5 ถัดไป · ขั้น 6 ล็อก",
+		WeaponShopWindow.getRowState(4) == "owned" and WeaponShopWindow.getRowState(5) == "next"
+			and WeaponShopWindow.getRowState(6) == "locked", true)
+
+	-- ══ ขอบ ══
+	shopPayload.clubTier = Config.Balance.Weapon.MAX_LEVEL
+	WeaponShopWindow.setPayload(shopPayload)
+	local anyNotOwned = false
+	for tier = 1, 10 do
+		if WeaponShopWindow.getRowState(tier) ~= "owned" then
+			anyNotOwned = true
+		end
+	end
+	check("ขั้น 10 แล้ว → ทุกแถวมีแล้ว ไม่มีปุ่มซื้อ", anyNotOwned, false)
+	shopPayload.clubTier = 99
+	check("clubTier แปลก (99) ไม่ error · ถือเป็นขั้น 10", pcall(WeaponShopWindow.setPayload, shopPayload)
+		and WeaponShopWindow.getRowState(10) == "owned", true)
+	shopPayload.clubTier = nil
+	check("ไม่มี clubTier → ถือว่าขั้น 1 (ขั้น 2 = ถัดไป)", pcall(WeaponShopWindow.setPayload, shopPayload)
+		and WeaponShopWindow.getRowState(1) == "owned" and WeaponShopWindow.getRowState(2) == "next", true)
+	check("describeRow ก่อนมี sync ไม่ error", (pcall(WeaponShopWindow.describeRow, 3, nil)))
+	WeaponShopWindow.close()
+	check("ปิดหน้าต่าง", WeaponShopWindow.isOpen(), false)
+end
+
+print("\n━━ BossHud: เลขดาเมจเด้งเหนือบอส (Phase 5C · เทียบ HP ห้องนั้นกับค่าก่อนหน้า) ━━")
+do
+	local BossHud = loaded.BossHud
+	check("ค่าแรกของห้อง → ไม่เด้ง", BossHud.onBossHpChanged(3, 10000) == nil)
+	check("HP ลด 30 → เด้ง 30", BossHud.onBossHpChanged(3, 9970), 30)
+	check("HP ลดอีก 60 (ตีสองคนในรอบเดียว) → เด้ง 60", BossHud.onBossHpChanged(3, 9910), 60)
+	check("HP เพิ่ม (บอสเกิด/ฟื้นกลางคืน) → ไม่เด้ง", BossHud.onBossHpChanged(3, 10000) == nil)
+	check("ห้องอื่นแยกกัน (ค่าแรกของห้อง 4) → ไม่เด้ง", BossHud.onBossHpChanged(4, 100000) == nil)
+	check("ตีตาย (HP → 0) → เด้งส่วนที่เหลือ", BossHud.onBossHpChanged(3, 0), 10000)
+	check("ค่าแปลก → ไม่เด้ง ไม่ error", BossHud.onBossHpChanged(3, "x") == nil)
 end
 
 print("\n━━ BossHud: ตัวเลขนับถอยหลังบนกำแพงกั้นบอส (Phase 5A) ━━")

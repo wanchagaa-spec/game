@@ -59,6 +59,8 @@ local RobuxShopWindow = require(script.Parent:WaitForChild("RobuxShopWindow"))
 local WeaponShopWindow = require(script.Parent:WaitForChild("WeaponShopWindow"))
 -- Phase 5A: ตัวเลขนับถอยหลังบนกำแพงกั้นบอส (อ่านสถานะจาก Attribute ที่ server ตั้ง ไม่ผ่าน FarmStateSync)
 local BossHud = require(script.Parent:WaitForChild("BossHud"))
+-- ท้องฟ้ากลางคืน: กลางคืนของวงจรบอส = พระจันทร์ + มืดลง (Lighting ของเครื่องตัวเอง · ภาพล้วน)
+local NightSky = require(script.Parent:WaitForChild("NightSky"))
 
 local MarketplaceService = game:GetService("MarketplaceService")
 
@@ -1013,6 +1015,8 @@ end, function(room: number, damage: number)
 	local top = Config.getBossCornerCenter(room) + Vector3.new(0, Config.MapDimensions.BossArena.BossSize.Y, 0)
 	CombatEffects.floatingText(top, `-{UiKit.formatShort(damage)}`, BOSS_HIT_COLOR)
 end)
+-- กลางคืน = เปลี่ยนฟ้าเป็นพระจันทร์ + มืดลง · เช้า = กลับค่าเดิม (อ่าน Phase บน BossState ตัวเดียวกับ BossHud)
+NightSky.start()
 
 print("[egg-army-game] client พร้อมแล้ว")
 print("   จำลองด่านที่พังแล้วเพื่อทดสอบกำแพง (ค่าจริงจาก sync จะเขียนทับทันที): WallRenderer.setWallProgress(n)")

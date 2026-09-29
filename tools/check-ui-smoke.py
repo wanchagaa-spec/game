@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Smoke test ของ UI ฝั่ง client (UI-1 · UI-2 · UI-3 · UI-4 · UI-5 · Phase 5A · 5C · 5D): Hotbar · BagWindow · SidePanels · UiKit · SellWindow
-· MapSigns · SummonWindow · IndexWindow · RobuxShopWindow · BossHud · WeaponShopWindow · HealthBar
+· MapSigns · SummonWindow · IndexWindow · RobuxShopWindow · BossHud · WeaponShopWindow · HealthBar · NightSky
 
     python3 tools/check-ui-smoke.py
 
@@ -18,7 +18,7 @@ LUAU = os.environ.get('LUAU') or shutil.which('luau')
 if not LUAU:
     sys.exit('หา luau CLI ไม่เจอ — ติดตั้งแล้วใส่ใน PATH หรือสั่ง LUAU=/path/to/luau python3 ...')
 
-MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns', 'SummonWindow', 'IndexWindow', 'RobuxShopWindow', 'BossHud', 'WeaponShopWindow', 'HealthBar']
+MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns', 'SummonWindow', 'IndexWindow', 'RobuxShopWindow', 'BossHud', 'WeaponShopWindow', 'HealthBar', 'NightSky']
 
 MOCK = r'''--!nocheck
 local Config = require("./src/shared/Config")
@@ -198,6 +198,14 @@ function Methods.FindFirstChild(self, name)
 	return nil
 end
 Methods.WaitForChild = Methods.FindFirstChild
+function Methods.FindFirstChildOfClass(self, className)
+	for _, child in rawget(self, "__children") do
+		if rawget(child, "__class") == className then
+			return child
+		end
+	end
+	return nil
+end
 -- โมเดลตัวละคร (เทมเพลตใน ReplicatedStorage.MotherModelTemplates) — พอให้ UiKit.setPortrait สร้าง ViewportFrame ได้
 function Methods.Clone(self)
 	local copy = newInstance(rawget(self, "__class"))
@@ -1925,6 +1933,70 @@ do
 	check("relayout ซ้ำไม่ error", (pcall(HealthBar.relayout)))
 end
 
+print("\n━━ NightSky: กลางคืน = พระจันทร์ + มืดลง · เช้ากลับค่าเดิม · เวลาในวันเดินหน้าเสมอ ━━")
+do
+	local NightSky = loaded.NightSky
+	local sky = Config.NightSky
+	check("เวลาเดินหน้า 14 → 0 ครึ่งทาง = 19 (ตกดิน ไม่ย้อนผ่านเช้า)", NightSky.forwardClock(14, 0, 0.5), 19)
+	check("เวลาเดินหน้า 0 → 14 ครึ่งทาง = 7 (รุ่งเช้า ไม่ย้อน)", NightSky.forwardClock(0, 14, 0.5), 7)
+	check("  ปลายทางพอดี = 0", NightSky.forwardClock(14, 0, 1), 0)
+
+	local lighting = Instance.new("Lighting")
+	local dayAmbient = Color3.fromRGB(70, 70, 70)
+	local dayOutdoor = Color3.fromRGB(128, 128, 128)
+	lighting.ClockTime = 14
+	lighting.Brightness = 2
+	lighting.ExposureCompensation = 0
+	lighting.Ambient = dayAmbient
+	lighting.OutdoorAmbient = dayOutdoor
+	NightSky.attach(lighting)
+	check("เริ่มกลางวัน: ไม่มี Sky ที่สร้างเอง", lighting:FindFirstChildOfClass("Sky") == nil, true)
+	check("  phase เดิม (day) → ไม่เปลี่ยน", NightSky.setPhase("day", 0), false)
+	check("  phase แปลก (nil) = กลางวัน → ไม่เปลี่ยน", NightSky.setPhase(nil, 0), false)
+	check("เข้ากลางคืน → เปลี่ยน", NightSky.setPhase("night", 100), true)
+	local moonSky = lighting:FindFirstChildOfClass("Sky")
+	check("  สร้าง Sky ชั่วคราว · พระจันทร์ใหญ่ขึ้น", moonSky and moonSky.MoonAngularSize, sky.MOON_ANGULAR_SIZE)
+	check("  ยังไม่ทันเปลี่ยน (t = 0) = ค่ากลางวัน", lighting.ClockTime, 14)
+	NightSky.step(100 + sky.TRANSITION_SECONDS / 2)
+	check("  ครึ่งทาง: ช่วงตกดิน (เวลา 14 → 24)", lighting.ClockTime > 14 and lighting.ClockTime < 24, true)
+	check("  ครึ่งทาง: มืดลงแล้วแต่ยังไม่สุด", lighting.Brightness < 2 and lighting.Brightness > 2 * sky.BRIGHTNESS_SCALE, true)
+	check("  ครบเวลา → เสร็จ", NightSky.step(100 + sky.TRANSITION_SECONDS), 1)
+	check("  เที่ยงคืน (เห็นพระจันทร์)", lighting.ClockTime, sky.CLOCK_TIME)
+	check("  ความสว่าง = กลางวัน × สเกล", lighting.Brightness, 2 * sky.BRIGHTNESS_SCALE)
+	check("  exposure ลดลงตาม offset", lighting.ExposureCompensation, sky.EXPOSURE_OFFSET)
+	check("  สี ambient แสงจันทร์", lighting.Ambient == sky.AMBIENT and lighting.OutdoorAmbient == sky.OUTDOOR_AMBIENT, true)
+	check("  กลางคืนซ้ำ → ไม่เปลี่ยน", NightSky.setPhase("night", 150), false)
+
+	check("เข้ากลางวัน → เปลี่ยน", NightSky.setPhase("day", 200), true)
+	NightSky.step(200 + sky.TRANSITION_SECONDS / 2)
+	check("  ครึ่งทาง: รุ่งเช้า (เวลา 0 → 14 เดินหน้า)", lighting.ClockTime > 0 and lighting.ClockTime < 14, true)
+	check("  ระหว่างรุ่งเช้ายังเห็นพระจันทร์ (Sky ยังอยู่)", lighting:FindFirstChildOfClass("Sky") ~= nil, true)
+	NightSky.step(200 + sky.TRANSITION_SECONDS)
+	check("  กลับเวลากลางวันเดิม", lighting.ClockTime, 14)
+	check("  ความสว่างเดิม", lighting.Brightness, 2)
+	check("  exposure เดิม", lighting.ExposureCompensation, 0)
+	check("  สี ambient เดิม", lighting.Ambient == dayAmbient and lighting.OutdoorAmbient == dayOutdoor, true)
+	check("  ลบ Sky ที่สร้างเองแล้ว", lighting:FindFirstChildOfClass("Sky") == nil, true)
+
+	-- เกมมี Sky อยู่แล้ว: ขยายพระจันทร์ชั่วคราว · เช้าคืนขนาดเดิม · ไม่สร้าง/ไม่ลบ Sky
+	local lighting2 = Instance.new("Lighting")
+	lighting2.ClockTime = 12
+	lighting2.Brightness = 3
+	lighting2.ExposureCompensation = 0.2
+	lighting2.Ambient = dayAmbient
+	lighting2.OutdoorAmbient = dayOutdoor
+	local ownSky = Instance.new("Sky")
+	ownSky.MoonAngularSize = 11
+	ownSky.Parent = lighting2
+	NightSky.attach(lighting2)
+	check("เข้าเกมตอนกลางคืน (instant) → มืดทันที", NightSky.setPhase("night", 0, true) and lighting2.ClockTime == sky.CLOCK_TIME, true)
+	check("  ใช้ Sky เดิม ขยายพระจันทร์ (ไม่สร้างเพิ่ม)", #lighting2:GetChildren() == 1 and ownSky.MoonAngularSize == sky.MOON_ANGULAR_SIZE, true)
+	NightSky.setPhase("day", 10)
+	NightSky.step(10 + sky.TRANSITION_SECONDS)
+	check("  เช้า: พระจันทร์คืนขนาดเดิม · Sky เดิมยังอยู่", ownSky.MoonAngularSize == 11 and ownSky.Parent == lighting2, true)
+	check("  ความสว่าง/exposure กลับค่าเดิมของเกมนี้", lighting2.Brightness == 3 and lighting2.ExposureCompensation == 0.2, true)
+end
+
 print(string.format("\n=== ผ่าน %d / ตก %d ===", passCount, failCount))
 if failCount > 0 then
 	error(`มีเทสต์ตก {failCount} เคส`, 0)
@@ -1971,6 +2043,7 @@ static_checks = [
     ('Main สร้างแถบเลือดเหนือ hotbar (HealthBar.create(hud, Hotbar.getFrame()))', 'HealthBar.create(hud, Hotbar.getFrame())' in main_src),
     ('Main ต่อแถบเลือดกับตัวละคร (HealthBar.start())', 'HealthBar.start()' in main_src),
     ('Main ปิดแถบเลือด/จอแดงของ Roblox (CoreGuiType.Health) กันซ้อนสองชุด', 'SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)' in main_src),
+    ('Main เปิดท้องฟ้ากลางคืน (NightSky.start())', 'NightSky.start()' in main_src),
 ]
 static_fail = 0
 for label, ok in static_checks:
@@ -1978,4 +2051,4 @@ for label, ok in static_checks:
     if not ok:
         static_fail += 1
 if static_fail:
-    sys.exit(f'ต่อสาย HealthBar ใน Main.client.lua ไม่ครบ {static_fail} ข้อ')
+    sys.exit(f'ต่อสาย HealthBar/NightSky ใน Main.client.lua ไม่ครบ {static_fail} ข้อ')

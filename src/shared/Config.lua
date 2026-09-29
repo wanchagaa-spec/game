@@ -3424,6 +3424,20 @@ Config.ClubVisuals = {
 	club("กระบองเรืองแสง", 3.4, rgb(30, 40, 70), "Metal", 1.7, 2.15, rgb(90, 220, 255), "Neon", 1.5),
 	club("กระบองเทพ", 3.6, rgb(255, 225, 140), "Neon", 1.9, 2.35, rgb(255, 245, 190), "Neon", 3),
 } :: { ClubVisual }
+-- ══ ท้องฟ้ากลางคืน (วงจรบอส) ══ (ของสวย ๆ ไม่ใช่ลูกบิดสมดุล จึงไม่อยู่ใน Balance)
+-- ผู้ใช้สั่ง: กลางคืนเปลี่ยนฟ้าเป็นพระจันทร์ + มืดลง · client (NightSky.lua) ปรับ Lighting ของเครื่องตัวเองตาม Phase บน BossState
+-- ⚠️ ภาพล้วน — Lighting ที่ client แก้ไม่ replicate และไม่มีผลกับการตัดสินใด ๆ ของ server · ไม่แตะเวลาวงจร (อ่าน Phase อย่างเดียว)
+-- ค่ากลางวัน = ค่าที่อ่านจาก Lighting ตอนเริ่ม (server ไม่เคยแก้ Lighting) → เช้ากลับค่าเดิมเป๊ะ ไม่เดาเอง
+-- ความสว่าง/exposure ของกลางคืนคิด**จากค่ากลางวัน** (สเกล/บวกลบ) · สี ambient เป็นค่าตายตัว (น้ำเงินเข้มแบบแสงจันทร์)
+Config.NightSky = {
+	CLOCK_TIME = 0, -- เที่ยงคืน: พระอาทิตย์ใต้ขอบฟ้า · พระจันทร์ + ดาวขึ้น (ClockTime ของ Roblox 0–24)
+	BRIGHTNESS_SCALE = 0.4, -- × Lighting.Brightness กลางวัน (แสงจันทร์อ่อนกว่าแดด)
+	EXPOSURE_OFFSET = -0.35, -- + Lighting.ExposureCompensation กลางวัน (ติดลบ = ทั้งจอมืดลง)
+	AMBIENT = rgb(35, 40, 70), -- เงาในร่ม: น้ำเงินเข้ม
+	OUTDOOR_AMBIENT = rgb(60, 70, 110), -- กลางแจ้ง: น้ำเงินหม่น (ยังมองทางเดินออก)
+	MOON_ANGULAR_SIZE = 22, -- องศา · Roblox ตั้งต้น 11 → ใหญ่ขึ้นเท่าตัวให้เห็นชัด
+	TRANSITION_SECONDS = 4, -- ฟ้าค่อย ๆ มืด/สว่าง (ต้นกลางคืน · ต้นกลางวัน) · ≤ ครึ่งกลางคืน (validate)
+}
 -- ══ 5B: ไข่บอส ══
 Config.BOSS_EGG_FOLDER = "BossEggs" -- Folder ใน BossArena · Part ไข่อยู่ตลอด ซ่อน/โชว์ตามสถานะ
 --   5B-2: ชื่อ Part = Config.getBossEggPartName(ห้อง, i) = "BossEgg{ห้อง}_{i}" (i = 1..EGGS_PER_NIGHT) · 9 × 6 = 54 ฟอง
@@ -4838,6 +4852,19 @@ function Config.validate()
 			assert(Config.getBossDodgeUptime() > 0, "Config: จังหวะฟาดถี่จนตีบอสไม่ได้เลย (สัดส่วนเวลาตีจริง = 0)")
 		end
 		assert(cycle.EGGS_PER_NIGHT >= 1, "Config: BossCycle.EGGS_PER_NIGHT ต้องมีอย่างน้อย 1")
+		-- ท้องฟ้ากลางคืน (ภาพล้วน) — ต้องมืดเต็มก่อนกลางคืนจบ และต้อง "มืดลง" จริง ไม่ใช่สว่างขึ้น
+		local sky = Config.NightSky
+		assert(
+			sky.TRANSITION_SECONDS > 0 and sky.TRANSITION_SECONDS <= cycle.NIGHT_SECONDS / 2,
+			`Config: NightSky.TRANSITION_SECONDS ต้อง > 0 และไม่เกินครึ่งกลางคืน ({cycle.NIGHT_SECONDS / 2} วิ) — ไม่งั้นยังไม่ทันมืดก็เช้าแล้ว`
+		)
+		assert(sky.CLOCK_TIME >= 0 and sky.CLOCK_TIME < 24, "Config: NightSky.CLOCK_TIME ต้องอยู่ในช่วง 0 ถึงก่อน 24")
+		assert(
+			sky.BRIGHTNESS_SCALE > 0 and sky.BRIGHTNESS_SCALE < 1,
+			"Config: NightSky.BRIGHTNESS_SCALE ต้องอยู่ระหว่าง 0 ถึง 1 (กลางคืนมืดกว่ากลางวัน แต่ไม่ดำสนิท)"
+		)
+		assert(sky.EXPOSURE_OFFSET <= 0, "Config: NightSky.EXPOSURE_OFFSET ต้องไม่เป็นบวก (กลางคืนต้องมืดลง)")
+		assert(sky.MOON_ANGULAR_SIZE > 0, "Config: NightSky.MOON_ANGULAR_SIZE ต้องมากกว่า 0 (ไม่งั้นไม่เห็นพระจันทร์)")
 		assert(cycle.EGG_PICKUP_HOLD_SECONDS > 0, "Config: หยิบไข่บอสต้องกด E ค้าง (EGG_PICKUP_HOLD_SECONDS > 0)")
 		assert(
 			cycle.EGG_PICKUP_HOLD_TOLERANCE >= 0 and cycle.EGG_PICKUP_HOLD_TOLERANCE < cycle.EGG_PICKUP_HOLD_SECONDS / 2,

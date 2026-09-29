@@ -42,7 +42,7 @@
 --     → พัก BOSS_SLAM_REST_SECONDS → ถ้ายังมีคนในวง ง้างใหม่ · ไม่มีใครในวง = ไม่ฟาด · กลางคืน/บอสตาย = ยกเลิกท่าที่ง้างค้าง
 --     ตีทุกคนในวง (รวมคนวิ่งผ่าน · คนไม่มีสิทธิ์ห้องที่เดินทะลุกำแพง client มาก็โดน) · ไม่มี PvP · สถานะต่อห้อง (Room.slam*)
 --   เลือด: Humanoid.Health ปกติ เต็ม PLAYER_MAX_HEALTH ทุกคน · สคริปต์ฟื้นเลือดของ Roblox ถูกถอด ·
---     ไม่โดนตีครบ PLAYER_REGEN_DELAY_SECONDS → เต็มทันที · อยู่เซฟโซน/เกิดใหม่ → เต็มทันที (planHealth)
+--     ไม่โดนตีครบ PLAYER_REGEN_DELAY_SECONDS (10) → ฟื้นทีละนิดจนเต็มใน PLAYER_REGEN_FILL_SECONDS (5) · อยู่เซฟโซน/เกิดใหม่ → เต็มทันที (planHealth)
 --   ตาย (สาเหตุใดก็ได้ รวมรีเซ็ต): ในสนามรบ → เกิดใหม่หน้าทางเข้าเลน (จุดวาปกลางคืน · pickGateSpot กระจายไม่ซ้อน) ·
 --     ในเซฟโซน → เกิดที่คอกตามปกติ · รอ PLAYER_RESPAWN_SECONDS (Players.RespawnTime) · ไข่บอสที่ถือกลับจุดเดิม ·
 --     กระบองกลับมาขั้นเดิม (ensureWeapon ทุก tick) · **ไม่แตะ PlayerData เลย** (เงิน/แม่/ไข่ในกระเป๋า/ทหาร/อัญเชิญเหมือนเดิม)
@@ -477,16 +477,19 @@ function BossService.recordHit(state: State, userId: number, now: number)
 	state.lastHitAt[userId] = now
 end
 
--- เลือดที่ควรเป็น "ตอนนี้" ตามกติกาฟื้นเลือด 5D (คืนค่าเดิม = ไม่ต้องแตะ)
+-- เลือดที่ควรเป็น "ตอนนี้" ตามกติกาฟื้นเลือด 5D (คืนค่าเดิม = ไม่ต้องแตะ) · dt = วินาทีที่ผ่านไปตั้งแต่เรียกครั้งก่อน
 -- ตายแล้ว (≤ 0) = ไม่ฟื้น (รอเกิดใหม่) · เต็มอยู่แล้ว = เดิม · อยู่เซฟโซน = เต็มทันที ·
--- ไม่โดนตีครบ PLAYER_REGEN_DELAY_SECONDS (หรือไม่เคยโดน) = เต็มทันที · นอกนั้น = ไม่ฟื้นระหว่างสู้
+-- ⚠️ แก้ 5D (ผู้ใช้สั่ง): ไม่โดนตีครบ PLAYER_REGEN_DELAY_SECONDS (10 · นับจากโดนครั้งล่าสุด) → ฟื้น**ทีละนิด**
+--   เลือดเต็ม ÷ PLAYER_REGEN_FILL_SECONDS ต่อวินาที (20/วิ · 0 → เต็ม 5 วิ) · นับเฉพาะส่วนของ dt ที่เลยจุดเริ่มฟื้นแล้ว
+--   ไม่เคยโดน (เลือดลดจากทางอื่น) = ฟื้นทีละนิดเลย · นอกนั้น = ไม่ฟื้นระหว่างสู้
 function BossService.planHealth(
 	state: State,
 	userId: number,
 	health: number,
 	maxHealth: number,
 	inSafeZone: boolean,
-	now: number
+	now: number,
+	dt: number
 ): number
 	if health <= 0 or health >= maxHealth then
 		return health
@@ -494,11 +497,13 @@ function BossService.planHealth(
 	if inSafeZone then
 		return maxHealth
 	end
+	local cfg = cycleConfig()
 	local last = state.lastHitAt[userId]
-	if last == nil or now - last >= cycleConfig().PLAYER_REGEN_DELAY_SECONDS then
-		return maxHealth
+	local regenSeconds = if last == nil then dt else math.min(dt, now - (last + cfg.PLAYER_REGEN_DELAY_SECONDS))
+	if regenSeconds <= 0 then
+		return health
 	end
-	return health
+	return math.min(maxHealth, health + maxHealth / cfg.PLAYER_REGEN_FILL_SECONDS * regenSeconds)
 end
 
 -- ตายตรงนี้แล้วเกิดใหม่หน้าทางเข้าเลนไหม — ตายในสนามรบ (นอกเซฟโซน) = ใช่ · ในเซฟโซน / ไม่รู้ตำแหน่ง = เกิดตามปกติ (คอก)
@@ -1684,8 +1689,12 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 		tickSlams(serverNow())
 	end
 
-	-- 5D: เลือด — ไม่ฟื้นระหว่างสู้ · ไม่โดนตีครบ PLAYER_REGEN_DELAY_SECONDS = เต็ม · อยู่เซฟโซน = เต็มทันที (planHealth)
+	-- 5D: เลือด — ไม่ฟื้นระหว่างสู้ · ไม่โดนตีครบ PLAYER_REGEN_DELAY_SECONDS = ฟื้นทีละนิด · อยู่เซฟโซน = เต็มทันที (planHealth)
+	-- dt = เวลาจริงตั้งแต่รอบก่อน (ลูปหลักทุก WORLD_TICK) — ฟื้นตามเวลาที่ผ่านจริง ไม่ขึ้นกับจังหวะลูป
+	local lastHealthTickAt: number? = nil
 	local function updateHealth(now: number)
+		local dt = if lastHealthTickAt then math.max(0, now - (lastHealthTickAt :: number)) else 0
+		lastHealthTickAt = now
 		for _, player in Players:GetPlayers() do
 			local character = player.Character
 			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -1697,7 +1706,8 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 					humanoid.Health,
 					humanoid.MaxHealth,
 					Config.isInSafeZone(root.Position),
-					now
+					now,
+					dt
 				)
 				if target ~= humanoid.Health then
 					humanoid.Health = target
@@ -1870,7 +1880,7 @@ function BossService.debugBossAttack(rawOn: any): string
 		.. ` (ค่าใน Config = {tostring(cycleConfig().BOSS_ATTACK_ENABLED)} · เซิร์ฟเปิดใหม่กลับเป็นค่านี้)`
 end
 
--- 5D: ตั้งเลือดผู้เล่น (0..เลือดเต็ม) — นับเป็น "เพิ่งโดนตี" จึงยังไม่ฟื้นจนไม่โดนตีครบ PLAYER_REGEN_DELAY_SECONDS
+-- 5D: ตั้งเลือดผู้เล่น (0..เลือดเต็ม) — นับเป็น "เพิ่งโดนตี" จึงยังไม่ฟื้นจนไม่โดนตีครบ PLAYER_REGEN_DELAY_SECONDS แล้วฟื้นทีละนิด
 -- ⚠️ ยืนในเซฟโซน = เต็มทันทีใน tick ถัดไป (กติกา) — ทดสอบฟื้นเลือดให้ยืนในสนามรบ · 0 = ตาย (ทดสอบจุดเกิดใหม่)
 function BossService.debugSetHealth(player: Player, rawHealth: any): string
 	local state = requireState()
@@ -1892,7 +1902,7 @@ function BossService.debugSetHealth(player: Player, rawHealth: any): string
 		.. (if target <= 0
 			then " — ตาย (ในสนามรบ = เกิดหน้าทางเข้าเลน · ในเซฟโซน = เกิดที่คอก)"
 			elseif target < humanoid.MaxHealth
-			then ` — เต็มเองเมื่อไม่โดนตีครบ {cycleConfig().PLAYER_REGEN_DELAY_SECONDS} วิ (ในเซฟโซนเต็มทันที)`
+			then ` — ไม่โดนตีครบ {cycleConfig().PLAYER_REGEN_DELAY_SECONDS} วิแล้วฟื้นทีละนิด (เต็มหลอด {cycleConfig().PLAYER_REGEN_FILL_SECONDS} วิ · ในเซฟโซนเต็มทันที)`
 			else "")
 end
 

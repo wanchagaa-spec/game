@@ -1165,7 +1165,22 @@ return function(t, Config)
 			and Config.getBossSlamPeriodSeconds() == 5, true)
 		check("เลือดเต็ม 100", cycle.PLAYER_MAX_HEALTH, 100)
 		check("ดาเมจต่อครั้ง = 100 ÷ 5 = 20", Config.getBossSlamDamage(), 20)
-		check("ฟื้นเลือดเมื่อไม่โดนตี 5 วิ · เกิดใหม่ 5 วิ", cycle.PLAYER_REGEN_DELAY_SECONDS == 5 and cycle.PLAYER_RESPAWN_SECONDS == 5, true)
+		-- แก้ 5D (ผู้ใช้สั่ง): เริ่มฟื้น 10 วิหลังโดนครั้งล่าสุด (เดิม 5 = เท่ารอบฟาดพอดี) · ฟื้นทีละนิดเต็มหลอดใน 5 วิ (20/วิ)
+		check("เริ่มฟื้นเลือด 10 วิหลังโดนครั้งล่าสุด · เต็มหลอด 5 วิ · เกิดใหม่ 5 วิ", cycle.PLAYER_REGEN_DELAY_SECONDS == 10
+			and cycle.PLAYER_REGEN_FILL_SECONDS == 5 and cycle.PLAYER_RESPAWN_SECONDS == 5, true)
+		check("  ฟื้น 20 ต่อวินาที (100 ÷ 5)", Config.getPlayerRegenPerSecond(), 20)
+		check("  เวลาเริ่มฟื้นมากกว่ารอบฟาด (5 วิ) อย่างน้อย 1 รอบ", cycle.PLAYER_REGEN_DELAY_SECONDS - Config.getBossSlamPeriodSeconds()
+			>= Config.getBossSlamPeriodSeconds(), true)
+		local savedDelay = cycle.PLAYER_REGEN_DELAY_SECONDS
+		cycle.PLAYER_REGEN_DELAY_SECONDS = 5 -- ค่าเดิม = เท่ารอบฟาดพอดี
+		check("  เวลาเริ่มฟื้น 5 (= รอบฟาด) → validate ไม่ผ่าน", pcall(Config.validate), false)
+		cycle.PLAYER_REGEN_DELAY_SECONDS = 9.9
+		check("  9.9 (มากกว่ารอบฟาดไม่ถึง 1 รอบ) → validate ไม่ผ่าน", pcall(Config.validate), false)
+		cycle.PLAYER_REGEN_DELAY_SECONDS = savedDelay
+		local savedFill = cycle.PLAYER_REGEN_FILL_SECONDS
+		cycle.PLAYER_REGEN_FILL_SECONDS = 0
+		check("  เต็มหลอด 0 วิ (= เต็มทันที) → validate ไม่ผ่าน", pcall(Config.validate), false)
+		cycle.PLAYER_REGEN_FILL_SECONDS = savedFill
 		check("ค่าบอสตีกลับเดิม (DAMAGE/INTERVAL/RANGE) ลบแล้ว", cycle.BOSS_ATTACK_DAMAGE == nil and cycle.BOSS_ATTACK_INTERVAL == nil
 			and cycle.BOSS_ATTACK_RANGE == nil, true)
 		cycle.BOSS_ATTACK_RANGE = 14
@@ -1261,48 +1276,120 @@ return function(t, Config)
 	end
 
 	----------------------------------------------------------------------------
-	print("── 5D เลือด: ยืนในวงเฉย ๆ โดน 5 ครั้งตายพอดี ──")
-	----------------------------------------------------------------------------
-	do
-		local s, t0 = dayWithBosses()
-		local boss4 = Config.getBossCornerCenter(4)
-		local standing = { [1] = pos(boss4.X - 10, boss4.Z) }
-		local health, hits, deathAt = cycle.PLAYER_MAX_HEALTH, 0, nil
-		for i = 0, 400 do
-			local now = t0 + i * 0.1
-			local positions = if health > 0 then standing else {}
-			for _, e in BossService.stepSlams(s, now, positions) do
-				if e.kind == "slam" and table.find(e.targets, 1) then
-					hits += 1
-					health = math.max(0, health - Config.getBossSlamDamage())
-					if health <= 0 and deathAt == nil then
-						deathAt = e.at
-					end
-				end
-			end
-		end
-		check("โดนครบ 5 ครั้งแล้วตาย (ไม่โดนต่อหลังตาย)", hits, 5)
-		check("  เลือด 0 พอดี", health, 0)
-		check("  ตายตอนฟาดครั้งที่ 5 = ง้าง 1 + 4 × (พัก 4 + ง้าง 1) = 21 วิ", deathAt - t0, 21)
-		check("  โดน 4 ครั้งยังไม่ตาย (เหลือ 20)", cycle.PLAYER_MAX_HEALTH - 4 * Config.getBossSlamDamage(), 20)
-	end
-
-	----------------------------------------------------------------------------
-	print("── 5D เลือด: ไม่ฟื้นระหว่างสู้ · ไม่โดนตีครบ 5 วิ = เต็ม · เซฟโซน = เต็มทันที · ตายแล้วไม่ฟื้น ──")
+	print("── 5D เลือด: ไม่ฟื้นระหว่างสู้ · ไม่โดนตีครบ 10 วิ แล้วฟื้นทีละนิด (เต็มใน 5 วิ) · เซฟโซน = เต็มทันที · ตายแล้วไม่ฟื้น ──")
 	----------------------------------------------------------------------------
 	do
 		local s = BossService.newState(0)
 		local MAX = cycle.PLAYER_MAX_HEALTH
 		BossService.recordHit(s, 1, 100)
-		check("เพิ่งโดนตี (0 วิ) → ไม่ฟื้น", BossService.planHealth(s, 1, 60, MAX, false, 100), 60)
-		check("  4.9 วิ → ยังไม่ฟื้น", BossService.planHealth(s, 1, 60, MAX, false, 104.9), 60)
-		check("  ครบ 5 วิ → เต็มทันที", BossService.planHealth(s, 1, 60, MAX, false, 105), MAX)
-		BossService.recordHit(s, 1, 104)
-		check("  โดนซ้ำระหว่างรอ → นับ 5 วิใหม่ (105 ยังไม่ฟื้น)", BossService.planHealth(s, 1, 40, MAX, false, 105), 40)
-		check("เข้าเซฟโซน → เต็มทันทีแม้เพิ่งโดน", BossService.planHealth(s, 1, 40, MAX, true, 104.1), MAX)
-		check("ตายแล้ว (0) → ไม่ฟื้น (รอเกิดใหม่)", BossService.planHealth(s, 1, 0, MAX, true, 999), 0)
-		check("เต็มอยู่แล้ว → เดิม", BossService.planHealth(s, 1, MAX, MAX, false, 104.1), MAX)
-		check("ไม่เคยโดนบอส (เลือดลดจากทางอื่น) → เต็ม", BossService.planHealth(s, 2, 50, MAX, false, 0), MAX)
+		check("เพิ่งโดนตี (0 วิ) → ไม่ฟื้น", BossService.planHealth(s, 1, 60, MAX, false, 100, 0.25), 60)
+		check("  5 วิ (เท่ารอบฟาด) → ยังไม่ฟื้น (เดิมเต็มทันที)", BossService.planHealth(s, 1, 60, MAX, false, 105, 0.25), 60)
+		check("  9.9 วิ → ยังไม่ฟื้น", BossService.planHealth(s, 1, 60, MAX, false, 109.9, 0.25), 60)
+		check("  10.25 วิ (ผ่านจุดเริ่มฟื้นมา 0.25 วิ) → +5 (20/วิ) ไม่เต็มทันที",
+			BossService.planHealth(s, 1, 60, MAX, false, 110.25, 0.25), 65)
+		check("  ช่วง dt คร่อมจุดเริ่มฟื้น → นับเฉพาะส่วนที่เลยจุดเริ่มแล้ว (10.1 · dt 0.25 → +2)",
+			math.abs(BossService.planHealth(s, 1, 60, MAX, false, 110.1, 0.25) - 62) < 1e-9, true)
+		-- ไล่ทีละ 0.25 วิ จาก 0 → ต้องเต็มในราว 5 วิหลังเริ่มฟื้น
+		local health, t = 1, 110
+		while health < MAX and t < 130 do
+			t += 0.25
+			health = BossService.planHealth(s, 1, health, MAX, false, t, 0.25)
+		end
+		check(`  จาก 1 → เต็ม ใช้ {t - 110} วิหลังเริ่มฟื้น (≈ 5 วิ)`, t - 110 <= cycle.PLAYER_REGEN_FILL_SECONDS and t - 110 >= 4.5, true)
+		check("  ไม่เกินเลือดเต็ม", health, MAX)
+		BossService.recordHit(s, 1, 112)
+		check("  โดนซ้ำระหว่างฟื้น → หยุดฟื้น นับ 10 วิใหม่ (121 ยังไม่ฟื้น)", BossService.planHealth(s, 1, 40, MAX, false, 121, 0.25), 40)
+		check("เข้าเซฟโซน → เต็มทันทีแม้เพิ่งโดน", BossService.planHealth(s, 1, 40, MAX, true, 112.1, 0.25), MAX)
+		check("ตายแล้ว (0) → ไม่ฟื้น (รอเกิดใหม่)", BossService.planHealth(s, 1, 0, MAX, true, 999, 0.25), 0)
+		check("เต็มอยู่แล้ว → เดิม", BossService.planHealth(s, 1, MAX, MAX, false, 112.1, 0.25), MAX)
+		check("ไม่เคยโดนบอส (เลือดลดจากทางอื่น) → ฟื้นทีละนิด ไม่เต็มทันที", BossService.planHealth(s, 2, 50, MAX, false, 0, 0.25), 55)
+	end
+
+	----------------------------------------------------------------------------
+	print("── 5D เลือด (จำลองลูปจริง): ยืนในวงไม่หลบเลย → ตายภายใน 5 ครั้งที่ฟาด · หลบ 1 โดน 1 → ตายในที่สุด ──")
+	----------------------------------------------------------------------------
+	do
+		-- จำลองลูปจริงของ BossService.start: ลูปหลักทุก worldDt (stepSlams → planHealth ด้วย dt จริง)
+		--   + ตัวตั้งเวลาฟาดแม่น ๆ ที่ slamAt + 0.02 (task.delay) · ง้างใหม่หลังพักจับได้ที่ลูปหลักเท่านั้น (ช้าได้ถึง worldDt)
+		-- dodge(i) = ง้างครั้งที่ i หลบไหม (หลบ = วิ่งออกนอกวงตอนเห็นวง · ฟาดแล้วกลับเข้ามายืนตีต่อ)
+		local SLAM_SLACK = 0.02
+		local function fight(dodge: (number) -> boolean, worldDt: number, room: number)
+			local s, t0 = dayWithBosses()
+			local boss = Config.getBossCornerCenter(room)
+			local inRing = pos(boss.X - 10, boss.Z)
+			local outside = pos(boss.X - (Config.getBossSlamRadius() + 1), boss.Z)
+			local health = cycle.PLAYER_MAX_HEALTH
+			local windups, slams, hits, dodgingNow = 0, 0, 0, false
+			local hpBeforeHit: { number } = {}
+			local nextWorld, pendingSlam = t0, nil :: number?
+			local lastWorld: number? = nil
+			local limit = t0 + DAY
+			while nextWorld <= limit do
+				local isWorld = pendingSlam == nil or nextWorld <= (pendingSlam :: number)
+				local now = if isWorld then nextWorld else pendingSlam :: number
+				local positions = { [1] = if dodgingNow then outside else inRing }
+				for _, e in BossService.stepSlams(s, now, positions) do
+					if e.kind == "windup" then
+						windups += 1
+						dodgingNow = dodge(windups)
+						pendingSlam = e.at + SLAM_SLACK
+					elseif e.kind == "slam" then
+						slams += 1
+						pendingSlam = nil
+						if table.find(e.targets, 1) then
+							hits += 1
+							table.insert(hpBeforeHit, health)
+							BossService.recordHit(s, 1, now)
+							health = math.max(0, health - Config.getBossSlamDamage())
+							if health <= 0 then
+								return hits, slams, now - t0, hpBeforeHit
+							end
+						end
+						dodgingNow = false -- ฟาดแล้วกลับเข้ามายืนตีต่อ
+					end
+				end
+				if isWorld then
+					local dt = if lastWorld then now - (lastWorld :: number) else 0
+					lastWorld = now
+					health = BossService.planHealth(s, 1, health, cycle.PLAYER_MAX_HEALTH, false, now, dt)
+					nextWorld += worldDt
+				elseif pendingSlam ~= nil and now >= (pendingSlam :: number) then
+					pendingSlam = nil -- ตัวตั้งเวลาทำงานแล้ว (ฟาดจริงถ้าถึงเวลา — ไม่งั้นลูปหลักรับต่อ)
+				end
+			end
+			return hits, slams, math.huge, hpBeforeHit
+		end
+
+		for _, worldDt in { 0.25, 0.05 } do
+			local hits, slams, seconds, before = fight(function(_i)
+				return false
+			end, worldDt, 4)
+			check(`ยืนในวงไม่หลบ (ลูป {worldDt} วิ): ตายภายใน 5 ครั้งที่ฟาด (โดน {hits}/{slams} · {string.format("%.2f", seconds)} วิ)`,
+				hits == 5 and slams <= 5, true)
+			check(`  ไม่ได้ฟื้นเลยระหว่างโดน (เลือดก่อนโดนแต่ละครั้ง 100 → 80 → 60 → 40 → 20)`,
+				before[1] == 100 and before[2] == 80 and before[3] == 60 and before[4] == 40 and before[5] == 20, true)
+			print(string.format("   ยืนในวงไม่หลบ (ลูป %.2f วิ): ตายที่ฟาดครั้งที่ %d · %.2f วิ", worldDt, slams, seconds))
+		end
+
+		-- หลบ 1 โดน 1 (เริ่มด้วยโดน / เริ่มด้วยหลบ) · ลูปหลักจริง task.wait(0.25) มักช้ากว่าที่ขอเล็กน้อย → ลอง 0.27 / 0.3 ด้วย
+		--   (ง้างใหม่จับได้ช้าสุดเกือบ 1 ลูป → ช่วงห่างระหว่างโดนยาวเกิน 10 วิ = ได้ฟื้นเล็กน้อย — กรณีแย่สุดของกติกานี้)
+		for _, startWithDodge in { false, true } do
+			for _, worldDt in { 0.25, 0.27, 0.3, 0.05 } do
+				local hits, slams, seconds, before = fight(function(i)
+					return (i % 2 == 1) == startWithDodge
+				end, worldDt, 6)
+				local maxRegain = 0
+				for index = 2, #before do
+					maxRegain = math.max(maxRegain, before[index] - (before[index - 1] - Config.getBossSlamDamage()))
+				end
+				check(`หลบ 1 โดน 1 ({if startWithDodge then "เริ่มหลบ" else "เริ่มโดน"} · ลูป {worldDt} วิ): ตายในที่สุด `
+					.. `(โดน {hits} ครั้งจากฟาด {slams} · {string.format("%.1f", seconds)} วิ · ฟื้นระหว่างคู่สูงสุด {string.format("%.1f", maxRegain)})`,
+					seconds < DAY, true)
+				check(`  ฟื้นระหว่างโดนแต่ละครั้งน้อยกว่าดาเมจ 1 ครั้ง (เลือดลดลงสุทธิทุกคู่)`, maxRegain < Config.getBossSlamDamage(), true)
+				print(string.format("   หลบ 1 โดน 1 (%s · ลูป %.2f วิ): ตายหลังโดน %d ครั้ง (ฟาด %d) · %.1f วิ · ฟื้นระหว่างคู่สูงสุด %.1f",
+					if startWithDodge then "เริ่มหลบ" else "เริ่มโดน", worldDt, hits, slams, seconds, maxRegain))
+			end
+		end
 	end
 
 	----------------------------------------------------------------------------

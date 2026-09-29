@@ -1620,9 +1620,13 @@ Balance.BossCycle = {
 	-- ══ 5D: เลือดผู้เล่น (Humanoid.Health ปกติ · เท่ากันทุกคน · ยังไม่มีเกราะ/เลือดที่อัปได้) ══
 	PLAYER_MAX_HEALTH = 100,
 	BOSS_HITS_TO_KILL_PLAYER = 5, -- โดนบอสฟาดกี่ครั้งตาย → ดาเมจต่อครั้ง 100 ÷ 5 = 20
-	-- ไม่ฟื้นเลือดเองระหว่างสู้ · ไม่โดนตีครบเท่านี้ (วินาที) → เต็มทันที · เข้าเซฟโซน/เกิดใหม่ = เต็มทันที
+	-- ไม่ฟื้นเลือดเองระหว่างสู้ · ไม่โดนตีครบ PLAYER_REGEN_DELAY_SECONDS (นับจากโดนครั้งล่าสุด) → เริ่มฟื้น**ทีละนิด**
+	--   อัตรา = เลือดเต็ม ÷ PLAYER_REGEN_FILL_SECONDS ต่อวินาที (0 → เต็ม ใช้ 5 วิ · 100 ÷ 5 = 20/วิ) · เข้าเซฟโซน/เกิดใหม่ = เต็มทันที
+	-- ⚠️ แก้ 5D (ผู้ใช้สั่ง): เดิมไม่โดน 5 วิ = เต็มทันที — เท่ากับรอบฟาดพอดี (5 วิ) → ยืนตีไม่หลบอาจเต็มก่อนโดนทุกครั้ง
+	--   และหลบได้ครั้งเดียวก็เต็ม · validate() บังคับ DELAY ≥ รอบฟาด × 2 (มากกว่ารอบฟาดอย่างน้อย 1 รอบ)
 	-- ⚠️ สคริปต์ฟื้นเลือดเริ่มต้นของ Roblox (Script "Health" ในตัวละคร · 1%/วิ) ขัดกติกานี้ → BossService ถอดทิ้งทุกครั้งที่เกิด
-	PLAYER_REGEN_DELAY_SECONDS = 5,
+	PLAYER_REGEN_DELAY_SECONDS = 10,
+	PLAYER_REGEN_FILL_SECONDS = 5,
 	-- ตายแล้วรอเกิดใหม่กี่วินาที (Players.RespawnTime) · ตายในสนามรบ = เกิดหน้าทางเข้าเลน (จุดวาปกลางคืน) · ตายในเซฟโซน = เกิดที่คอก
 	PLAYER_RESPAWN_SECONDS = 5,
 
@@ -3148,6 +3152,12 @@ end
 function Config.getBossSlamDamage(): number
 	local cycle = Config.Balance.BossCycle
 	return cycle.PLAYER_MAX_HEALTH / cycle.BOSS_HITS_TO_KILL_PLAYER
+end
+
+-- 5D: ฟื้นเลือดกี่หน่วยต่อวินาที (หลังไม่โดนตีครบ PLAYER_REGEN_DELAY_SECONDS) = เลือดเต็ม ÷ PLAYER_REGEN_FILL_SECONDS (100 ÷ 5 = 20)
+function Config.getPlayerRegenPerSecond(): number
+	local cycle = Config.Balance.BossCycle
+	return cycle.PLAYER_MAX_HEALTH / cycle.PLAYER_REGEN_FILL_SECONDS
 end
 
 -- หนึ่งจังหวะฟาด = ง้าง + พัก (5 วิ)
@@ -4812,7 +4822,18 @@ function Config.validate()
 				damage % 1 == 0 and damage * hits == cycle.PLAYER_MAX_HEALTH,
 				`Config: ดาเมจบอสฟาด {damage} × {hits} ครั้งต้องเท่ากับเลือดเต็ม {cycle.PLAYER_MAX_HEALTH} พอดี`
 			)
-			assert(cycle.PLAYER_REGEN_DELAY_SECONDS > 0, "Config: PLAYER_REGEN_DELAY_SECONDS ต้องมากกว่า 0 (0 = ฟื้นเต็มระหว่างสู้)")
+			-- ⚠️ แก้ 5D (ผู้ใช้สั่ง): เวลาเริ่มฟื้นต้องมากกว่ารอบฟาดอย่างน้อย 1 รอบ (≥ 2 รอบ) — ไม่งั้นยืนโดนทุกรอบก็ฟื้นทัน
+			--   หรือหลบครั้งเดียวแล้วฟื้น · รอบฟาด = ง้าง + พัก (Config.getBossSlamPeriodSeconds)
+			local period = Config.getBossSlamPeriodSeconds()
+			assert(
+				cycle.PLAYER_REGEN_DELAY_SECONDS - period >= period,
+				`Config: PLAYER_REGEN_DELAY_SECONDS ({cycle.PLAYER_REGEN_DELAY_SECONDS}) ต้องมากกว่ารอบฟาดบอส ({period} วิ) `
+					.. `อย่างน้อย 1 รอบ (≥ {period * 2} วิ)`
+			)
+			assert(
+				cycle.PLAYER_REGEN_FILL_SECONDS > 0,
+				"Config: PLAYER_REGEN_FILL_SECONDS ต้องมากกว่า 0 (ฟื้นทีละนิดจนเต็ม — 0 = เต็มทันที)"
+			)
 			assert(cycle.PLAYER_RESPAWN_SECONDS > 0, "Config: PLAYER_RESPAWN_SECONDS ต้องมากกว่า 0")
 			assert(Config.getBossDodgeUptime() > 0, "Config: จังหวะฟาดถี่จนตีบอสไม่ได้เลย (สัดส่วนเวลาตีจริง = 0)")
 		end

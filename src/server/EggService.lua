@@ -1615,6 +1615,51 @@ function EggService.debugGrantMother(
 	return true, nil
 end
 
+-- ให้แม่**ครบทุกตัวละคร** (ตามลำดับดัชนี Config.CharacterOrder · ตัวละครละ 1 ตัว) เข้ากระเป๋า — ไว้ดูโมเดลในการ์ด/ดัชนี/คอก
+-- (รอบโมเดลตัวละคร) · weight ไม่ใส่ = 100 kg (tier 1) · กระเป๋าว่างไม่พอทั้งชุด = ปฏิเสธทั้งชุด (ไม่แจกครึ่ง ๆ)
+-- ⚠️ ผ่านจุดกลาง PlayerData.createMother ทุกตัว (uid + ดัชนี · tools/check-mother-creation.py ตรวจ)
+function EggService.debugGrantAllCharacters(player: Player, weight: number?): (boolean, string?)
+	local data = dataOf(player)
+	if not data then
+		warn(`[EggService] debugGrantAllCharacters: {player.Name} ยังไม่มีข้อมูลผู้เล่น`)
+		return false, "ยังไม่มีข้อมูลผู้เล่น"
+	end
+	-- ⚠️ น้ำหนักแม่ต้องเป็นจำนวนเต็มเสมอ (ส่วนหนึ่งของ stack key) — เหมือน debugGrantMother
+	local flooredWeight = math.floor(weight or 100)
+	if flooredWeight <= 0 then
+		warn(`[EggService] debugGrantAllCharacters: น้ำหนักต้องมากกว่า 0`)
+		return false, "น้ำหนักต้องมากกว่า 0"
+	end
+
+	local charIds: { string } = {}
+	for _, charId in Config.CharacterOrder do
+		local character = Config.getCharacter(charId)
+		if character and character.enabled then
+			table.insert(charIds, charId)
+		end
+	end
+	-- เช็คที่ว่างก่อนสร้างแม่จริง กันเปลือง uid (เดินหน้าอย่างเดียว ห้าม reuse)
+	local free = Config.Balance.Bag.CAPACITY - #data.mothersInBag
+	if free < #charIds then
+		warn(`[EggService] debugGrantAllCharacters: {player.Name} กระเป๋าว่าง {free} ช่อง ต้องการ {#charIds}`)
+		return false, `กระเป๋าว่าง {free} ช่อง ต้องการ {#charIds}`
+	end
+
+	local now = os.time()
+	for _, charId in charIds do
+		table.insert(data.mothersInBag, PlayerData.createMother(data, player.UserId, charId, flooredWeight, now))
+	end
+
+	EggService.sync(player)
+
+	print(
+		`[EggService] debugGrantAllCharacters: {player.Name} ได้แม่ครบ {#charIds} ตัวละคร `
+			.. `{Config.formatWeight(flooredWeight)} → กระเป๋า · `
+			.. debugSaveNow(player)
+	)
+	return true, nil
+end
+
 -- วางไข่ในกระเป๋าโดย**บังคับน้ำหนัก**ตามที่ระบุ (ข้าม RNG ของ Config.rollMotherWeightForEgg)
 -- ยังคงสุ่ม "ตัวละคร" ตามตารางคลาสของ eggId นั้นตามปกติตอนวางลงสวนฟัก (ไม่ได้บังคับคลาส)
 -- ใช้ทดสอบว่าขนาดโมเดลไข่/เวลาฟักคำนวณถูกตามน้ำหนักที่กำหนดครบทุก tier

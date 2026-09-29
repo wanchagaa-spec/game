@@ -11,7 +11,7 @@
   1. แจก uid (`Config.makeUid(`) ได้เฉพาะใน src/shared/PlayerData.lua (createMother + buildWorstCase ที่เป็นข้อมูลจำลอง)
   2. แก้ตัวนับ `nextUid` (`nextUid +=` / `nextUid =`) ได้เฉพาะใน src/shared/PlayerData.lua
   3. PlayerData.createMother ต้องแจก uid + เลื่อน nextUid + บันทึก discovered ในตัวเอง
-  4. ทุกทางที่สร้างแม่ใน server ที่รู้จัก (ฟักไข่ · debugGrantMother) เรียก PlayerData.createMother
+  4. ทุกทางที่สร้างแม่ใน server ที่รู้จัก (ฟักไข่ · debugGrantMother · debugGrantAllCharacters) เรียก PlayerData.createMother
 เพิ่มทางใหม่ที่สร้างแม่ → เรียก PlayerData.createMother แล้วเติมชื่อฟังก์ชันใน KNOWN_CREATORS
 """
 import os, re, sys
@@ -24,6 +24,7 @@ EGG_SERVICE = os.path.join('src', 'server', 'EggService.lua')
 KNOWN_CREATORS = [
     (EGG_SERVICE, 'local function hatch'),
     (EGG_SERVICE, 'function EggService.debugGrantMother'),
+    (EGG_SERVICE, 'function EggService.debugGrantAllCharacters'),  # รอบโมเดลตัวละคร
 ]
 
 MAKE_UID = re.compile(r'(?<!function )Config\.makeUid\(')  # ตัวนิยามใน Config ไม่นับ

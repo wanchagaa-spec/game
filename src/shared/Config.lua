@@ -905,6 +905,12 @@ Balance.VisualScale = {
 	-- ตัวใหญ่ขึ้น s เท่า → เดินเร็วขึ้น √s เท่า + อนิเมชันช้าลง √s เท่า → ระยะต่อก้าวโต s เท่า
 	-- พอดีกับขนาดตัว (สัตว์จริงก็ขยายแบบนี้) · เท้าไถล = ค่านี้มากไป · ย่ำอยู่กับที่ = น้อยไป
 	MOTHER_MESH_WALK_SPEED = 4,
+
+	-- ══ ขนาดตามคลาส (รอบโมเดลตัวละคร · ผู้ใช้สั่ง) ══ คูณเพิ่มจากตัวคูณน้ำหนัก — คลาสสูงตัวใหญ่ขึ้นเล็กน้อย
+	-- ใช้กับ**โมเดล** (ประกอบจาก Part · mesh) ทั้งในคอกและตัวอย่าง showcase · กล่องสีสำรองไม่คูณ (คงเดิม)
+	-- ⚠️ ตัวใหญ่สุด (SS tier 7) ต้องยังอยู่ในคอกไม่ทะลุรั้ว — tests/models.spec.luau ตรวจกับแบบจริงทุกตัว
+	-- ภาพล้วน ไม่มีผลกับ damage/เงิน/การรบ
+	CLASS_MULTIPLIER = { C = 1.0, B = 1.1, A = 1.2, S = 1.35, SS = 1.5 },
 }
 
 --------------------------------------------------------------------------------
@@ -1207,12 +1213,17 @@ local CharacterClasses: { [string]: CharacterClass } = {
 
 Config.CharacterClasses = CharacterClasses
 
+-- ⚠️ เปลี่ยนตัวละคร 2 ตัว (ผู้ใช้ตัดสิน · รอบโมเดลตัวละคร): เปลี่ยน**แค่ชื่อที่แสดง + โมเดล**
+--   · `yulai` → "ราชาปีศาจวัว" (SS) · `guanyin` → "องค์หญิงพัดเหล็ก" (S)
+--   · **charId เดิมคงไว้โดยตั้งใจ** (ฝังอยู่ใน stack key/ดัชนี/แม่ที่เซฟไปแล้ว — เปลี่ยน id = ข้อมูลผู้เล่นอ่านไม่ออก)
+--     คลาส · ตัวคูณ · น้ำหนักสุ่ม · ลำดับใน CharacterOrder เหมือนเดิมทุกอย่าง → ไม่ต้อง migration
+--   · ⚠️ **ห้ามใช้ชื่อเดิมกลับมาในข้อความที่ผู้เล่นเห็น** (tools/check-character-names.py ตรวจ)
 local Characters: { [string]: Character } = {
 	-- SS ×5
-	yulai = { id = "yulai", name = "องค์ยูไล", class = "SS", enabled = true },
+	yulai = { id = "yulai", name = "ราชาปีศาจวัว", class = "SS", enabled = true },
 
 	-- S ×3
-	guanyin = { id = "guanyin", name = "พระแม่กวนอิม", class = "S", enabled = true },
+	guanyin = { id = "guanyin", name = "องค์หญิงพัดเหล็ก", class = "S", enabled = true },
 	jade_emperor = { id = "jade_emperor", name = "เง็กเซียนฮ่องเต้", class = "S", enabled = true },
 
 	-- A ×2
@@ -2460,6 +2471,19 @@ end
 -- ขนาดโมเดลไข่ตามน้ำหนัก — ไข่แสดงขนาดเดียวกันทุกที่ที่เห็น ไม่มีเวอร์ชันย่อ
 function Config.getEggVisualSize(weight: number): Vector3
 	return scaleVec3(Config.MapDimensions.Blockout.EggSize, Config.getVisualScaleMultiplier(weight))
+end
+
+-- ชื่อต้นแบบโมเดลของตัวละครใน ReplicatedStorage.MotherModelTemplates (server ใส่ · client วาดรูปจากชื่อนี้)
+-- mesh (Character.modelAssetId) = tostring(assetId) ตามเดิม · ประกอบจาก Part (MotherModels) = charId
+function Config.getMotherTemplateName(charId: string): string
+	local character = Config.Characters[charId]
+	local assetId = if character then character.modelAssetId else nil
+	return if assetId then tostring(assetId) else charId
+end
+
+-- ตัวคูณขนาดตามคลาสของโมเดลแม่ (VisualScale.CLASS_MULTIPLIER) — คลาสแปลก = 1
+function Config.getMotherClassScale(class: string): number
+	return Config.Balance.VisualScale.CLASS_MULTIPLIER[class] or 1
 end
 
 -- ขนาดโมเดลแม่ตามน้ำหนัก — inPen = true คูณ MOTHER_PEN_SHRINK (ตอนนี้ = 1 คือ 1:1
@@ -4291,6 +4315,27 @@ function Config.validate()
 			Balance.VisualScale.MOTHER_MESH_WALK_SPEED > 0,
 			`Config: VisualScale.MOTHER_MESH_WALK_SPEED ต้องมากกว่า 0`
 		)
+		-- ขนาดตามคลาส: ครบทุกคลาส · C = 1 (ฐานเท่าลิง) · คลาสสูงไม่เล็กกว่าคลาสต่ำ
+		local classScale = Balance.VisualScale.CLASS_MULTIPLIER
+		assert(classScale.C == 1, "Config: VisualScale.CLASS_MULTIPLIER.C ต้องเป็น 1 (ขนาดฐานเท่าลิง)")
+		local ordered = {}
+		for classId, class in CharacterClasses do
+			local value = classScale[classId]
+			assert(
+				type(value) == "number" and value > 0,
+				`Config: VisualScale.CLASS_MULTIPLIER ไม่มีค่าของคลาส {classId}`
+			)
+			table.insert(ordered, { order = class.order, value = value, id = classId })
+		end
+		table.sort(ordered, function(a, b)
+			return a.order > b.order -- C (order 5) → SS (order 1)
+		end)
+		for index = 2, #ordered do
+			assert(
+				ordered[index].value >= ordered[index - 1].value,
+				`Config: VisualScale.CLASS_MULTIPLIER คลาส {ordered[index].id} ต้องไม่เล็กกว่า {ordered[index - 1].id}`
+			)
+		end
 	end
 
 	-- ⚠️ เวลาฟักตามน้ำหนัก+คลาส (Config.getHatchSeconds) — ตารางต้องครบและเวลาสูงสุด

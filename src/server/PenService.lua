@@ -23,8 +23,10 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local MotherModels = require(ReplicatedStorage.Shared.MotherModels)
 local MapBuilder = require(ServerScriptService.MapBuilder)
 
 local PenService = {}
@@ -40,13 +42,20 @@ export type Pen = {
 }
 
 -- แม่ 1 ตัวที่กำลังเดินอยู่ในคอก
--- ⚠️ visual เป็น Part (กล่องสีเดิม) หรือ Model (โมเดล mesh ที่ import มา — ดู
--- Character.modelAssetId) ก็ได้ ทั้งคู่เป็น PVInstance จึงใช้ PivotTo/GetPivot ร่วมกันได้
+-- ⚠️ visual เป็น Part (กล่องสีเดิม) หรือ Model (โมเดล mesh ที่ import มา — ดู Character.modelAssetId ·
+-- หรือโมเดลที่ประกอบจาก Part ในโค้ด — ดู MotherModels) ก็ได้ ทั้งคู่เป็น PVInstance จึงใช้ PivotTo/GetPivot ร่วมกันได้
 type Roamer = {
 	visual: Model | BasePart,
 	origin: Vector3, -- กึ่งกลางแปลงที่แม่ตัวนี้อยู่
-	from: Vector3,
+	from: Vector3, -- ⚠️ Y = baseY เสมอ (ระดับยืนบนพื้น) — ท่าขยับขึ้นลงบวกทีหลังตอนวาด ไม่สะสมเข้าตำแหน่ง
 	to: Vector3,
+	baseY: number, -- Y ของ pivot ตอนยืนบนพื้นพอดี
+	-- ท่าขยับของโมเดลที่ประกอบจาก Part (ไม่มีอนิเมชัน): "hop" กระเด้งตอนเดิน · "float" ลอยขึ้นลงตลอด (ปลา) · nil = ไม่ขยับ
+	motion: MotherModels.Motion?,
+	hover: number, -- float: ลอยเหนือพื้นเท่านี้ (studs)
+	bob: number, -- ระยะขยับ (studs) — hop: กระเด้งสูงสุด · float: ขึ้นลง ±
+	bobRate: number, -- hop: ก้าวต่อวินาที · float: รอบต่อวินาที
+	phase: number, -- สุ่มจังหวะเริ่ม ไม่ให้ทุกตัวขยับพร้อมกันเป๊ะ
 	startedAt: number, -- os.clock() ตอนเริ่มเดินรอบนี้
 	duration: number, -- ใช้เวลาเดินกี่วินาที
 	waitUntil: number, -- os.clock() ที่จะออกเดินรอบถัดไป
@@ -143,7 +152,9 @@ end
 
 local function pickNextTrip(roamer: Roamer, now: number)
 	local target = randomPointInPen(roamer.origin, roamer.inset)
-	local from = roamer.visual:GetPivot().Position
+	local pivot = roamer.visual:GetPivot().Position
+	-- ⚠️ ใช้ baseY ไม่ใช่ Y ของ pivot ตอนนี้ — ตอนกระเด้ง/ลอย pivot สูงกว่าพื้น ถ้าเอามาใช้ตรง ๆ ตัวจะค่อย ๆ ลอยขึ้นเรื่อย ๆ
+	local from = Vector3.new(pivot.X, roamer.baseY, pivot.Z)
 	local distance = (Vector3.new(target.X, from.Y, target.Z) - from).Magnitude
 
 	roamer.from = from
@@ -151,6 +162,16 @@ local function pickNextTrip(roamer: Roamer, now: number)
 	roamer.startedAt = now
 	-- ระยะ ÷ ความเร็ว = เวลาที่ใช้ · กันหาร 0 ตอนสุ่มได้จุดเดิมเป๊ะ
 	roamer.duration = math.max(distance / roamer.speed, 0.05)
+end
+
+-- ระยะยกจากพื้นตามท่าขยับ (studs) — moving = กำลังเดินอยู่
+local function motionOffset(roamer: Roamer, now: number, moving: boolean): number
+	if roamer.motion == "float" then
+		return roamer.hover + math.sin((now + roamer.phase) * roamer.bobRate * 2 * math.pi) * roamer.bob
+	elseif roamer.motion == "hop" and moving then
+		return math.abs(math.sin((now - roamer.startedAt) * roamer.bobRate * math.pi)) * roamer.bob
+	end
+	return 0
 end
 
 local function updateWander()
@@ -163,7 +184,12 @@ local function updateWander()
 		end
 
 		if now < roamer.waitUntil then
-			continue -- ยืนพักอยู่ (ท่ายืน/นั่งตั้งไว้แล้วตอนถึงจุดหมาย)
+			-- ยืนพักอยู่ (ท่ายืน/นั่งตั้งไว้แล้วตอนถึงจุดหมาย) · ปลาลอยขึ้นลงต่อแม้หยุดพัก
+			if roamer.motion == "float" then
+				local pivot = visual:GetPivot()
+				visual:PivotTo(pivot.Rotation + Vector3.new(pivot.X, roamer.baseY + motionOffset(roamer, now, false), pivot.Z))
+			end
+			continue
 		end
 
 		playPose(roamer, "walk")
@@ -171,6 +197,7 @@ local function updateWander()
 		local elapsed = now - roamer.startedAt
 		local alpha = math.clamp(elapsed / roamer.duration, 0, 1)
 		local position = roamer.from:Lerp(roamer.to, alpha)
+		position += Vector3.new(0, motionOffset(roamer, now, alpha < 1), 0)
 
 		-- หันหน้าไปทางที่เดิน ให้ดูมีชีวิตขึ้นโดยไม่ต้องมี Humanoid
 		local direction = roamer.to - roamer.from
@@ -183,6 +210,7 @@ local function updateWander()
 
 		if alpha >= 1 then
 			-- ถึงแล้ว หยุดพักสักครู่ค่อยออกเดินใหม่ · วนท่าพักที่ตัวนี้มี (ดู REST_POSE_ORDER)
+			-- (ตำแหน่งรอบนี้ใช้ offset ของ "ไม่ได้เดิน" แล้ว → กระเด้งจบที่พื้นพอดี)
 			roamer.stops += 1
 			local restPoses = roamer.restPoses
 			if #restPoses > 0 then
@@ -401,9 +429,10 @@ local function redrawPensUsing(assetId: number)
 end
 
 -- UI-1: ส่งสำเนาต้นแบบไปไว้ใน ReplicatedStorage ให้ client เอาไปวาดรูปใน ViewportFrame (กระเป๋า/แผงเท้า)
--- ⚠️ client โหลด asset เองไม่ได้ (InsertService:LoadAsset ใช้ได้เฉพาะ server) · ชื่อลูก = tostring(assetId)
+-- ⚠️ client โหลด asset เองไม่ได้ (InsertService:LoadAsset ใช้ได้เฉพาะ server)
+-- ชื่อลูก = Config.getMotherTemplateName(charId): mesh = tostring(assetId) (เดิม) · ประกอบจาก Part = charId
 -- เป็นภาพประกอบล้วน ๆ ไม่มีผลกับเกม · ไม่มีสำเนา (ยังโหลดไม่เสร็จ/ไม่มีโมเดล) = client วาดกล่องสีแทน
-local function publishPortraitTemplate(assetId: number, model: Model)
+local function publishPortraitTemplate(name: string, model: Model)
 	local folder = ReplicatedStorage:FindFirstChild(PORTRAIT_TEMPLATE_FOLDER)
 	if not folder then
 		local created = Instance.new("Folder")
@@ -411,7 +440,6 @@ local function publishPortraitTemplate(assetId: number, model: Model)
 		created.Parent = ReplicatedStorage
 		folder = created
 	end
-	local name = tostring(assetId)
 	if (folder :: Instance):FindFirstChild(name) then
 		return
 	end
@@ -453,7 +481,7 @@ local function getMeshTemplate(assetId: number): Model?
 		if model then
 			meshTemplates[assetId] = model
 			meshTemplateHeights[assetId] = nativeHeight
-			publishPortraitTemplate(assetId, model)
+			publishPortraitTemplate(tostring(assetId), model)
 			print(`[PenService] โหลด modelAssetId {assetId} สำเร็จ — วาดคอกใหม่`)
 			redrawPensUsing(assetId)
 		else
@@ -463,36 +491,69 @@ local function getMeshTemplate(assetId: number): Model?
 	return nil
 end
 
+-- ══ โมเดลที่ประกอบจาก Part ในโค้ด (MotherModels · รอบโมเดลตัวละคร) ══
+-- charId → ต้นแบบ (สร้างครั้งเดียว ไม่ yield · ไม่ได้ parent ไว้ที่ไหน ใช้ clone อย่างเดียว)
+local partTemplates: { [string]: Model } = {}
+
+-- สร้างต้นแบบ + ส่งสำเนาให้ client วาดรูป (ชื่อ = charId) — nil = charId นี้ไม่มีแบบ
+local function getPartTemplate(charId: string): Model?
+	local cached = partTemplates[charId]
+	if cached then
+		return cached
+	end
+	if not MotherModels.hasBlueprint(charId) then
+		return nil
+	end
+	local ok, model = pcall(MotherModels.build, charId)
+	if not ok or model == nil then
+		warn(`[PenService] ประกอบโมเดล "{charId}" จาก Part ไม่สำเร็จ: {model} — ใช้กล่องสีแทน`)
+		return nil
+	end
+	partTemplates[charId] = model :: Model
+	publishPortraitTemplate(Config.getMotherTemplateName(charId), model :: Model)
+	return model
+end
+
 -- UI-1: เริ่มโหลดโมเดลของทุกตัวละครที่มี modelAssetId ตั้งแต่เซิร์ฟบูต (เบื้องหลัง ไม่ yield)
 -- เดิมโหลดตอนมีแม่ตัวนั้นเข้าคอกครั้งแรกเท่านั้น → แม่ที่อยู่แค่ในกระเป๋าจะไม่มีรูปในกระเป๋าเลย
+-- + รอบโมเดลตัวละคร: ประกอบโมเดลจาก Part ของทุกตัวที่มีแบบ (MotherModels) ตั้งแต่บูต — client มีรูปตั้งแต่เข้าเกม
 -- เรียกจาก Main.server.lua ต่อจาก buildWorld()
-function PenService.preloadMeshTemplates()
+function PenService.preloadModelTemplates()
+	for _, problem in MotherModels.validate() do
+		warn(`[PenService] แบบโมเดลผิดกติกา: {problem}`)
+	end
 	for _, character in Config.Characters do
 		local assetId = character.modelAssetId
 		if character.enabled and assetId then
 			getMeshTemplate(assetId)
+		elseif character.enabled then
+			getPartTemplate(character.id)
 		end
 	end
 end
 
--- clone จากต้นแบบแล้วสเกลตามน้ำหนักแม่ — ไม่ yield
--- คืน (โมเดล, sizeScale) · sizeScale = ใหญ่กว่าขนาด tier 1 กี่เท่า (ไว้คิดความเร็วเดิน/ก้าว)
-local function buildMeshMother(template: Model, weight: number, assetId: number): (Model, number)
+-- clone จากต้นแบบแล้วสเกลตามน้ำหนักแม่ × คลาส — ไม่ yield
+-- nativeHeight = ความสูงต้นฉบับของ mesh (normalize ให้ tier 1 สูง MOTHER_MESH_BASE_HEIGHT) ·
+--   nil = โมเดลที่ประกอบจาก Part (ออกแบบเป็น studs จริงที่ tier 1 อยู่แล้ว ไม่ normalize — หมูเตี้ยกว่าคนตามแบบ)
+-- คืน (โมเดล, sizeScale) · sizeScale = ใหญ่กว่าขนาด tier 1 คลาส C กี่เท่า (ไว้คิดความเร็วเดิน/ก้าว)
+local function buildModelMother(template: Model, weight: number, class: string, nativeHeight: number?, label: string): (Model, number)
 	local model = template:Clone()
 	local visualScale = Config.Balance.VisualScale
 
 	-- ⚠️ สเกลแบบสัดส่วนเดียวกันทุกแกน (ไม่ยืด/บีบ) ต่างจากกล่องเดิมที่ยืด Vector3 อิสระ 3 แกนได้
-	-- เพราะโมเดล mesh จริงยืดแกนเดียวแล้วเสียรูปทันที
-	-- ⚠️ เทียบกับความสูงต้นฉบับ ไม่ใช่สเกลดิบ — ไฟล์แต่ละไฟล์ import มาขนาดไม่เท่ากัน
+	-- เพราะโมเดลจริงยืดแกนเดียวแล้วเสียรูปทันที
+	-- ⚠️ mesh เทียบกับความสูงต้นฉบับ ไม่ใช่สเกลดิบ — ไฟล์แต่ละไฟล์ import มาขนาดไม่เท่ากัน
 	-- (กอริลลาเคยออกมาเล็กกว่าคนมากทั้งที่สเกล 1:1) ตอนนี้ tier 1 สูง MOTHER_MESH_BASE_HEIGHT เสมอ
-	local sizeScale = Config.getVisualScaleMultiplier(weight) * visualScale.MOTHER_PEN_SHRINK
-	local nativeHeight = meshTemplateHeights[assetId] or visualScale.MOTHER_MESH_BASE_HEIGHT
-	local scale = visualScale.MOTHER_MESH_BASE_HEIGHT / nativeHeight * sizeScale
+	local sizeScale = Config.getVisualScaleMultiplier(weight)
+		* visualScale.MOTHER_PEN_SHRINK
+		* Config.getMotherClassScale(class)
+	local normalize = if nativeHeight and nativeHeight > 0 then visualScale.MOTHER_MESH_BASE_HEIGHT / nativeHeight else 1
+	local scale = normalize * sizeScale
 	local scaleOk = pcall(function()
 		model:ScaleTo(scale)
 	end)
 	if not scaleOk then
-		warn(`[PenService] Model:ScaleTo ล้มเหลวกับ modelAssetId {assetId} — ใช้ขนาดต้นฉบับที่ import มาแทน`)
+		warn(`[PenService] Model:ScaleTo ล้มเหลวกับ {label} — ใช้ขนาดต้นแบบแทน`)
 	end
 
 	return model, sizeScale
@@ -578,8 +639,8 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 		local character = Config.getCharacter(mother.charId)
 		local class = if character then character.class else "C"
 
-		-- ⚠️ ลองใช้โมเดล mesh ที่ import มาก่อน (Character.modelAssetId) ล้มเหลว/ไม่มี
-		-- ค่อยตกกลับไปกล่องสีเดิม — ต้องมี resting Y ที่ตรงกับรูปทรงจริงของแต่ละแบบ
+		-- ⚠️ ลำดับ: โมเดล mesh ที่ import มา (Character.modelAssetId) → โมเดลที่ประกอบจาก Part (MotherModels)
+		-- → กล่องสีเดิม (ไม่มีทั้งสองแบบ/ยังโหลดไม่เสร็จ) — ต้องมี resting Y ที่ตรงกับรูปทรงจริงของแต่ละแบบ
 		-- ⚠️ visualHeight คำนวณแยกต่อสาขา ไม่เรียก GetBoundingBox() รวมท้ายสุด เพราะเมธอดนี้
 		-- มีแค่ใน Model ไม่มีใน BasePart (สาขา fallback เป็น Part เดี่ยว ๆ)
 		local visual: Model | BasePart
@@ -594,9 +655,20 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 		local assetId = if character then character.modelAssetId else nil
 		-- ยังโหลดไม่เสร็จ/ล้มเหลว = nil → วาดกล่องสีไปก่อน (ไม่ yield)
 		local template = if assetId then getMeshTemplate(assetId) else nil
+		local nativeHeight: number? = if assetId and template
+			then meshTemplateHeights[assetId] or Config.Balance.VisualScale.MOTHER_MESH_BASE_HEIGHT
+			else nil
+		-- ไม่มี mesh → โมเดลที่ประกอบจาก Part (ถ้ามีแบบ)
+		if template == nil then
+			template = getPartTemplate(mother.charId)
+		end
+		local motion: MotherModels.Motion? = if template and nativeHeight == nil
+			then template:GetAttribute("Motion") :: MotherModels.Motion?
+			else nil
 
-		if assetId and template then
-			local meshModel, sizeScale = buildMeshMother(template, mother.weight, assetId)
+		if template then
+			local meshModel, sizeScale =
+				buildModelMother(template, mother.weight, class, nativeHeight, if assetId then `modelAssetId {assetId}` else mother.charId)
 			-- ครึ่งความสูงจริงหลังสเกลแล้ว (ไม่ใช่ก่อนสเกล) มาจาก bounding box จริงของโมเดลนั้น
 			local boxCFrame, boundsSize = meshModel:GetBoundingBox()
 			visualHeight = boundsSize.Y
@@ -660,11 +732,27 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 		label.Parent = gui
 
 		local pivotPosition = visual:GetPivot().Position
+		-- ท่าขยับของโมเดลที่ประกอบจาก Part (สัดส่วนของความสูงจริง · ตัวใหญ่ก้าวช้าลง √s แบบเดียวกับอนิเมชันลิง)
+		local hover, bob, bobRate = 0, 0, 0
+		if motion == "float" then
+			hover = MotherModels.FLOAT.HOVER_RATIO * visualHeight
+			bob = MotherModels.FLOAT.BOB_RATIO * visualHeight
+			bobRate = 1 / MotherModels.FLOAT.PERIOD
+		elseif motion == "hop" then
+			bob = MotherModels.HOP.HEIGHT_RATIO * visualHeight
+			bobRate = MotherModels.HOP.STEPS_PER_SECOND * animSpeed
+		end
 		local roamer: Roamer = {
 			visual = visual,
 			origin = pen.plot.center,
 			from = pivotPosition,
 			to = pivotPosition,
+			baseY = pivotPosition.Y,
+			motion = motion,
+			hover = hover,
+			bob = bob,
+			bobRate = bobRate,
+			phase = rng:NextNumber(0, 10),
 			startedAt = now,
 			duration = 0.05,
 			-- กระจายเวลาออกเดินครั้งแรก ไม่งั้นแม่ทุกตัวจะขยับพร้อมกันเป๊ะ ดูเป็นหุ่นยนต์
@@ -747,6 +835,131 @@ end
 -- จำนวนแม่ที่กำลังเดินอยู่ทั้งเซิร์ฟ — ไว้ดูตอนเทสต์ว่าไม่มีตัวค้าง
 function PenService.getRoamerCount(): number
 	return #roamers
+end
+
+--------------------------------------------------------------------------------
+-- คำสั่ง debug: แถวโชว์โมเดลครบทุกตัวละคร (Studio · สะพาน ServerStorage.EggServiceDebug — docs/debug-commands.md)
+--------------------------------------------------------------------------------
+-- วางกลางทางเดินกลาง (Config.getSpawnPoint) เรียงตามลำดับดัชนี · ขนาด tier 1 (100 kg) × คลาส = ขนาดเดียวกับในคอก
+-- หันหน้า −Z · ป้ายชื่อ/คลาส/จำนวนชิ้นตั้งอยู่หน้าเท้า (อ่านจากฝั่ง −Z) · ภาพล้วน ไม่แตะข้อมูลผู้เล่น
+-- เรียกซ้ำ = ลบแถวเดิมแล้ววางใหม่ (เช่น หลังโมเดลลิงโหลดเสร็จ) · ลิงยังโหลดไม่เสร็จ = กล่องสีสำรอง (ป้ายบอก)
+
+local SHOWCASE_NAME = "ModelShowcase" -- Folder ใน Workspace
+local SHOWCASE_SPACING = 11 -- studs ระหว่างกลางตัว (ราชาปีศาจวัว tier 1 กว้าง ≈ 7.9)
+local SHOWCASE_WEIGHT = 100 -- kg = tier 1
+local SHOWCASE_SIGN_SIZE = Vector3.new(9, 1.6, 0.3)
+
+function PenService.debugClearShowcase(): (boolean, string?)
+	local existing = Workspace:FindFirstChild(SHOWCASE_NAME)
+	if existing then
+		existing:Destroy()
+		print("[PenService] debugClearShowcase: ลบแถวโชว์โมเดลแล้ว")
+		return true, nil
+	end
+	return true, "ไม่มีแถวโชว์โมเดลอยู่"
+end
+
+local function countParts(instance: Instance): number
+	local count = if instance:IsA("BasePart") then 1 else 0
+	for _, descendant in instance:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			count += 1
+		end
+	end
+	return count
+end
+
+local function makeShowcaseSign(position: Vector3, lines: string): Part
+	local sign = Instance.new("Part")
+	sign.Name = "Sign"
+	sign.Size = SHOWCASE_SIGN_SIZE
+	sign.CFrame = CFrame.new(position)
+	sign.Anchored = true
+	sign.CanCollide = false
+	sign.CanQuery = false
+	sign.CanTouch = false
+	sign.Color = Color3.fromRGB(245, 240, 225)
+	sign.Material = Enum.Material.SmoothPlastic
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front -- ด้าน −Z = ฝั่งคนดู
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 40
+	gui.LightInfluence = 0 -- อ่านออกแม้กลางคืน
+	gui.Parent = sign
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.TextScaled = true
+	label.Font = Enum.Font.SourceSansBold
+	label.TextColor3 = Color3.fromRGB(30, 30, 35)
+	label.Text = lines
+	label.Parent = gui
+	return sign
+end
+
+function PenService.debugShowcaseModels(): (boolean, string?)
+	PenService.debugClearShowcase()
+
+	local folder = Instance.new("Folder")
+	folder.Name = SHOWCASE_NAME
+	local center = Config.getSpawnPoint()
+	local total = #Config.CharacterOrder
+	local summary: { string } = {}
+
+	for index, charId in Config.CharacterOrder do
+		local character = Config.getCharacter(charId)
+		if not character then
+			continue
+		end
+		local x = center.X + (index - (total + 1) / 2) * SHOWCASE_SPACING
+		local assetId = character.modelAssetId
+		local template = if assetId then getMeshTemplate(assetId) else nil
+		local nativeHeight: number? = if assetId and template
+			then meshTemplateHeights[assetId] or Config.Balance.VisualScale.MOTHER_MESH_BASE_HEIGHT
+			else nil
+		local kind = if template then "mesh" else "Part"
+		if template == nil then
+			template = getPartTemplate(charId)
+		end
+
+		local visual: Instance
+		local depth: number
+		local height: number
+		if template then
+			local model = buildModelMother(template, SHOWCASE_WEIGHT, character.class, nativeHeight, charId)
+			local boxCFrame, boxSize = model:GetBoundingBox()
+			local pivotAboveCenter = model:GetPivot().Y - boxCFrame.Y
+			-- ปลาลอยเหนือพื้นเท่ากับในคอก (โชว์ท่านิ่ง)
+			local lift = if model:GetAttribute("Motion") == "float" then MotherModels.FLOAT.HOVER_RATIO * boxSize.Y else 0
+			model:PivotTo(CFrame.new(x, Config.getPenRestingY(boxSize.Y / 2) + pivotAboveCenter + lift, center.Z))
+			visual = model
+			depth, height = boxSize.Z, boxSize.Y
+		else
+			kind = "กล่องสำรอง"
+			local size = Config.getMotherVisualSize(SHOWCASE_WEIGHT, true)
+			local part = Instance.new("Part")
+			part.Size = size
+			part.Position = Vector3.new(x, Config.getPenRestingY(size.Y / 2), center.Z)
+			part.Color = CLASS_COLORS[character.class] or CLASS_COLORS.C
+			part.Anchored = true
+			part.CanCollide = false
+			visual = part
+			depth, height = size.Z, size.Y
+		end
+		visual.Name = charId
+		visual.Parent = folder
+
+		local parts = countParts(visual)
+		local detail = if kind == "Part" then `{parts} ชิ้น` elseif kind == "mesh" then `mesh {parts} ชิ้น` else "ยังไม่มีโมเดล/กำลังโหลด"
+		local signPosition = Vector3.new(x, SHOWCASE_SIGN_SIZE.Y / 2, center.Z - depth / 2 - 1.2)
+		makeShowcaseSign(signPosition, `{character.name}\n{character.class} · {detail}`).Parent = folder
+		table.insert(summary, `{character.name} ({character.class}) {kind} {parts} ชิ้น สูง {string.format("%.1f", height)}`)
+	end
+
+	folder.Parent = Workspace
+	local text = table.concat(summary, " · ")
+	print(`[PenService] debugShowcaseModels: วาง {#summary} ตัวที่ทางเดินกลาง (ยืนฝั่ง −Z หันหน้าเข้าหา) — {text}`)
+	return true, text
 end
 
 -- ⚠️ ไม่ต่อ Players.PlayerRemoving ที่นี่ — Main.server.lua เป็นคนต่อสายให้

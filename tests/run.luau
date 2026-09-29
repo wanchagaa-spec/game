@@ -60,6 +60,7 @@ local suites: { { name: string, run: (any, any) -> () } } = {
 	{ name = "CombatService", run = require("./combat.spec") },
 	{ name = "Upgrades (damage/speed purchase)", run = require("./upgrades.spec") },
 	{ name = "Phase 5A (วงจรกลางวัน/กลางคืน · บอส · ล็อกอัญเชิญ)", run = require("./boss.spec") },
+	{ name = "โมเดลตัวละคร (ประกอบจาก Part · เปลี่ยนชื่อ 2 ตัว)", run = require("./models.spec") },
 }
 
 local startedAt = os.clock()

@@ -1276,7 +1276,7 @@ do
 		end
 	end
 	pcall(sendBatchHandler, player, { guanyinUid })
-	check("ส่งกวนอิมไปรบ", #data.battleRoster, 1)
+	check("ส่งองค์หญิงพัดเหล็ก (guanyin) ไปรบ", #data.battleRoster, 1)
 	check("  อยู่ในดัชนีตอนอยู่ในสนาม", data.discovered.guanyin, true)
 	local lost = CombatService.killRoster(data, 2)
 	check("ด่านพัง → แม่ในสนามตาย", lost, 1)

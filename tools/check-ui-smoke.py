@@ -82,7 +82,14 @@ local Color3 = {
 local Font = { new = function(family, weight, style) return typed("Font", { Family = family, Weight = weight, Style = style }) end }
 local ColorSequence = { new = function(k) return typed("ColorSequence", { Keypoints = k }) end }
 local ColorSequenceKeypoint = { new = function(t, c) return typed("ColorSequenceKeypoint", { Time = t, Value = c }) end }
-local CFrame = { lookAt = function(a, b) return typed("CFrame", { a = a, b = b }) end }
+-- CFrame: lookAt (กล้องรูปตัวละคร) + new/Angles/คูณกัน (MotherModels.build ประกอบโมเดลจาก Part) — เก็บค่า ไม่คำนวณจริง
+local CFrameMeta = { __type = "CFrame" }
+CFrameMeta.__mul = function(a, _b) return a end
+local CFrame = {
+	lookAt = function(a, b) return setmetatable({ a = a, b = b, Position = a }, CFrameMeta) end,
+	new = function(x, y, z) return setmetatable({ Position = Vector3.new(x, y, z) }, CFrameMeta) end,
+	Angles = function(rx, ry, rz) return setmetatable({ rx = rx, ry = ry, rz = rz }, CFrameMeta) end,
+}
 local Enum = setmetatable({}, {
 	__index = function(_, enumName)
 		return setmetatable({}, { __index = function(_, item) return `Enum.{enumName}.{item}` end })
@@ -223,7 +230,7 @@ function Methods.GetBoundingBox(_self)
 	return typed("CFrame", { Position = Vector3.new(0, 2, 0) }), Vector3.new(2, 4, 2)
 end
 function Methods.GetPivot(_self)
-	return typed("CFrame", { Position = Vector3.new(0, 0, 0), LookVector = Vector3.new(0, 0, -1) })
+	return typed("CFrame", { Position = Vector3.new(0, 0, 0), LookVector = Vector3.new(0, 0, -1), RightVector = Vector3.new(1, 0, 0) })
 end
 function Methods.IsA(self, className)
 	local own = rawget(self, "__class")
@@ -1572,6 +1579,102 @@ do
 	IndexWindow.close()
 end
 
+print("\n━━ โมเดลตัวละครประกอบจาก Part (11 ตัว): ประกอบได้ · ชิ้นไม่ชน · การ์ดจัดกรอบไม่ล้น · เงาดำทำงาน ━━")
+do
+	local MotherModels = loaded.MotherModels
+	local IndexWindow = loaded.IndexWindow
+	local templates = findDescendant(services.ReplicatedStorage, "MotherModelTemplates")
+	local built = 0
+	local allParts, badParts, primaries = 0, 0, 0
+	for _, charId in Config.CharacterOrder do
+		if MotherModels.hasBlueprint(charId) then
+			local ok, model = pcall(MotherModels.build, charId)
+			if ok and model then
+				built += 1
+				local count = 0
+				for _, part in model:GetChildren() do
+					count += 1
+					if part.CanCollide ~= false or part.Anchored ~= true or part.Massless ~= true
+						or part.CanTouch ~= false or part.CanQuery ~= false then
+						badParts += 1
+					end
+				end
+				allParts += count
+				if model.PrimaryPart ~= nil and model.PrimaryPart.Parent == model then
+					primaries += 1
+				end
+				check(`{charId}: ประกอบได้ {count} ชิ้น (≤ {MotherModels.PART_LIMIT}) · ตรงกับแบบ`,
+					count <= MotherModels.PART_LIMIT and count == MotherModels.getPartCount(charId), true)
+				model.Name = Config.getMotherTemplateName(charId)
+				model.Parent = templates
+			else
+				check(`{charId}: ประกอบโมเดลไม่ error`, false, true)
+			end
+		end
+	end
+	check("ประกอบได้ครบ 11 ตัว", built, 11)
+	check("  ทุกชิ้น CanCollide/CanTouch/CanQuery ปิด · Anchored · Massless", badParts, 0)
+	check("  ทุกตัวมี PrimaryPart อยู่ในโมเดล", primaries, 11)
+	check("  charId ไม่มีแบบ → คืน nil (ใช้กล่องสีสำรอง)", MotherModels.build("monkey") == nil, true)
+
+	-- การ์ดจัดกรอบไม่ล้น: ฉายมุม 8 มุมของกล่องล้อมรอบจริงของแต่ละตัวผ่านกล้องของ UiKit (มุมเฉียง 3/4) → ต้องอยู่ในมุมมองทุกมุม
+	local function sub(a, b) return { a[1] - b[1], a[2] - b[2], a[3] - b[3] } end
+	local function dot(a, b) return a[1] * b[1] + a[2] * b[2] + a[3] * b[3] end
+	local function cross(a, b) return { a[2] * b[3] - a[3] * b[2], a[3] * b[1] - a[1] * b[3], a[1] * b[2] - a[2] * b[1] } end
+	local function unit(a) local l = math.sqrt(dot(a, a)) return { a[1] / l, a[2] / l, a[3] / l } end
+	local halfTan = math.tan(math.rad(UiKit.PORTRAIT_FOV / 2))
+	local worstFill, worstId = 0, nil
+	for _, charId in MotherModels.listCharIds() do
+		local lo, hi, size = MotherModels.getBounds(charId)
+		local direction, distance = UiKit.getPortraitCamera(Vector3.new(size[1], size[2], size[3]), Vector3.new(0, 0, -1), Vector3.new(1, 0, 0))
+		local center = { (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2, (lo[3] + hi[3]) / 2 }
+		local eye = { center[1] + direction.X * distance, center[2] + direction.Y * distance, center[3] + direction.Z * distance }
+		local forward = unit(sub(center, eye))
+		local right = unit(cross(forward, { 0, 1, 0 }))
+		local up = cross(right, forward)
+		local fill = 0
+		for _, cx in { lo[1], hi[1] } do
+			for _, cy in { lo[2], hi[2] } do
+				for _, cz in { lo[3], hi[3] } do
+					local rel = sub({ cx, cy, cz }, eye)
+					local depth = dot(rel, forward)
+					fill = math.max(fill, math.abs(dot(rel, right)) / (depth * halfTan), math.abs(dot(rel, up)) / (depth * halfTan))
+				end
+			end
+		end
+		check(`  {charId}: กรอบการ์ดใช้ {string.format("%.0f", fill * 100)}% (ไม่ล้น ≤ 100%)`, fill <= 1, true)
+		if fill > worstFill then
+			worstFill, worstId = fill, charId
+		end
+	end
+	print(`   แน่นสุด {worstId} {string.format("%.0f", worstFill * 100)}% ของกรอบ`)
+
+	-- เงาดำในดัชนี: องค์หญิงพัดเหล็ก (S) ยังไม่เคยได้ = ViewportFrame ทาดำ · ได้แล้ว = สี
+	local ip = makePayload()
+	ip.discovered = { "jade_emperor" }
+	IndexWindow.setPayload(ip)
+	IndexWindow.open()
+	IndexWindow.setTab("S")
+	local win = findDescendant(gui, "IndexWindow")
+	local grid = findDescendant(win, "Grid")
+	local fanCard = nil
+	for _, child in grid:GetChildren() do
+		if child.Name == "Card" and child.Visible and fanCard == nil then
+			fanCard = child -- องค์หญิงพัดเหล็ก (guanyin) อยู่ช่องแรกของคลาส S
+		end
+	end
+	local portrait = findDescendant(findDescendant(fanCard, "PortraitHolder"), "Portrait")
+	check("องค์หญิงพัดเหล็กมีโมเดล → วาดด้วย ViewportFrame", portrait and portrait.__class, "ViewportFrame")
+	check("  ยังไม่เคยได้ → ทาดำ (เงา)", portrait and portrait.ImageColor3, UiKit.BLACK)
+	check("  ชื่อ ???", findDescendant(fanCard, "NameLabel").Text, "???")
+	table.insert(ip.discovered, "guanyin")
+	IndexWindow.setPayload(ip)
+	portrait = findDescendant(findDescendant(fanCard, "PortraitHolder"), "Portrait")
+	check("ได้แล้ว → รูปสี · ชื่อใหม่", portrait and portrait.ImageColor3 ~= UiKit.BLACK
+		and findDescendant(fanCard, "NameLabel").Text == "องค์หญิงพัดเหล็ก", true)
+	IndexWindow.close()
+end
+
 print("\n━━ RobuxShopWindow: ร้านค้า Robux (UI-5) ━━")
 do
 	local RobuxShopWindow = loaded.RobuxShopWindow
@@ -2004,8 +2107,13 @@ end
 '''
 
 
-def module_source(name: str) -> str:
-    path = os.path.join(ROOT, 'src', 'client', f'{name}.lua')
+# โมดูลใน src/shared ที่ต้องใช้ Roblox global ตอนเรียก (ไม่ใช่ตอน require) — โหลดแบบเดียวกับโมดูล client
+# รอบโมเดลตัวละคร: MotherModels.build ประกอบโมเดลจาก Part (Instance/CFrame/Enum ของ harness)
+SHARED_MODULES = ['MotherModels']
+
+
+def module_source(name: str, folder: str = 'client') -> str:
+    path = os.path.join(ROOT, 'src', folder, f'{name}.lua')
     src = open(path, encoding='utf-8').read()
     if not src.startswith('--!strict'):
         sys.exit(f'harness ตามซอร์สไม่ทัน: {name}.lua ไม่ได้ขึ้นต้นด้วย --!strict')
@@ -2014,8 +2122,8 @@ def module_source(name: str) -> str:
 
 def build_harness() -> str:
     loads = []
-    for name in MODULES:
-        src = module_source(name)
+    for name, folder in [(n, 'shared') for n in SHARED_MODULES] + [(n, 'client') for n in MODULES]:
+        src = module_source(name, folder)
         escaped = src.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
         loads.append(f'loadModule("{name}", "{escaped}")')
     return MOCK + CHECK.replace('__LOAD_MODULES__', '\n'.join(loads))

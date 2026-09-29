@@ -148,7 +148,7 @@ end
 MapBuilder.build()
 PenService.buildWorld()
 -- UI-1: โหลดโมเดลตัวละครล่วงหน้า (เบื้องหลัง) ให้รูปในกระเป๋าฝั่ง client มีโมเดลใช้ตั้งแต่ต้น
-PenService.preloadMeshTemplates()
+PenService.preloadModelTemplates()
 EggService.start()
 
 -- ⚠️ Phase 2B-1: ผลิตลูก + ผลิตเงินจากแม่ในคอก ทำงานเป็น periodic tick แยกจากลูปของ
@@ -184,16 +184,20 @@ if RunService:IsStudio() then
 	debugBridge.Name = "EggServiceDebug"
 	debugBridge.OnInvoke = function(name: unknown, ...: any): ...any
 		if type(name) ~= "string" or string.sub(name, 1, 5) ~= "debug" then
-			error(`EggServiceDebug: เรียกได้เฉพาะ EggService.debug* / BossService.debug* — ได้ {tostring(name)}`)
+			error(`EggServiceDebug: เรียกได้เฉพาะ EggService.debug* / BossService.debug* / PenService.debug* — ได้ {tostring(name)}`)
 		end
 		-- Phase 5A/5B: คำสั่งบอส (debugBossNight/debugBossDay/debugDamageBoss/debugKillBoss/debugBossStatus/debugBossEggs)
 		-- อยู่ที่ BossService — สะพานเดียวกัน ชื่อไม่ชนกับของ EggService · 5B-2: คำสั่งที่เกี่ยวกับห้องรับเลขห้องต่อท้าย
+		-- รอบโมเดลตัวละคร: + PenService (debugShowcaseModels / debugClearShowcase — วางโมเดลโชว์ที่ลานกลาง)
 		local fn = (EggService :: any)[name]
 		if type(fn) ~= "function" then
 			fn = (BossService :: any)[name]
 		end
 		if type(fn) ~= "function" then
-			error(`EggServiceDebug: ไม่มีฟังก์ชัน EggService.{name} / BossService.{name}`)
+			fn = (PenService :: any)[name]
+		end
+		if type(fn) ~= "function" then
+			error(`EggServiceDebug: ไม่มีฟังก์ชัน EggService.{name} / BossService.{name} / PenService.{name}`)
 		end
 		return fn(...)
 	end

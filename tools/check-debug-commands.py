@@ -207,6 +207,45 @@ do
 \tcheck("uid ขึ้นต้นด้วย UserId ของผู้เล่น", string.find(m.uid, tostring(player.UserId), 1, true) ~= nil, true)
 end
 
+print("\\n━━ debugGrantAllCharacters: แม่ครบทุกตัวละครเข้ากระเป๋า ผ่าน createMother (รอบโมเดลตัวละคร) ━━")
+do
+\tlocal player, data = freshPlayer("GrantAll")
+\ttable.clear(data.mothersInBag)
+\ttable.clear(data.discovered)
+\tlocal ok, reason = EggService.debugGrantAllCharacters(player)
+\tcheck("คืนค่า true", ok)
+\tcheck("ไม่มีเหตุผลปฏิเสธ", reason == nil, true)
+\tcheck("ได้แม่ครบทุกตัวละคร", #data.mothersInBag, #Config.CharacterOrder)
+\tlocal ordered, allHundred, uids = true, true, {}
+\tfor index, charId in Config.CharacterOrder do
+\t\tlocal m = data.mothersInBag[index]
+\t\tif m.charId ~= charId then ordered = false end
+\t\tif m.weight ~= 100 then allHundred = false end
+\t\tuids[m.uid] = true
+\tend
+\tcheck("  เรียงตามลำดับดัชนี (ราชาปีศาจวัวก่อน)", ordered)
+\tcheck("  น้ำหนักตั้งต้น 100 kg (tier 1)", allHundred)
+\tlocal distinct = 0
+\tfor _ in uids do distinct += 1 end
+\tcheck("  uid ไม่ซ้ำกันเลย", distinct, #Config.CharacterOrder)
+\tlocal allDiscovered = true
+\tfor _, charId in Config.CharacterOrder do
+\t\tif data.discovered[charId] ~= true then allDiscovered = false end
+\tend
+\tcheck("  ดัชนีขึ้นครบทุกตัว (ผ่าน PlayerData.createMother)", allDiscovered)
+\tlocal okHeavy = EggService.debugGrantAllCharacters(player, 5000.7)
+\tcheck("ใส่น้ำหนักได้ + ปัดลงเป็นจำนวนเต็ม", okHeavy and data.mothersInBag[#data.mothersInBag].weight, 5000)
+\twhile #data.mothersInBag < Config.Balance.Bag.CAPACITY - 3 do
+\t\ttable.insert(data.mothersInBag, data.mothersInBag[1])
+\tend
+\tlocal before, nextUid = #data.mothersInBag, data.nextUid
+\tlocal okFull, reasonFull = EggService.debugGrantAllCharacters(player)
+\tcheck("กระเป๋าว่างไม่พอทั้งชุด → ปฏิเสธทั้งชุด", okFull, false)
+\tcheck("  บอกเหตุผล", reasonFull ~= nil and string.find(reasonFull, "กระเป๋าว่าง", 1, true) ~= nil, true)
+\tcheck("  ไม่แจกครึ่ง ๆ · ไม่เปลือง uid", #data.mothersInBag == before and data.nextUid == nextUid, true)
+\tcheck("น้ำหนัก 0 → ปฏิเสธ", (EggService.debugGrantAllCharacters(player, 0)), false)
+end
+
 print("\\n━━ debugGrantMother: วางลงกระเป๋าสำเร็จ (ไม่มี lastProducedAt) ━━")
 do
 \tlocal player, data = freshPlayer("Grant2")

@@ -180,18 +180,35 @@ end
 -- รูปตัวละคร / ไข่
 --------------------------------------------------------------------------------
 
+-- ต้นแบบโมเดลของตัวละคร — ชื่อจาก Config.getMotherTemplateName (mesh = เลข asset · ประกอบจาก Part = charId)
 local function findTemplate(charId: string): Model?
-	local character = Config.getCharacter(charId)
-	local assetId = if character then character.modelAssetId else nil
-	if not assetId then
+	if not Config.getCharacter(charId) then
 		return nil
 	end
 	local folder = ReplicatedStorage:FindFirstChild(PORTRAIT_TEMPLATE_FOLDER)
-	local template = if folder then folder:FindFirstChild(tostring(assetId)) else nil
+	local template = if folder then folder:FindFirstChild(Config.getMotherTemplateName(charId)) else nil
 	if template and template:IsA("Model") then
 		return template
 	end
 	return nil
+end
+
+-- ══ กล้องรูปตัวละคร ══ มุมเฉียง 3/4 (หันมาทางซ้ายของตัวละคร + เงยลงเล็กน้อย) ให้เห็นทั้งหน้าและลำตัว
+-- (หน้าตรงเห็นปลา/ม้าแค่หัว) · ถอยให้ **ทรงกลมล้อมกล่องทั้งก้อนอยู่ในกรอบ** เสมอ → ตัวใหญ่/ยาวแค่ไหนก็ไม่ล้นการ์ด
+UiKit.PORTRAIT_FOV = 30 -- องศา (แนวตั้ง · การ์ดเป็นสี่เหลี่ยมจัตุรัส แนวนอนเท่ากัน)
+UiKit.PORTRAIT_YAW = 30 -- องศา จากหน้าตรงไปทางซ้ายของตัวละคร
+UiKit.PORTRAIT_PITCH = 12 -- องศา มองลงจากด้านบนเล็กน้อย
+UiKit.PORTRAIT_PADDING = 1.04 -- เผื่อขอบ
+
+-- ทิศจากกลางตัวไปหากล้อง (หน่วย) + ระยะ — facing/right = LookVector/RightVector ของ pivot โมเดล
+-- ⚠️ ระยะ = รัศมีทรงกลมล้อมกล่อง ÷ sin(ครึ่งมุมมอง) (ไม่ใช่ tan — tan ให้ขอบทรงกลมเกินกรอบนิดหนึ่ง)
+function UiKit.getPortraitCamera(boxSize: Vector3, facing: Vector3, right: Vector3): (Vector3, number)
+	local yaw, pitch = math.rad(UiKit.PORTRAIT_YAW), math.rad(UiKit.PORTRAIT_PITCH)
+	local horizontal = facing * math.cos(yaw) + right * -math.sin(yaw)
+	local direction = horizontal * math.cos(pitch) + Vector3.new(0, math.sin(pitch), 0)
+	local radius = boxSize.Magnitude / 2
+	local distance = radius * UiKit.PORTRAIT_PADDING / math.sin(math.rad(UiKit.PORTRAIT_FOV / 2))
+	return direction, distance
 end
 
 local function clearPortrait(holder: GuiObject)
@@ -231,14 +248,13 @@ function UiKit.setPortrait(holder: GuiObject, charId: string, class: string, sil
 		local model = template:Clone()
 		model.Parent = viewport
 
-		-- ⚠️ หันกล้องเข้าหาด้านหน้าของโมเดล (LookVector ของ pivot) ถอยออกให้พอดีกรอบจากกล่องล้อมรอบ
+		-- ⚠️ หันกล้องเข้าหาด้านหน้าของโมเดล (LookVector ของ pivot) แบบเฉียง 3/4 ถอยออกให้พอดีกรอบจากกล่องล้อมรอบ
 		local boxCFrame, boxSize = model:GetBoundingBox()
 		local camera = Instance.new("Camera")
-		camera.FieldOfView = 30
-		local radius = boxSize.Magnitude / 2
-		local distance = radius / math.tan(math.rad(camera.FieldOfView / 2))
-		local facing = model:GetPivot().LookVector
-		camera.CFrame = CFrame.lookAt(boxCFrame.Position + facing * distance, boxCFrame.Position)
+		camera.FieldOfView = UiKit.PORTRAIT_FOV
+		local pivot = model:GetPivot()
+		local direction, distance = UiKit.getPortraitCamera(boxSize, pivot.LookVector, pivot.RightVector)
+		camera.CFrame = CFrame.lookAt(boxCFrame.Position + direction * distance, boxCFrame.Position)
 		camera.Parent = viewport
 		viewport.CurrentCamera = camera
 		viewport.Parent = holder

@@ -95,10 +95,16 @@ local function makeFloor(name: string, sizeX: number, sizeZ: number, centerX: nu
 	return part
 end
 
-local function makeLabel(text: string, width: number, adornee: BasePart, heightOffset: number): TextLabel
+-- ป้ายตัวหนังสือลอย (BillboardGui) — ⚠️ ขนาดเป็น **studs ในโลก** (UDim2 ส่วน Scale ของ BillboardGui = studs)
+-- ไม่ใช่พิกเซล: เดิม fromOffset(กว้าง, 44) = ขนาดคงที่บนจอ → ยิ่งเดินออกไกล ป้ายยิ่งดูใหญ่เทียบกับโลก
+-- (ผลทดสอบ Studio: "ยิ่งวิ่งออกไกลยิ่งขยาย") · ตอนนี้ใกล้ = ใหญ่ ไกล = เล็ก เหมือนของจริงในฉาก
+-- 5B-2 รอบแก้ป้าย (ผู้ใช้เลือก): ลบป้ายลอย "คอก N" · "แท่นอัญเชิญ" · "ด่าน N" · "รังบอสด่าน N" แล้ว — เหลือแค่ป้ายร้าน
+local LABEL_HEIGHT_STUDS = 2.4
+
+local function makeLabel(text: string, widthStuds: number, adornee: BasePart, heightOffset: number): TextLabel
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "Label"
-	gui.Size = UDim2.fromOffset(width, 44)
+	gui.Size = UDim2.fromScale(widthStuds, LABEL_HEIGHT_STUDS)
 	gui.StudsOffsetWorldSpace = Vector3.new(0, heightOffset, 0)
 	gui.MaxDistance = 500
 	gui.Adornee = adornee
@@ -126,7 +132,6 @@ export type PenPlot = {
 	model: Model,
 	base: Part,
 	center: Vector3,
-	label: TextLabel,
 }
 
 -- ⚠️ 5B: ไม่มี eggSpots แล้ว — แผ่นวางไข่ 5 จุดวงกลมของดีไซน์ "บอสด่านละตัว" ลบแล้ว
@@ -234,7 +239,7 @@ end
 -- ป้ายชื่อคอก — **ปักข้างประตู ไม่ใช่กลางประตู** (กันเดินชน)
 -- ปักบนหญ้าด้านนอกคอก ใกล้ประตู · ยกสูงให้อ่านได้จากมุมกล้องผู้เล่นทั่วไป
 -- ⚠️ ตำแหน่งมาจาก Config.getPenNameSignSpot — ป้ายอัปเกรดข้างประตู (UI-2) เว้นระยะจากจุดนี้
-local function buildPenSign(plot: Model, index: number): TextLabel
+local function buildPenSign(plot: Model, index: number)
 	local spot = Config.getPenNameSignSpot(index)
 	local signX, signZ = spot.X, spot.Z
 
@@ -257,8 +262,8 @@ local function buildPenSign(plot: Model, index: number): TextLabel
 	board.Material = Enum.Material.WoodPlanks
 	board.CanCollide = false
 	board.CastShadow = false
-
-	return makeLabel(`คอก {index}`, 220, board, MAP.Pen.SignSize.Y)
+	-- ⚠️ 5B-2 รอบแก้ป้าย (ผู้ใช้เลือก): เอาตัวหนังสือลอย "คอก N" เหนือป้ายออกแล้ว — เหลือตัวป้ายไม้เปล่า ๆ
+	--   (คอกของตัวเองดูได้จากป้ายค่าวิ่ง/อัปคอกข้างประตู ที่แต่ละคนเห็นเฉพาะคอกตัวเอง — MapSigns)
 end
 
 function MapBuilder.buildPlaza(parent: Folder)
@@ -324,9 +329,9 @@ function MapBuilder.buildPlaza(parent: Folder)
 		model.PrimaryPart = base
 
 		buildFence(model, index, center, sizeX, sizeZ)
-		local label = buildPenSign(model, index)
+		buildPenSign(model, index)
 
-		penPlots[index] = { index = index, model = model, base = base, center = center, label = label }
+		penPlots[index] = { index = index, model = model, base = base, center = center }
 	end
 end
 
@@ -370,7 +375,8 @@ function MapBuilder.buildShop(parent: Folder)
 		if isSellShop then
 			model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
 		end
-		makeLabel(if isSellShop then "ร้านขายแม่" else "ซื้ออาวุธ", 220, counter, h * 0.4 + 3)
+		-- ป้ายลอยเดียวที่เหลือในแมพ (ผู้ใช้เลือกเก็บ) · กว้างเท่าแผง ขนาดติดโลก
+		makeLabel(if isSellShop then "ร้านขายแม่" else "ซื้ออาวุธ", MAP.Shop.StallSize.X, counter, h * 0.4 + 3)
 	end
 
 	-- ⚠️ **ไม่มีแท่นวาปแล้ว** (เอาออกรอบซื้อความเร็ว)
@@ -544,8 +550,7 @@ local function buildSummonPedestal(parent: Instance)
 	particles.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.35), NumberSequenceKeypoint.new(1, 0) })
 	particles.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1) })
 	particles.Parent = aura
-
-	makeLabel("แท่นอัญเชิญ", 220, core, 6)
+	-- ⚠️ 5B-2 รอบแก้ป้าย (ผู้ใช้เลือก): เอาตัวหนังสือลอย "แท่นอัญเชิญ" ออกแล้ว — จุดกด E ("อัญเชิญ"/"ปิดอัญเชิญ") ยังอยู่ (MapSigns)
 end
 
 function MapBuilder.buildBattleLane(parent: Folder)
@@ -641,20 +646,25 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	buildSummonPedestal(parent)
 
 	-- เส้นบอกรอยต่อด่าน — ⚠️ **เครื่องหมายเฉย ๆ ไม่ใช่กำแพง** กำแพงจริงวาดฝั่ง client
+	-- ⚠️ 5B-2 รอบแก้ป้าย (ผลทดสอบ Studio · ผู้ใช้สั่ง): เอาเส้นหน้าทางเข้าออก + เอาตัวหนังสือลอย "ด่าน N" ออกทุกด่าน
+	--   วางเฉพาะเส้นที่อยู่**บนพื้นเลน** (ต้นด่าน ≥ Config.getLaneFloorStartX) — ด่าน 1 เริ่มที่ต้นเลน X 140
+	--   ซึ่งอยู่บนหญ้าหน้าช่องประตู (ก่อนพื้นเลน X 157.5) = เส้นที่ผู้ใช้เห็นขวางหน้าทางเข้า · ด่าน 2–9 อยู่ใต้กำแพงด่านตามเดิม
 	local markers = Instance.new("Folder")
 	markers.Name = "StageMarkers"
 	markers.Parent = lane
 
 	for stage = 1, Config.Balance.Stage.COUNT do
-		local marker = makePart(
-			`StageMarker{stage}`,
-			Vector3.new(1.5, 0.3, MAP.Lane.Width),
-			Vector3.new(Config.getStageStartX(stage), 0, 0),
-			COLORS.marker,
-			markers
-		)
-		marker.CanCollide = false
-		makeLabel(`ด่าน {stage}`, 160, marker, 6)
+		local markerX = Config.getStageStartX(stage)
+		if markerX >= Config.getLaneFloorStartX() then
+			local marker = makePart(
+				`StageMarker{stage}`,
+				Vector3.new(1.5, 0.3, MAP.Lane.Width),
+				Vector3.new(markerX, 0, 0),
+				COLORS.marker,
+				markers
+			)
+			marker.CanCollide = false
+		end
 	end
 end
 
@@ -686,9 +696,7 @@ function MapBuilder.buildBossRooms(parent: Folder)
 		base.Material = Enum.Material.Ground
 		model.PrimaryPart = base
 
-		-- ด่าน 1 ไม่มีกำแพงกั้น → เดินเข้าได้ตั้งแต่เข้าเกมครั้งแรก
-		local gated = if Config.getWallX(stage) then "หลังกำแพง" else "เข้าได้เลย"
-		makeLabel(`รังบอสด่าน {stage} · {gated}`, 280, base, 10)
+		-- ⚠️ 5B-2 รอบแก้ป้าย (ผู้ใช้เลือก): เอาตัวหนังสือลอย "รังบอสด่าน N · เข้าได้เลย/หลังกำแพง" ออกแล้ว
 
 		-- ⚠️ 5B: ไม่วางแผ่นจุดไข่แล้ว (เดิม 5 จุดวงกลมตาม Balance.Boss.EGGS_PER_SPAWN ที่ลบแล้ว)
 		-- 5B-2: บอส + ไข่จริงของทุกห้องอยู่มุมห้อง — buildBossArena (ตรงนี้แค่พื้นห้อง + ป้าย)
@@ -708,6 +716,8 @@ end
 -- ⚠️ 5B: กำแพงกั้นย้ายไป**ปิดช่องทางเข้าเลนพอดี** (ช่องประตูกำแพงหินขอบแมพ) · สีขาวทึบ · บอส + ไข่ 6 ฟองอยู่มุมห้อง
 --   5B-2: กำแพงกั้นยังเป็นชิ้นเดียวที่ปากเลน (ผู้ใช้ยืนยัน) · มุมบอสแต่ละห้องสลับฟันปลาตาม BossRoom.CornerSide
 -- ⚠️ Persistent: client ติดตัวเลขนับถอยหลังไว้ที่ผิวกำแพงกั้น + จุดกด E ที่ไข่ (เหตุผลเดียวกับแท่นอัญเชิญ/ป้ายบนแมพ)
+local BOSS_HP_BAR_SIZE = Vector2.new(16, 2.8) -- studs (กว้าง · สูง) ของแถบ HP บอส — ติดโลก ไม่ใช่พิกเซลบนจอ
+
 local BOSS_ARENA_COLORS = {
 	barrier = Color3.fromRGB(245, 245, 245), -- 5B: ขาวทึบ (เดิมแดง ForceField โปร่ง)
 	bossBody = Color3.fromRGB(92, 58, 120),
@@ -780,9 +790,11 @@ local function buildBoss(model: Model, room: number)
 	boss.PrimaryPart = body
 
 	-- แถบ HP เหนือหัว — ของ server ทุกคนเห็นค่าเดียวกัน (BossService อัปเดต HpFill/HpText)
+	-- ⚠️ ขนาดเป็น **studs ในโลก** (เดิม fromOffset(260, 46) = คงที่บนจอ → ยิ่งถอยออกไกลยิ่งดูใหญ่เทียบกับบอส ·
+	--   ผลทดสอบ Studio) · กว้างกว่าตัวบอส (10) นิดหน่อย
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "HpBar"
-	gui.Size = UDim2.fromOffset(260, 46)
+	gui.Size = UDim2.fromScale(BOSS_HP_BAR_SIZE.X, BOSS_HP_BAR_SIZE.Y)
 	gui.StudsOffsetWorldSpace = Vector3.new(0, headSize + 3, 0)
 	gui.MaxDistance = 300
 	gui.Adornee = head

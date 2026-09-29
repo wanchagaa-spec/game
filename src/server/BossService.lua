@@ -150,7 +150,7 @@ end
 local function newRoom(room: number): Room
 	return {
 		room = room,
-		bossAlive = false, -- เซิร์ฟเปิดใหม่ = ต้นกลางวัน ยังไม่มีบอสจนคืนแรก
+		bossAlive = false, -- ค่าตั้งต้นของโครง — newState เรียก spawnAllBosses ต่อทันที (เปิดเซิร์ฟ = บอสครบทุกห้อง)
 		bossHp = 0,
 		bossMaxHp = Config.getBossHp(room),
 		bossSpawnedAt = nil,
@@ -163,12 +163,20 @@ local function newRoom(room: number): Room
 	}
 end
 
+-- ประกาศล่วงหน้า (ตัวจริงอยู่ข้างล่าง) — newState เรียกตอนเปิดเซิร์ฟ · enterNight เรียกทุกคืน · **ฟังก์ชันเดียวกัน**
+local spawnAllBosses: (state: State, at: number) -> ()
+
+-- สถานะตอนเซิร์ฟเปิด: ต้นกลางวัน (นับเวลากลางวันเต็ม DAY_SECONDS จาก now)
+-- ⚠️ ผู้ใช้สั่ง: **บอสทุกห้องเกิดทันที HP เต็ม + ไข่ห้องละ EGGS_PER_NIGHT ฟอง** เหมือนเพิ่งผ่านกลางคืนมา
+--   (เดิมไม่มีบอสจนคืนแรก ต้องรอ 9 นาทีหรือ debugBossNight) · ใช้ spawnAllBosses ตัวเดียวกับต้นกลางคืน ไม่เขียนแยก ·
+--   ไม่เปลี่ยน phase/เวลา/cycle — ไม่มีกำแพงกั้น ไม่วาป ไม่ประกาศไข่หนัก (สามอย่างนั้นผูกกับเหตุการณ์ "night" เท่านั้น)
+--   · ล็อกอัญเชิญทำงานได้ตั้งแต่เปิดเซิร์ฟ (lockUser ต้องการบอสห้องนั้นมีชีวิต)
 function BossService.newState(now: number, rng: Rng?): State
 	local rooms: { Room } = {}
 	for room = 1, roomCount() do
 		rooms[room] = newRoom(room)
 	end
-	return {
+	local state: State = {
 		phase = "day",
 		phaseEndsAt = now + cycleConfig().DAY_SECONDS,
 		cycle = 0,
@@ -183,6 +191,8 @@ function BossService.newState(now: number, rng: Rng?): State
 		lastHitAt = {},
 		gateRespawn = {},
 	}
+	spawnAllBosses(state, now)
+	return state
 end
 
 -- ห้องบอสตามเลขห้อง (nil = เลขห้องแปลก)
@@ -206,10 +216,10 @@ local function spawnEggs(state: State, roomState: Room)
 	roomState.eggs = eggs
 end
 
--- บอสทุกห้องเกิด (ต้นกลางคืน) — ตัวเก่ายังไม่ตาย = ฟื้น HP เต็ม · บันทึกดาเมจเริ่มใหม่ · ไข่ชุดใหม่ทุกห้อง
+-- บอสทุกห้องเกิด (ต้นกลางคืน + ตอนเปิดเซิร์ฟ) — ตัวเก่ายังไม่ตาย = ฟื้น HP เต็ม · บันทึกดาเมจเริ่มใหม่ · ไข่ชุดใหม่ทุกห้อง
 -- ⚠️ ไข่ที่มีคนถืออยู่หายหมด (คนถือถูกจดใน lostCarriers ให้ runtime แจ้ง) · การกดค้างที่ค้างอยู่ถูกล้าง
 -- ⚠️ ไม่ล้าง lockedUsers — ปลดล็อกได้ทางเดียวคือฆ่าบอสห้องนั้น
-local function spawnAllBosses(state: State, at: number)
+spawnAllBosses = function(state: State, at: number)
 	local lost: { number } = {}
 	for userId in state.carrying do
 		table.insert(lost, userId)
@@ -876,6 +886,7 @@ end
 
 local BARRIER_NIGHT_TRANSPARENCY = 0 -- 5B: ขาวทึบ (เดิม 0.35 โปร่ง)
 local WORLD_TICK = 0.25 -- วินาที — จังหวะเช็คเปลี่ยน phase · ถือ/เก็บอาวุธ · บอสฟาด · เลือด · ส่งไข่ที่เซฟโซน
+local LOOP_WARN_INTERVAL = 10 -- วินาที — error ซ้ำของระบบย่อยเดิมในลูปหลัก warn ไม่ถี่กว่านี้ (กัน output ท่วม)
 local CARRY_ABOVE_ROOT = 3 -- ไข่ที่ถือลอยเหนือ HumanoidRootPart เท่านี้ + รัศมีไข่ (อยู่เหนือหัวพอดี)
 local PICKUP_REQUEST_COOLDOWN = 0.25 -- วินาที — กันยิงคำขอหยิบรัว (server นับเอง)
 
@@ -1719,15 +1730,37 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 	publish()
 	print(`[BossService] เริ่มวงจรกลางวัน/กลางคืน · บอส {#state.rooms} ห้อง · {BossService.describeHeader(state, serverNow())}`)
 
+	-- ⚠️ ลูปหลักห้ามตาย: error ที่หลุดออกมาจากระบบย่อยตัวไหนก็ตาม (ตัวละครหายกลางทาง ฯลฯ) จะหยุด thread ทั้งเส้น →
+	--   วงจรกลางวัน/กลางคืนค้างถาวร (บอสไม่เกิดอีกจนกว่าจะสั่ง debug) · แยก pcall ต่อระบบ ให้ตัวอื่นเดินต่อ + warn บอกชื่อระบบ
+	local lastLoopWarnAt: { [string]: number } = {}
+	local function guarded(name: string, run: () -> ())
+		-- cast: ชนิดของ pcall คืนแค่ค่าที่ฟังก์ชันคืน (ไม่มี) · ของจริงคืนข้อความ error เป็นค่าที่ 2 ตอนพัง
+		local ok, err = pcall(run :: () -> ...any)
+		if not ok then
+			local clock = os.clock()
+			local last = lastLoopWarnAt[name]
+			if last == nil or clock - last >= LOOP_WARN_INTERVAL then
+				lastLoopWarnAt[name] = clock
+				warn(`[BossService] ลูปหลัก: {name} error (ระบบอื่นเดินต่อ) — {err}`)
+			end
+		end
+	end
+
 	task.spawn(function()
 		while true do
 			task.wait(WORLD_TICK)
 			local now = serverNow()
-			applyEvents(BossService.step(state, now))
-			updateWeapons()
-			tickSlams(now)
-			updateHealth(now)
-			updateCarriers()
+			guarded("วงจรกลางวัน/กลางคืน", function()
+				applyEvents(BossService.step(state, now))
+			end)
+			guarded("อาวุธ", updateWeapons)
+			guarded("บอสฟาด", function()
+				tickSlams(now)
+			end)
+			guarded("เลือด", function()
+				updateHealth(now)
+			end)
+			guarded("ส่งไข่", updateCarriers)
 		end
 	end)
 end
@@ -1797,7 +1830,7 @@ function BossService.debugBossEggs(rawRoom: number?): string
 		local phase = if roomState.bossAlive then "บอสยังอยู่ — ยังหยิบไม่ได้" else "บอสไม่อยู่ — หยิบได้ (ถ้าไข่ยังวางอยู่)"
 		table.insert(lines, `ห้อง {room} ({Config.getBossEggId(room)}) · {phase}`)
 		if #roomState.eggs == 0 then
-			table.insert(lines, "  ยังไม่มีไข่ (รอคืนแรก — debugBossNight)")
+			table.insert(lines, "  ไม่มีไข่ (ปกติไม่เกิด — เปิดเซิร์ฟมีไข่ครบแล้ว · debugBossNight สร้างชุดใหม่)")
 		end
 		for _, egg in roomState.eggs do
 			table.insert(

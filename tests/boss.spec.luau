@@ -135,12 +135,13 @@ return function(t, Config)
 	local HP1 = Config.getBossHp(1)
 
 	----------------------------------------------------------------------------
-	print("── 5A วงจร: เซิร์ฟเปิด = ต้นกลางวัน ไม่มีบอส · เปลี่ยนตรงจังหวะ 9:00 / 1:00 ──")
+	print("── 5A วงจร: เซิร์ฟเปิด = ต้นกลางวัน (บอสครบทุกห้องแล้ว) · เปลี่ยนตรงจังหวะ 9:00 / 1:00 ──")
 	----------------------------------------------------------------------------
 	do
 		local s = BossService.newState(1000)
 		check("เริ่มกลางวัน", s.phase, "day")
-		check("  ไม่มีบอสจนคืนแรก (ห้อง 1)", s.rooms[1].bossAlive, false)
+		check("  บอสห้อง 1 เกิดทันทีตอนเปิดเซิร์ฟ (ไม่ต้องรอคืนแรก)", s.rooms[1].bossAlive, true)
+		check("  ยังไม่นับเป็นคืน (cycle 0)", s.cycle, 0)
 		check("  มีครบ 9 ห้อง", #s.rooms, Config.Balance.Stage.COUNT)
 		check("  จบกลางวันที่ +540", s.phaseEndsAt, 1540)
 
@@ -214,7 +215,9 @@ return function(t, Config)
 	do
 		local s = BossService.newState(0)
 		local dealt = BossService.applyDamage(s, 1, 1, 5, 10)
-		check("กลางวันแรก ไม่มีบอส → ตีไม่เข้า", dealt, 0)
+		check("กลางวันแรก (บอสเกิดตั้งแต่เปิดเซิร์ฟ) → ตีเข้า", dealt, 5)
+		BossService.applyDamage(s, 2, 1, Config.getBossHp(2), 11)
+		check("บอสห้อง 2 ตายแล้ว → ตีไม่เข้า", (BossService.applyDamage(s, 2, 1, 5, 12)), 0)
 		BossService.step(s, 540)
 		dealt = BossService.applyDamage(s, 1, 1, 5, 545)
 		check("กลางคืน (บอสอยู่หลังกำแพงกั้น) → ตีไม่เข้า", dealt, 0)
@@ -319,7 +322,11 @@ return function(t, Config)
 	----------------------------------------------------------------------------
 	do
 		local s = BossService.newState(0)
-		check("ไม่มีบอส → ล็อกไม่ได้", BossService.lockUser(s, 5, 2), false)
+		check("เปิดเซิร์ฟ (บอสห้อง 3 อยู่แล้ว) → ล็อกได้ตั้งแต่กลางวันแรก", BossService.lockUser(s, 8, 3), true)
+		BossService.applyDamage(s, 3, 9, Config.getBossHp(3), 5)
+		check("  บอสห้อง 3 ตาย → ปลดล็อก", BossService.isUserLocked(s, 8), false)
+		BossService.applyDamage(s, 2, 9, Config.getBossHp(2), 5)
+		check("บอสห้อง 2 ตายแล้ว (ไม่มีบอส) → ล็อกไม่ได้", BossService.lockUser(s, 5, 2), false)
 		check("  ไม่ติดล็อก", BossService.isUserLocked(s, 5), false)
 		BossService.step(s, 540)
 		check("บอสห้อง 2 อยู่ → ล็อกได้", BossService.lockUser(s, 5, 2), true)
@@ -498,8 +505,8 @@ return function(t, Config)
 	----------------------------------------------------------------------------
 	do
 		local s = BossService.newState(0, lowRng)
-		check("เซิร์ฟเปิด (ยังไม่ถึงคืนแรก) = ยังไม่มีไข่", #s.rooms[1].eggs, 0)
-		check("  หยิบตอนยังไม่มีไข่ → alive (ยังไม่มีบอสตาย = ไม่มีไข่ให้หยิบ) หรือ taken", (pick(s, 1, 1, 1)) ~= "ok", true)
+		check("เซิร์ฟเปิด = ไข่ 6 ฟองเกิดพร้อมบอสทันที (ห้อง 1)", #s.rooms[1].eggs, 6)
+		check("  บอสยังอยู่ → หยิบไม่ได้ (alive)", (pick(s, 1, 1, 1)), "alive")
 		BossService.step(s, DAY)
 		check("ต้นกลางคืน: ไข่ 6 ฟองเกิดพร้อมบอส (ห้อง 1)", #s.rooms[1].eggs, 6)
 		local allResting, allTypeOk, allWeightOk = true, true, true
@@ -842,13 +849,15 @@ return function(t, Config)
 	----------------------------------------------------------------------------
 	do
 		local s = BossService.newState(0, lowRng)
-		local noneAlive = true
+		local openOk = true
 		for room = 1, STAGES do
-			if s.rooms[room].bossAlive then
-				noneAlive = false
+			local r = s.rooms[room]
+			if not r.bossAlive or r.bossHp ~= Config.getBossHp(room) or #r.eggs ~= cycle.EGGS_PER_NIGHT then
+				openOk = false
 			end
 		end
-		check("เซิร์ฟเปิด (กลางวันแรก) ไม่มีบอสห้องไหน", noneAlive, true)
+		check("เซิร์ฟเปิด (กลางวันแรก) บอสครบทุกห้อง HP เต็ม + ไข่ครบ", openOk, true)
+		BossService.applyDamage(s, 4, 9, 7, 100) -- ตีบอสห้อง 4 ไว้บางส่วน (ไม่ตาย) ก่อนคืนแรก
 		BossService.step(s, DAY) -- คืน 1
 		local allAlive, allFull, allEggs = true, true, true
 		for room = 1, STAGES do
@@ -1248,8 +1257,11 @@ return function(t, Config)
 		local boss1 = Config.getBossCornerCenter(1)
 		local near = { [1] = pos(boss1.X - 10, boss1.Z) }
 		local s0 = BossService.newState(0)
-		check("เซิร์ฟเปิดใหม่ (ยังไม่มีบอส) → ไม่ฟาด", #BossService.stepSlams(s0, 10, near), 0)
+		local openEvents = BossService.stepSlams(s0, 10, near)
+		check("เซิร์ฟเปิดใหม่ (บอสเกิดทันที) → ง้างได้ตั้งแต่กลางวันแรก", #openEvents == 1 and openEvents[1].kind == "windup", true)
 		BossService.step(s0, DAY)
+		local nightEvents = BossService.stepSlams(s0, DAY, near)
+		check("เข้ากลางคืนคืนแรก → ท่าที่ง้างค้างถูกยกเลิก", #nightEvents == 1 and nightEvents[1].kind == "cancel", true)
 		check("กลางคืน (บอสเพิ่งเกิด) → ไม่ฟาด", #BossService.stepSlams(s0, DAY + 1, near), 0)
 
 		local s, t0 = dayWithBosses()
@@ -1531,5 +1543,106 @@ return function(t, Config)
 		check(`ขั้น 10 ตีห้อง 9 หลบแล้ว {string.format("%.1f", capstone)} วิ`, capstone <= DAY, true)
 		print(string.format("   ห้อง 1 %.1f วิ · ห้อง 2–9 (ขั้น N) ช้าสุด %.1f วิ · มือใหม่ %.1f วิ · ขั้น 10 ห้อง 9 %.1f วิ",
 			(simulate(1, 1)), worst, rookie, capstone))
+	end
+
+	----------------------------------------------------------------------------
+	print("── เปิดเซิร์ฟ: บอสครบ 9 ห้อง + ไข่ 54 ฟองทันที (ไม่เรียก debug) · ไม่ประกาศ · เข้ากลางคืนเองหลัง 540 วิ ──")
+	----------------------------------------------------------------------------
+	do
+		local t0 = 5000
+		-- highRng = ไข่หนักทุกฟอง → ถ้าเปิดเซิร์ฟแล้วมีเหตุการณ์ (= runtime จะประกาศไข่หนัก/วาป/ขึ้นกำแพงกั้น) เทสต์จับได้
+		local s = BossService.newState(t0, highRng)
+		local alive, fullHp, eggs, resting = 0, 0, 0, 0
+		for room = 1, STAGES do
+			local r = s.rooms[room]
+			if r.bossAlive and r.bossSpawnedAt == t0 then
+				alive += 1
+			end
+			if r.bossHp == Config.getBossHp(room) and r.bossMaxHp == r.bossHp then
+				fullHp += 1
+			end
+			for _, egg in r.eggs do
+				eggs += 1
+				if egg.status == "resting" and egg.eggId == Config.getBossEggId(room) and egg.room == room then
+					resting += 1
+				end
+			end
+		end
+		check("เปิดเซิร์ฟ: บอสมีชีวิตครบ 9 ห้องทันที (ไม่เรียก debug)", alive, STAGES)
+		check("  HP เต็มทุกห้อง", fullHp, STAGES)
+		check("  ไข่ 54 ฟอง (ห้องละ 6)", eggs, STAGES * cycle.EGGS_PER_NIGHT)
+		check("  ทุกฟองวางอยู่ในรัง · ชนิดไข่ของห้องนั้น", resting, STAGES * cycle.EGGS_PER_NIGHT)
+		check("  ยังกลางวัน (กำแพงกั้นเปิด · ไม่วาป)", s.phase, "day")
+		check("  กลางวันเต็ม 540 วิ", BossService.getRemaining(s, t0), DAY)
+		check("  ยังไม่นับเป็นคืน (cycle 0)", s.cycle, 0)
+		check("  ไม่มีคนไข่หาย (ไม่มีอะไรให้แจ้ง)", #s.lostCarriers, 0)
+		check("  มีไข่หนักเกินเกณฑ์อยู่จริง (ใช้พิสูจน์ข้อถัดไป)", #BossService.getHeavyEggAlerts(s) > 0, true)
+		check("  tick ตอนเปิดเซิร์ฟไม่มีเหตุการณ์ = ไม่ประกาศไข่หนัก/ไม่วาป/ไม่ขึ้นกำแพง", #BossService.step(s, t0), 0)
+		check("ล็อกอัญเชิญทำงานตั้งแต่เปิดเซิร์ฟ (พังกำแพง 4 ตอนบอสห้อง 4 ยังอยู่)", BossService.lockUser(s, 77, 4), true)
+
+		-- กลางวันแรก: ตีห้อง 4 ไว้บางส่วน · ฆ่าห้อง 2 แล้วถือไข่ค้าง → คืนแรกต้องทำงานตามปกติ
+		BossService.applyDamage(s, 4, 9, 7, t0 + 10)
+		BossService.applyDamage(s, 2, 9, s.rooms[2].bossHp, t0 + 11)
+		check("  ฆ่าห้อง 2 ได้ตั้งแต่กลางวันแรก", s.rooms[2].bossAlive, false)
+		check("  ไข่ห้อง 2 หยิบได้หลังบอสตาย", (pick(s, 55, 2, 3)), "ok")
+		local openEggs = s.rooms[6].eggs
+
+		-- จำลองลูปจริงของ server (step ทุก WORLD_TICK 0.25 วิ) · ไม่เรียก debug / forcePhase เลย
+		local nightAt, nightEvents = nil, nil
+		for tick = 1, 4000 do
+			local now = t0 + tick * 0.25
+			local events = BossService.step(s, now)
+			if #events > 0 then
+				nightAt, nightEvents = now, events
+				break
+			end
+		end
+		check("วงจรเข้ากลางคืนเองที่ +540 วิพอดี", nightAt and nightAt - t0, DAY)
+		check("  เหตุการณ์เดียว = night (runtime ถึงจะขึ้นกำแพง · วาป · ประกาศไข่หนัก)", nightEvents and table.concat(nightEvents, ","), "night")
+		check("  คืนที่ 1", s.cycle, 1)
+		local nightAlive, nightFull, nightEggs = 0, 0, 0
+		for room = 1, STAGES do
+			local r = s.rooms[room]
+			if r.bossAlive and r.bossSpawnedAt == t0 + DAY then
+				nightAlive += 1
+			end
+			if r.bossHp == Config.getBossHp(room) then
+				nightFull += 1
+			end
+			nightEggs += #r.eggs
+		end
+		check("  คืนแรก: บอสเกิดใหม่ครบ 9 ห้อง", nightAlive, STAGES)
+		check("  HP เต็มทุกห้อง (ห้อง 4 ที่โดนตีไว้ฟื้นเต็ม)", nightFull, STAGES)
+		check("  บันทึกดาเมจห้อง 4 เริ่มใหม่", s.rooms[4].damageBy[9], nil)
+		check("  ห้อง 2 (ตายไปแล้ว) เกิดใหม่", s.rooms[2].bossAlive, true)
+		check("  ไข่ 54 ฟองชุดใหม่", nightEggs, STAGES * cycle.EGGS_PER_NIGHT)
+		check("  ไข่ห้อง 6 (ไม่มีใครแตะ) เป็นชุดใหม่", s.rooms[6].eggs ~= openEggs, true)
+		check("  ไข่ที่ถือจากห้อง 2 หาย · จดคนถือไว้แจ้ง", BossService.getCarriedEgg(s, 55) == nil and table.concat(s.lostCarriers, ",") == "55", true)
+		check("  ล็อกห้อง 4 ไม่ปลดข้ามคืน", BossService.getLockedRoom(s, 77), 4)
+		check("  ไข่หนักของคืนแรกมีให้ประกาศ (ประกาศเฉพาะตอนเข้ากลางคืน)", #BossService.getHeavyEggAlerts(s) > 0, true)
+
+		local dayAt = nil
+		for tick = 1, 400 do
+			local now = t0 + DAY + tick * 0.25
+			local events = BossService.step(s, now)
+			if #events > 0 then
+				dayAt = if events[1] == "day" then now else -1
+				break
+			end
+		end
+		check("  กลางคืน 60 วิแล้วเข้ากลางวันเอง (+600)", dayAt and dayAt - t0, DAY + NIGHT)
+	end
+
+	----------------------------------------------------------------------------
+	print("── ท้องฟ้ากลางคืน (ภาพล้วน): มืดเต็มก่อนกลางคืนจบ · มืดลงจริง · ไม่ใช่ลูกบิดสมดุล · ไม่แตะเวลาวงจร ──")
+	----------------------------------------------------------------------------
+	do
+		local sky = Config.NightSky
+		check("ค่าท้องฟ้าอยู่ที่ Config.NightSky (ไม่ใช่ Balance)", type(sky) == "table" and Config.Balance.NightSky == nil, true)
+		check("  เปลี่ยนฟ้าเสร็จภายในครึ่งกลางคืน", sky.TRANSITION_SECONDS > 0 and sky.TRANSITION_SECONDS <= NIGHT / 2, true)
+		check("  กลางคืน = เที่ยงคืน (เห็นพระจันทร์)", sky.CLOCK_TIME, 0)
+		check("  มืดลง: ความสว่างต่ำกว่ากลางวัน · exposure ไม่เพิ่ม", sky.BRIGHTNESS_SCALE < 1 and sky.EXPOSURE_OFFSET <= 0, true)
+		check("  พระจันทร์ใหญ่กว่าค่าตั้งต้นของ Roblox (11)", sky.MOON_ANGULAR_SIZE > 11, true)
+		check("  เวลาวงจรเดิม (กลางวัน 540 · กลางคืน 60)", DAY == 540 and NIGHT == 60, true)
 	end
 end

@@ -280,6 +280,27 @@ print(game.ServerStorage.EggServiceDebug:Invoke("debugSetHealth", P1, 0))  -- 5D
 
 ---
 
+## คำสั่งโมเดลตัวละคร (รอบโมเดลตัวละคร) — `EggService` + `PenService`
+
+สะพานเดียวกัน (`ServerStorage.EggServiceDebug`) — หาชื่อใน `EggService` → `BossService` → `PenService` ตามลำดับ
+📄 ขั้นตอนดูโมเดลใน Studio ทั้งชุด: `docs/models-test-checklist.md`
+
+| คำสั่ง | ทำอะไร |
+|---|---|
+| `debugShowcaseModels()` (PenService) | วางโมเดลครบ 12 ตัวละครเรียงแถว**กลางทางเดินกลาง** (ลำดับดัชนี: ราชาปีศาจวัว → … → ปลา) ขนาด tier 1 (100 kg) × ขนาดคลาส = เท่าที่เห็นในคอก · หันหน้า −Z (ยืนฝั่ง −Z มองเข้าหา) · ป้ายหน้าเท้าบอก**ชื่อ · คลาส · จำนวนชิ้น** · คืนข้อความสรุป (ชื่อ · แบบ Part/mesh/กล่องสำรอง · จำนวนชิ้น · ความสูง) · **เรียกซ้ำ = ลบแถวเดิมแล้ววางใหม่** (เช่น หลังลิง mesh โหลดเสร็จ) · ภาพล้วน ไม่แตะข้อมูลผู้เล่น |
+| `debugClearShowcase()` (PenService) | ลบแถวโชว์ออก (ไม่มีแถว = คืนข้อความบอก) |
+| `debugGrantAllCharacters(player, weight?)` (EggService) | ให้แม่**ครบทุกตัวละคร** ตัวละครละ 1 ตัว เข้า**กระเป๋า** เรียงตามดัชนี · `weight` ไม่ใส่ = 100 kg (tier 1) · ปัดลงเป็นจำนวนเต็ม · ผ่าน `PlayerData.createMother` ทุกตัว (uid + ดัชนีขึ้นครบ) · กระเป๋าว่างไม่พอทั้งชุด = **ปฏิเสธทั้งชุด** (ไม่แจกครึ่ง ๆ · ไม่เปลือง uid) · ไว้ดูโมเดลในการ์ด/ดัชนี/หน้าต่างอัญเชิญ/ร้านขาย แล้วกด "สวมใส่ที่ดีที่สุด" ดูในคอก |
+
+```lua
+local P1 = game.Players:GetPlayers()[1]
+print(game.ServerStorage.EggServiceDebug:Invoke("debugShowcaseModels"))
+game.ServerStorage.EggServiceDebug:Invoke("debugClearShowcase")
+game.ServerStorage.EggServiceDebug:Invoke("debugGrantAllCharacters", P1)            -- 100 kg ทุกตัว
+game.ServerStorage.EggServiceDebug:Invoke("debugGrantAllCharacters", P1, 100000000) -- tier 7 ทุกตัว (ดูตัวใหญ่สุดในคอก)
+```
+
+---
+
 ## ตัวอย่าง flow ทดสอบครบทุก tier
 
 ⚠️ เขียนแบบ `require` ให้อ่านง่าย — ใน Command Bar ต้องแปลงเป็น `game.ServerStorage.EggServiceDebug:Invoke(...)` ทีละบรรทัด (ดูหัวเอกสาร)
@@ -344,8 +365,8 @@ EggService.debugWipeSavedData(player, player.Name)
 
 | charId | ชื่อ | คลาส |
 |---|---|---|
-| `yulai` | องค์ยูไล | SS |
-| `guanyin` | พระแม่กวนอิม | S |
+| `yulai` | ราชาปีศาจวัว (เดิม "องค์ยูไล" · charId คงเดิม) | SS |
+| `guanyin` | องค์หญิงพัดเหล็ก (เดิม "พระแม่กวนอิม" · charId คงเดิม) | S |
 | `jade_emperor` | เง็กเซียนฮ่องเต้ | S |
 | `tang` | พระถังซัมจั๋ง | A |
 | `wukong` | ซุนหงอคง | A |

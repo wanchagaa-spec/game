@@ -44,9 +44,10 @@ row("META", "damageFormula", Config.Balance.Damage.ACTIVE_FORMULA)
 row("META", "coinBase", Config.Balance.Economy.BASE_PER_MINUTE)
 row("META", "coinStageMult", Config.Balance.Economy.STAGE_MULTIPLIER)
 row("META", "sellMinutes", Config.Balance.Economy.SELL_MOTHER_MINUTES)
-row("META", "autoPause", Config.Balance.Combat.AUTO_PAUSE_AFTER_UNITS)
-row("META", "maxVisible", Config.Balance.Combat.MAX_VISIBLE_UNITS)
-row("META", "walkSeconds", Config.Balance.Combat.WALK_SECONDS_TO_WALL)
+-- 5E-1 รบแบบชุด: ค่าเดิม (autoPause/maxVisible/walkSeconds) ลบแล้ว
+row("META", "fieldSlots", Config.Balance.Combat.FIELD_SLOTS)
+row("META", "gatherSize", Config.Balance.Combat.GATHER_SIZE)
+row("META", "autoPauseDeaths", Config.Balance.Combat.AUTO_PAUSE_AFTER_DEATHS)
 row("META", "bagCapacity", Config.Balance.Bag.CAPACITY)
 row("META", "maxSsOverS", Config.Balance.BalanceCheck.MAX_SS_OVER_S_RATIO)
 row("META", "costMultInStage", Config.Balance.DamageUpgrade.COST_MULTIPLIER_IN_STAGE)
@@ -113,7 +114,9 @@ for stage = 1, 9 do
 	row("STAGEINFO", stage, Config.getStageDefenderCount(stage), Config.getStageDefenderHp(stage),
 		Config.getStageWallHp(stage), Config.getStageTotalHp(stage), Config.getStageTurretDps(stage),
 		Config.getBossHp(stage), Config.getWeaponDamage(stage), Config.getReleaseRate(stage),
-		Config.getArmyDamageMultiplier(Config.getMaxDamageLevel(stage)), Config.getVisibleUnitCount(stage))
+		Config.getArmyDamageMultiplier(Config.getMaxDamageLevel(stage)),
+		-- 5E-1: คอลัมน์สุดท้าย = จำนวนศัตรูทั้งด่าน (ใหญ่ + เล็ก) แทนจำนวนโมเดลบนจอของระบบเดิม
+		Config.getStageEnemyStats(stage).bigCount + Config.getStageEnemyStats(stage).smallCount)
 end
 
 for lvl = 1, Config.Balance.Pen.MAX_LEVEL do
@@ -252,17 +255,17 @@ for _, w in WEIGHTS do
 		Config.Balance.Production.STACK_CAP / on3 / 60)
 end
 
--- ── turret ──
+-- ── turret (5E-1: ยิงจริง · สัดส่วนของเลือดลูกอ้างอิงที่เข้าสนาม) ──
+-- แถว: ด่าน · ดาเมจช่องเต็ม/วิ · turretDps · สัดส่วน (= TOLL) · 10% ของดาเมจ (อ้างอิงเดิม) · ช่องบนสนาม ·
+--       วิที่ป้อมล้างสนามเต็มได้ลำพัง · วินาทีตีทั้งด่าน (โมเดลรวมพล)
 for stage = 2, 9 do
-	local w = check.REFERENCE_WEIGHT[stage]
-	local penCap = Config.getPenCapacity(stage)
-	local eff = math.min(penCap * Config.getProductionPerMinute(w, nil, stage - 1, true) / 60, Config.getReleaseRate(stage))
-	local power = Config.computeBattlePower(Config.getChildWeight(w), classChar(check.REFERENCE_CLASS[stage]), nil, Config.getMaxDamageLevel(stage))
-	local ourDps = eff * power
+	local ref = Config.getReferenceUnitStats(stage)
+	local fullOutput = ref.fullPower * ref.releaseRate
 	local t = Config.getStageTurretDps(stage)
-	local onField = math.min(Config.getReleaseRate(stage) * Config.Balance.Combat.WALK_SECONDS_TO_WALL, 1e9)
-	row("TURRET", stage, ourDps, t, t / ourDps, 0.1 * ourDps, onField, onField * power / t,
-		Config.getStageTotalHp(stage) / ourDps)
+	local hpIn = math.min(ref.producedPerSecond, ref.releaseRate) * ref.hp
+	local slots = Config.Balance.Combat.FIELD_SLOTS
+	row("TURRET", stage, fullOutput, t, t / hpIn, 0.1 * fullOutput, slots, slots * ref.hp / t,
+		Config.getReferenceClearEstimate(stage).totalSeconds)
 end
 
 -- ── ตาราง upgrade damage ต่อด่าน ──

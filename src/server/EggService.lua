@@ -234,8 +234,8 @@ end
 local function describeStack(key: string, count: number, damageLevel: number, robuxDamageBonus: number)
 	local charId, weight, statuses = Config.parseStackKey(key)
 	local character = if charId then Config.getCharacter(charId) else nil
-	-- UI-3: พลังต่อตัว — สูตรเดียวกับที่ CombatService.releaseFromQueue ใช้ตีจริง (รวมสถานะ + damageLevel
-	-- + โบนัส Robux ที่ทะลุเพดาน — UI-5)
+	-- UI-3: พลังต่อตัว (พลังเต็ม) — สูตรเดียวกับที่ CombatService ใช้ตีจริง (รวมสถานะ + damageLevel
+	-- + โบนัส Robux ที่ทะลุเพดาน — UI-5) · 5E-1: ดาเมจ/วิบนสนาม = พลังนี้ × อัตราปล่อย ÷ 6 · เลือด = พลังฐาน
 	-- ⚠️ คิดที่ server (client ห้ามคิดเอง) · key เพี้ยน = nil (ไม่น่าเกิด — key มาจาก makeStackKey เท่านั้น)
 	local power = if charId and weight
 		then Config.computeBattlePower(Config.getChildWeight(weight, statuses), charId, statuses, damageLevel, robuxDamageBonus)
@@ -258,7 +258,7 @@ end
 -- ส่งเท่าที่ UI แสดงจริง + จำนวนรวม ที่เหลือรอจนกว่า UI จะทำ virtualize (Phase 5.5)
 local HELD_EGGS_PER_SYNC = 50
 
-local function buildSyncPayload(data: Data, bossLocked: boolean?)
+local function buildSyncPayload(data: Data, bossLocked: boolean?, combatMeta: any?)
 	local now = os.time()
 
 	local heldItems = data.heldEggs.items
@@ -320,9 +320,12 @@ local function buildSyncPayload(data: Data, bossLocked: boolean?)
 
 	-- ⚠️ กองลูก — จำนวน stack key ยังเล็กมาก (สถานะยังไม่เปิดใช้จริง) ส่งทั้งหมดได้
 	-- ต่างจากกระเป๋าไข่ (10,000 ฟอง) ที่ต้อง virtualize เพราะเป็นคนละขนาดกัน
+	-- 5E-1: ลูกที่ยืนอยู่บนสนามยังนับอยู่ในกอง (หักตอนตาย) → โชว์เฉพาะที่ "พร้อมปล่อย" (หักตัวบนสนามออก)
+	-- กองที่ทั้งกองอยู่บนสนามโชว์เป็น 0 ตัว (ยังติ๊กอยู่ตามลำดับเดิม)
+	local reserved = CombatService.getReservedChildren(combatMeta)
 	local children = {}
 	for key, count in data.children do
-		table.insert(children, describeStack(key, count, data.damageLevel, data.robuxDamageBonus))
+		table.insert(children, describeStack(key, math.max(0, count - (reserved[key] or 0)), data.damageLevel, data.robuxDamageBonus))
 	end
 
 	local discoveredList: { string } = {}
@@ -350,7 +353,7 @@ local function buildSyncPayload(data: Data, bossLocked: boolean?)
 	-- ⚠️ Phase 3A: ฟิลด์การรบ (stageProgress/summonEnabled/releaseOrder/...) มาจาก
 	-- CombatService.buildSyncFields() ล้วน ๆ ไม่คำนวณซ้ำที่นี่ — แค่ merge เข้า payload เดียวกัน
 	-- ให้ 3B ใช้ต่อได้โดยไม่ต้องมี RemoteEvent แยก
-	local combat = CombatService.buildSyncFields(data, bossLocked)
+	local combat = CombatService.buildSyncFields(data, bossLocked, combatMeta)
 
 	-- ⚠️ เพดานที่ซื้อได้ผูกกับ wallProgress (off-by-one: ด่าน 1 = 8 ขั้น ไม่ใช่ 0 — ดู
 	-- docs/data-schema.md §8.6) ต้องเช็คเพดานนี้ก่อนถามราคา ไม่งั้น damageUpgradeCost จะไม่ nil
@@ -421,7 +424,7 @@ function EggService.sync(player: Player)
 	if not data then
 		return
 	end
-	farmStateSync:FireClient(player, buildSyncPayload(data, isBossLocked(player.UserId)))
+	farmStateSync:FireClient(player, buildSyncPayload(data, isBossLocked(player.UserId), CombatService.getMeta(player.UserId)))
 end
 
 --------------------------------------------------------------------------------
@@ -1776,6 +1779,33 @@ function EggService.debugSetStageProgress(
 			.. `wallProgress {wallProgressBefore} → {data.wallProgress} · `
 			.. debugSaveNow(player)
 	)
+end
+
+-- 5E-1: สนามรบทั้ง 12 ช่อง (เรา 6 · ศัตรู 6) + เลือด + คิวที่เหลือ — พิมพ์ลง Output และคืนข้อความเดียวกัน
+function EggService.debugBattleStatus(player: Player): string
+	local data = dataOf(player)
+	if not data then
+		local message = `[EggService] debugBattleStatus: {player.Name} ยังไม่มีข้อมูลผู้เล่น`
+		warn(message)
+		return message
+	end
+	local text = CombatService.describeBattle(data, CombatService.getMeta(player.UserId))
+	print(`[EggService] debugBattleStatus: {player.Name}\n{text}`)
+	return text
+end
+
+-- 5E-1: เปิด/ปิดป้อมบนกำแพง **ทั้งเซิร์ฟ** (ไม่เซฟ · เซิร์ฟใหม่ = เปิดเสมอ) — ทดสอบว่าเวลาตี/การตายเปลี่ยนตามป้อมจริง
+-- ⚠️ ป้อมไม่ใช่ของผู้เล่นรายคน — รับได้ทั้ง debugTurret(false) และแบบสะพานปกติ debugTurret(player, false)
+-- ค่าที่ไม่ใช่ boolean = ปฏิเสธ
+function EggService.debugTurret(first: any, second: any?): string
+	local enabled = if type(first) == "boolean" then first else second
+	if type(enabled) ~= "boolean" then
+		return "debugTurret: ต้องส่ง true (เปิด) หรือ false (ปิด)"
+	end
+	CombatService.setTurretEnabled(enabled)
+	local message = `[EggService] debugTurret: ป้อมบนกำแพง{if enabled then "เปิด" else "ปิด"}แล้ว (ทั้งเซิร์ฟ · ไม่เซฟ)`
+	print(message)
+	return message
 end
 
 -- ตั้งค่า currency.coins ตรง ๆ — ใช้ทดสอบอัปเกรดคอก/ขายแม่โดยไม่ต้องรอสะสมเงินจริง

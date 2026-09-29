@@ -140,7 +140,7 @@ return function(t, Config)
 		data.currency.coins = 1e18
 		local meta = CombatService.newMeta()
 		-- ⚠️ power/ตัวจะสูงกว่า 360 ที่ combat.spec.luau ใช้ (นั่นวัดตอน damageLevel=0) เพราะที่นี่
-		-- ซื้อ damageLevel ไปแล้ว 8 ขั้นก่อนตี (×1.1^8 ≈ ×2.14) — ยิ่งเกินพอสำหรับ 15,000 ที่ด่าน 2 ต้องใช้
+		-- ซื้อ damageLevel ไปแล้ว 8 ขั้นก่อนตี (×1.1^8 ≈ ×2.14) — ยิ่งเร็วขึ้นสำหรับ 15,000 ที่ด่าน 2 ต้องใช้
 		-- ไม่กระทบผลของเทสต์นี้เลย เพราะเช็คแค่ว่าด่านพังจริงหรือไม่ ไม่ได้เช็คเศษ HP ที่เหลือ
 		local key = Config.makeStackKey("wukong", 10000, {})
 		data.children[key] = 100000
@@ -155,7 +155,12 @@ return function(t, Config)
 		check("ก่อนพังด่าน 2 — ซื้อขั้น 9 ไม่ได้", okBefore, false)
 
 		CombatService.tick(data, meta, 1) -- พังด่าน 1 ฟรี (ไม่มีกำแพงจริง)
-		CombatService.tick(data, meta, 50) -- ปล่อยได้ถึง 50 ตัว (RELEASE_PER_SECOND ด่าน 2 = 1/วิ) เกินพอพังด่าน 2
+		-- 5E-1: ช่องเต็ม 6 ตัว ดาเมจรวม ≈ 770/วิ → ด่าน 2 (15,000 HP) พังในไม่กี่สิบวินาที (tick ละ ≤ 5 วิ)
+		for _ = 1, 30 do
+			if CombatService.tick(data, meta, 5).stageCleared then
+				break
+			end
+		end
 		check("ด่าน 2 พังจริงแล้ว wallProgress = 2", data.wallProgress, 2)
 
 		local okAfter, reasonAfter = simulateBuyDamageUpgrade(data)

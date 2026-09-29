@@ -368,28 +368,31 @@ return function(t, Config)
 	check("ด่าน 9 ทหาร 1,000,000,000", Config.getStageDefenderCount(9), 1e9)
 	check("ด่าน 1 ไม่มี turret", Config.getStageTurretDps(1), 0)
 
-	-- turret ต้องเป็นสัดส่วนของ damage/วินาที ไม่ใช่ของ damage ทหารฝ่ายรับ
-	local function ourDpsAt(stage)
+	-- turret ต้องเป็นสัดส่วนของ "เลือดลูกอ้างอิงที่เข้าสนามต่อวินาที" (5E-1) ไม่ใช่ของ damage ทหารฝ่ายรับ
+	-- คิดแยกจาก Config เอง (ไม่เรียก getReferenceUnitStats) — ถ้าสูตรใน Config เพี้ยน เทสต์นี้ต้องจับได้
+	local function hpInAt(stage)
 		local chk = Config.Balance.BalanceCheck
 		local w = chk.REFERENCE_WEIGHT[stage]
 		local cid
-		for id, ch in Config.Characters do if ch.class == chk.REFERENCE_CLASS[stage] then cid = id break end end
+		for id, ch in Config.Characters do if ch.class == chk.REFERENCE_CLASS[stage] and ch.enabled then cid = id break end end
 		local eff = math.min(Config.getPenCapacity(stage) * Config.getProductionPerMinute(w, nil, stage - 1, true) / 60,
 			Config.getReleaseRate(stage))
-		return eff * Config.computeBattlePower(Config.getChildWeight(w), cid, nil, Config.getMaxDamageLevel(stage))
+		return eff * Config.computePower(Config.getChildWeight(w), cid, nil)
 	end
 	local tollOk, tollMax, tollMin = true, 0, 1
 	for st = 2, 9 do
-		local toll = Config.getStageTurretDps(st) / ourDpsAt(st)
+		local toll = Config.getStageTurretDps(st) / hpInAt(st)
 		if toll > tollMax then tollMax = toll end
 		if toll < tollMin then tollMin = toll end
 		if toll > Config.Balance.BalanceCheck.TURRET_TOLL_CEILING then tollOk = false end
 	end
-	near("ด่าน 9 turret = 20% ของ damage/วิ", Config.getStageTurretDps(9), 0.20 * ourDpsAt(9), 1e-6)
+	near("ด่าน 9 turret = 20% ของเลือดลูกที่เข้าสนาม/วิ", Config.getStageTurretDps(9), 0.20 * hpInAt(9), 1e-6)
 	check("turret กินกำลังพลไม่เกินเพดานทุกด่าน", tollOk, true)
-	near("ด่าน 2 turret กิน ~10%", Config.getStageTurretDps(2) / ourDpsAt(2), 0.10, 0.01)
-	near("ด่าน 9 turret กิน ~20%", Config.getStageTurretDps(9) / ourDpsAt(9), 0.20, 0.01)
+	near("ด่าน 2 turret กิน ~10%", Config.getStageTurretDps(2) / hpInAt(2), 0.10, 0.01)
+	near("ด่าน 9 turret กิน ~20%", Config.getStageTurretDps(9) / hpInAt(9), 0.20, 0.01)
 	check("ด่านสูง turret เขี้ยวขึ้น", tollMax > tollMin, true)
+	check("ป้อมยิงนัดละ turretDps ÷ อัตรายิง", Config.getStageTurretShotDamage(9),
+		Config.getStageTurretDps(9) / Config.Balance.Combat.TURRET_SHOTS_PER_SECOND)
 	print(string.format("   turret กินกำลังพล %.1f%% (ด่าน 2) → %.1f%% (ด่าน 9)",
 		tollMin * 100, tollMax * 100))
 	local ok9 = true
@@ -577,17 +580,28 @@ return function(t, Config)
 	check("คืนราคาเดิมแล้ว validate ผ่าน", pcall(Config.validate), true)
 
 	print("── เกมต้องยากขึ้นเรื่อย ๆ ──")
-	-- คิดแบบระบบใหม่: อัตราจริง = min(ผลิตได้, ปล่อยได้) และข้ามด่านที่ไม่มีกำแพง
+	-- 5E-1 รบแบบชุด + รวมพล (ค3): คิดแยกจาก Config เอง แล้วเทียบกับ getReferenceClearHours ข้างล่าง
+	-- ช่องเต็ม = พลังเต็ม × อัตราปล่อย · ลูกตาย = (ศัตรูรุม พลังฐาน × อัตราปล่อย + ป้อม) ÷ เลือดลูก
+	-- ผลิตไม่ทันการตาย → ผลิต × (ดาเมจเต็ม ÷ อัตราตาย) × (1 − (6 − 1) ÷ (2 × 12)) · ช่วงกำแพงโดนแค่ป้อม
 	local function hoursAt(st)
-		local hp = Config.getStageTotalHp(st)
-		if hp <= 0 then return 0 end
+		local defHp, wallHp = Config.getStageDefenderHp(st), Config.getStageWallHp(st)
+		if defHp + wallHp <= 0 then return 0 end
 		local w = Config.Balance.BalanceCheck.REFERENCE_WEIGHT[st]
 		local cl = Config.Balance.BalanceCheck.REFERENCE_CLASS[st]
 		local id
-		for cid, ch in Config.Characters do if ch.class == cl then id = cid break end end
+		for cid, ch in Config.Characters do if ch.class == cl and ch.enabled then id = cid break end end
+		local childW = Config.getChildWeight(w)
+		local base = Config.computePower(childW, id, nil)
+		local full = Config.computeBattlePower(childW, id, nil, Config.getMaxDamageLevel(st))
+		local R = Config.getReleaseRate(st)
 		local produced = Config.getPenCapacity(st) * Config.getProductionPerMinute(w, nil, st - 1, true) / 60
-		local rate = math.min(produced, Config.getReleaseRate(st))
-		return hp / (rate * Config.computeBattlePower(Config.getChildWeight(w), id, nil, Config.getMaxDamageLevel(st)) * 3600)
+		local turret = Config.Balance.Combat.TURRET_TOLL[st] * math.min(produced, R) * base
+		local function rate(incoming)
+			local deaths = (incoming + turret) / base
+			if deaths <= produced then return full * R end
+			return produced * full * R / deaths * (1 - 5 / 24)
+		end
+		return (defHp / rate(base * R) + wallHp / rate(0)) / 3600
 	end
 	-- ⚠️ เส้นเวลา "ซิกแซก" โดยตั้งใจ เพราะคลาสไต่เป็นขั้น ๆ (C→B→A) ไม่ใช่ต่อเนื่อง
 	-- ด่านที่ผู้เล่นเพิ่งได้คลาสใหม่จะง่ายลง แล้วค่อยยากขึ้นอีกสองด่าน
@@ -667,9 +681,62 @@ return function(t, Config)
 	check("เลือกแม่จากคอกได้ → validate ไม่ผ่าน", pcall(Config.validate), false)
 	Config.Balance.Combat.MOTHERS_SELECTABLE_FROM_PEN = savedP
 
-	print("── โมเดลบนจอ ──")
-	check("ด่าน 1: 1/วิ × 30 วิ = 30 ตัว", Config.getVisibleUnitCount(1), 30)
-	check("ด่าน 9: 10/วิ × 30 วิ = 300 → ตัดที่ cap 120", Config.getVisibleUnitCount(9), 120)
+	do
+	print("── 5E-1 รบแบบชุด: ค่าใน Config ──")
+	local combatCfg = Config.Balance.Combat
+	check("สนาม 6 ช่องต่อฝ่าย", combatCfg.FIELD_SLOTS, 6)
+	check("แม่ยืนช่องหลังสุด", combatCfg.MOTHER_SLOT, combatCfg.FIELD_SLOTS)
+	check("รวมพล 12 ตัว (ค3)", combatCfg.GATHER_SIZE, 12)
+	check("ศัตรูชุดละ ใหญ่ 1 + เล็ก 5", combatCfg.ENEMY_BIG_PER_GROUP == 1 and combatCfg.ENEMY_SMALL_PER_GROUP == 5, true)
+	check("ตัวใหญ่ 5 เท่า", combatCfg.ENEMY_BIG_MULTIPLIER, 5)
+	check("auto-pause ตายติดกัน 30 ตัว", combatCfg.AUTO_PAUSE_AFTER_DEATHS, 30)
+	check("ค่าเก่าของระบบปล่อยต่อเนื่องลบแล้ว", combatCfg.AUTO_PAUSE_AFTER_UNITS == nil
+		and combatCfg.MAX_VISIBLE_UNITS == nil and combatCfg.WALK_SECONDS_TO_WALL == nil, true)
+	check("getVisibleUnitCount ลบแล้ว", Config.getVisibleUnitCount, nil)
+	combatCfg.MAX_VISIBLE_UNITS = 120
+	check("เติม MAX_VISIBLE_UNITS กลับ → validate ไม่ผ่าน", pcall(Config.validate), false)
+	combatCfg.MAX_VISIBLE_UNITS = nil
+	combatCfg.GATHER_SIZE = 4
+	check("รวมพลน้อยกว่าช่อง → validate ไม่ผ่าน", pcall(Config.validate), false)
+	combatCfg.GATHER_SIZE = 12
+	combatCfg.ENEMY_SMALL_PER_GROUP = 4
+	check("ศัตรูชุดไม่เท่าจำนวนช่อง → validate ไม่ผ่าน", pcall(Config.validate), false)
+	combatCfg.ENEMY_SMALL_PER_GROUP = 5
+	check("คืนค่าเดิมแล้ว validate ผ่าน", pcall(Config.validate), true)
+
+	print("── 5E-1 ทหารเรา: เลือด = พลังฐาน · ดาเมจ = พลังเต็ม × อัตราปล่อย ÷ 6 ──")
+	local ww = 1500
+	check("เลือดไม่รวมอัปดาเมจ", Config.getUnitHp(ww, "wukong", nil), Config.computePower(ww, "wukong", nil))
+	near("ดาเมจ/วิ = พลังเต็ม × R ÷ 6", Config.getUnitDps(9, ww, "wukong", nil, 40, 3),
+		Config.computeBattlePower(ww, "wukong", nil, 40, 3) * 10 / 6, 1e-9)
+	check("อัปดาเมจเพิ่มดาเมจ ไม่เพิ่มเลือด", Config.getUnitDps(5, ww, "wukong", nil, 20) > Config.getUnitDps(5, ww, "wukong", nil, 0)
+		and Config.getUnitHp(ww, "wukong", nil) == Config.computePower(ww, "wukong", nil), true)
+
+	print("── 5E-1 ศัตรู: ใหญ่ 5 เท่า · เลือดรวมเท่าเดิม · สองชนิดหมดพร้อมกัน ──")
+	local enemyTotalsOk, enemyRatioOk, enemyDpsOk = true, true, true
+	for st = 1, 9 do
+		local e = Config.getStageEnemyStats(st)
+		local sum = e.bigCount * e.bigHp + e.smallCount * e.smallHp
+		if math.abs(sum - Config.getStageDefenderHp(st)) > Config.getStageDefenderHp(st) * 1e-9 then enemyTotalsOk = false end
+		if st >= 2 then
+			if e.bigHp ~= e.smallHp * 5 or e.bigDps ~= e.smallDps * 5 then enemyRatioOk = false end
+			-- เลือดรวมตัวใหญ่ : ตัวเล็ก = 1 : 5 (ตามสัดส่วนช่อง) → ทุกช่องโดนเท่ากันแล้วหมดพร้อมกัน
+			if math.abs(e.bigCount * e.bigHp * 5 - e.smallCount * e.smallHp) > sum * 1e-9 then enemyRatioOk = false end
+			local ref = Config.getReferenceUnitStats(st)
+			if math.abs((e.bigDps + 5 * e.smallDps) - ref.hp * ref.releaseRate) > 1e-9 * ref.hp * ref.releaseRate then enemyDpsOk = false end
+		end
+	end
+	check("เลือดรวมศัตรู = HP ทหารฝ่ายรับเดิมทุกด่าน", enemyTotalsOk, true)
+	check("ตัวใหญ่ = ตัวเล็ก × 5 (เลือด+ดาเมจ) · เลือดรวมสองชนิด 1 : 5", enemyRatioOk, true)
+	check("ศัตรูทั้งชุดรุม = พลังฐานลูกอ้างอิง × อัตราปล่อย", enemyDpsOk, true)
+	check("ด่าน 1 ไม่มีศัตรู", Config.getStageEnemyStats(1).bigCount + Config.getStageEnemyStats(1).smallCount, 0)
+	near("เลือดตัวเล็กด่าน 9 ≈ พลังเต็มลูกอ้างอิง", Config.getStageEnemyStats(9).smallHp / Config.getReferenceUnitStats(9).fullPower, 1, 0.01)
+	for st = 2, 9 do
+		local e = Config.getStageEnemyStats(st)
+		print(string.format("   ด่าน %d: ใหญ่ %d · เล็ก %d · เลือดเล็ก %.4g · ป้อม %.4g/นัด", st, e.bigCount, e.smallCount,
+			e.smallHp, Config.getStageTurretShotDamage(st)))
+	end
+	end
 
 	print("── ซากของ Phase 1 ต้องยังอยู่แต่ปิดไว้ ──")
 	-- กฎ id: เลิกใช้ให้ตั้ง enabled = false ห้ามลบ (ข้อมูลที่เซฟไปแล้วอ้างถึงอยู่)
@@ -805,21 +872,29 @@ return function(t, Config)
 	-- ค่าที่คำนวณต้องตรงกับ TOLL เป๊ะทุกด่าน ไม่ใช่แค่ใกล้เคียง
 	local exact = true
 	for st = 2, 9 do
-		if math.abs(Config.getStageTurretDps(st) / ourDpsAt(st) - Config.Balance.Combat.TURRET_TOLL[st]) > 1e-9 then
+		if math.abs(Config.getStageTurretDps(st) / hpInAt(st) - Config.Balance.Combat.TURRET_TOLL[st]) > 1e-9 then
 			exact = false
 		end
 	end
-	check("turretDps = TOLL × damage/วิ เป๊ะทุกด่าน", exact, true)
+	check("turretDps = TOLL × เลือดลูกที่เข้าสนาม/วิ เป๊ะทุกด่าน", exact, true)
 
-	-- หัวใจของการเปลี่ยนรอบนี้: ปรับอะไรก็ตามที่กระทบ damage แล้ว turret ต้องขยับตามเอง
+	do
+	-- หัวใจของการเก็บเป็นสัดส่วน: ปรับอะไรก็ตามที่กระทบกำลังพล แล้ว turret ต้องขยับตามเอง
+	-- 5E-1: ป้อมผูกกับ "เลือด" (พลังฐาน) → ตัวคูณอัปดาเมจไม่กระทบป้อมแล้ว · ตัวคูณคลาสกระทบ
 	local beforeDps = Config.getStageTurretDps(9)
 	local savedStepM = Config.Balance.DamageUpgrade.STEP_MULTIPLIER
 	Config.Balance.DamageUpgrade.STEP_MULTIPLIER = 1.05
-	local afterDps = Config.getStageTurretDps(9)
-	check("ลดตัวคูณ damage แล้ว turret ลดตามเอง (ไม่ต้องแก้มือ)", afterDps < beforeDps, true)
-	near("สัดส่วนยังเป็น 20% เท่าเดิม", afterDps / ourDpsAt(9), 0.20, 1e-9)
+	check("ลดตัวคูณ damage แล้ว turret ไม่เปลี่ยน (ป้อมยิงเลือด ไม่ใช่ดาเมจ)", Config.getStageTurretDps(9), beforeDps)
 	Config.Balance.DamageUpgrade.STEP_MULTIPLIER = savedStepM
+	local refClass = Config.Balance.BalanceCheck.REFERENCE_CLASS[9]
+	local savedClassM = Config.CharacterClasses[refClass].multiplier
+	Config.CharacterClasses[refClass].multiplier = savedClassM / 2
+	local afterDps = Config.getStageTurretDps(9)
+	check("ลดตัวคูณคลาสอ้างอิงแล้ว turret ลดตามเอง (ไม่ต้องแก้มือ)", afterDps < beforeDps, true)
+	near("สัดส่วนยังเป็น 20% เท่าเดิม", afterDps / hpInAt(9), 0.20, 1e-9)
+	Config.CharacterClasses[refClass].multiplier = savedClassM
 	check("คืนค่าเดิมแล้ว turret กลับมาเท่าเดิม", Config.getStageTurretDps(9), beforeDps)
+	end
 
 	-- ยามต้องจับ TOLL ที่แรงเกินเพดาน
 	local savedToll = Config.Balance.Combat.TURRET_TOLL[9]
@@ -933,16 +1008,11 @@ return function(t, Config)
 
 	print("── ผู้เล่นที่ไม่ซื้อ upgrade เลย ต้องตัน ──")
 	-- ถ้าไม่ซื้อแล้วยังผ่านได้สบาย แปลว่าระบบซื้อไม่มีความหมาย
+	-- 5E-1: ไม่ซื้อ = ดาเมจเท่าพลังฐาน แต่ศัตรูยังอึดเท่าพลังเต็มของผู้เล่นอ้างอิง (ซื้อครบ)
 	local function hoursNoUpgrade(st)
-		local hp = Config.getStageTotalHp(st)
-		if hp <= 0 then return 0 end
-		local w = Config.Balance.BalanceCheck.REFERENCE_WEIGHT[st]
-		local cl = Config.Balance.BalanceCheck.REFERENCE_CLASS[st]
-		local id
-		for cid, ch in Config.Characters do if ch.class == cl then id = cid break end end
-		local rate = math.min(Config.getPenCapacity(st) * Config.getProductionPerMinute(w, nil, st - 1, true) / 60,
-			Config.getReleaseRate(st))
-		return hp / (rate * Config.computeBattlePower(Config.getChildWeight(w), id, nil, 0) * 3600)
+		local ref = Config.getReferenceUnitStats(st)
+		local fullNoUpgrade = Config.computeBattlePower(ref.childWeight, ref.charId, nil, 0)
+		return Config.estimateStageClearSeconds(st, ref.hp, fullNoUpgrade, ref.producedPerSecond).totalSeconds / 3600
 	end
 	local firstBlocked
 	for st = 2, 9 do

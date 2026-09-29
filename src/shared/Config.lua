@@ -1825,7 +1825,11 @@ Balance.Combat = {
 	-- ตอนนี้จึงเก็บแค่ "สัดส่วนกำลังพลที่ยอมให้ turret กิน" แล้วให้
 	-- Config.getStageTurretDps() คำนวณ damage จริงจากสูตร:
 	--
-	--     turretDps(N) = TURRET_TOLL[N] × Config.getReferenceDps(N)
+	--     turretDps(N) = TURRET_TOLL[N] × min(ผลิต, ปล่อย) × เลือดลูกอ้างอิง
+	--
+	-- ⚠️ 5E-1: ป้อมยิงจริงแล้ว (ยิงตัวหน้าสุด TURRET_SHOTS_PER_SECOND นัด/วิ) และทหารเรามี "เลือด"
+	-- = พลังฐาน (ไม่รวมอัปดาเมจ/Robux) → สัดส่วนคิดเป็น "ลูกที่ป้อมยิงทิ้ง" ต่อลูกที่เข้าสนาม
+	-- (เดิม TOLL × damage/วินาที ซึ่งรวมตัวคูณอัปดาเมจ — ใช้กับเลือดจริงแล้วป้อมแรงเกินเป็นร้อยเท่า)
 	--
 	-- ปรับตัวคูณคลาส/upgrade/อัตราปล่อยอะไรก็ตาม turret ขยับตามเองทันที
 	-- อยากให้ด่านไหนโหดขึ้นเป็นพิเศษ ก็ดัน TOLL ของด่านนั้นตัวเดียว
@@ -1852,15 +1856,32 @@ Balance.Combat = {
 	-- ดีกว่าปล่อยทีละตัวแล้วถูกกินทีละตัว
 	SUMMON_DEFAULT_ON = true,
 
-	-- auto-pause: ปล่อยไปครบเท่านี้ตัวแล้ว HP ฝ่ายตรงข้ามไม่ลดเลย → หยุดปล่อยเอง
-	-- กันไม่ให้ทหารถูกป้อนเข้าเครื่องบดหายถาวรโดยไม่ได้ damage
-	AUTO_PAUSE_AFTER_UNITS = 100,
-
-	-- cap โมเดลทหารฝ่ายเราที่แสดงพร้อมกัน ส่วนเกินรวมเป็นตัวเลข
-	-- แสดงเฉพาะทหารของผู้เล่นคนนั้นเอง ไม่แสดงของคนอื่น
-	-- ประมาณการ: 10 ตัว/วินาที × เดินถึงกำแพง ~30 วินาที = 300 ตัวมีชีวิตพร้อมกัน
-	MAX_VISIBLE_UNITS = 120,
-	WALK_SECONDS_TO_WALL = 30, -- เวลาเดินจากจุดสปอนถึงกำแพง ใช้ประมาณจำนวนบนจอ
+	-- ══ 5E-1 รบแบบชุด — ช่องบนสนาม 6 ช่องต่อฝ่าย (docs/data-schema.md §7.13) ══
+	-- ทหารเรา: เลือด = พลังฐาน (Config.getUnitHp — น้ำหนัก × คลาส × สถานะ · ไม่รวมอัปดาเมจ/Robux)
+	--          ดาเมจ/วิ = พลังเต็ม (computeBattlePower) × อัตราปล่อยของด่าน ÷ FIELD_SLOTS (Config.getUnitDps)
+	--   → ช่องเต็ม 6 ตัว = ดาเมจรวม "พลังเต็ม × อัตราปล่อย" เท่าระบบปล่อยต่อเนื่องเดิมพอดี
+	--   ตารางอัตราปล่อยจึงยังเป็นคันโยกเพดานดาเมจของแต่ละด่านเหมือนเดิม (ไม่ใช่จำนวนตัวที่ปล่อย/วิ แล้ว)
+	-- ช่อง 1 = หน้าสุด · ช่อง MOTHER_SLOT = หลังสุด ที่แม่ยืน (ลูกหมด → แม่ลงช่องอื่นได้ · แม่หมด → ลูกลงช่องแม่)
+	FIELD_SLOTS = 6,
+	MOTHER_SLOT = 6,
+	-- (ค3 · ผู้ใช้เลือก) สนามฝั่งเราว่างหมด → รอจนมีพร้อมปล่อยครบเท่านี้ก่อน แล้วลง FIELD_SLOTS ตัว ที่เหลือเป็นคลังสำรอง
+	-- ระหว่างสู้เติมทีละตัวตามปกติ · ไม่มีทางถึง (ไม่มีกองที่ติ๊กที่ผลิตเติมอยู่) = ปล่อยเท่าที่มี
+	-- ⚠️ ด่านที่ผลิตไม่ทันการตาย (ด่าน 2) ไม่รวมพล = ลูกออกไปทีละตัวแล้วโดนรุมตายก่อนตีได้เต็มแรง (ช้าลง ~4 เท่า)
+	GATHER_SIZE = 12,
+	-- ศัตรู: ชุดละ ใหญ่ ENEMY_BIG_PER_GROUP + เล็ก ENEMY_SMALL_PER_GROUP ลงพร้อมกัน · ตายแล้วตัว**ชนิดเดียวกัน**มาแทนช่องเดิม
+	-- ตัวเล็ก (ศัตรู "สลับด้าน" · ผู้ใช้ยืนยัน): เลือด ≈ พลังเต็มของลูกอ้างอิงด่านนั้น · ดาเมจ/วิ = พลังฐานลูกอ้างอิง × อัตราปล่อย ÷ 10
+	--   (10 = ใหญ่ 1 × 5 + เล็ก 5 → ทั้งชุดรุมตัวหน้าสุดรวม "พลังฐาน × อัตราปล่อย" = ลูกอ้างอิงตาย R ตัว/วิ เท่าระบบเดิม)
+	-- ตัวใหญ่ = ตัวเล็ก × ENEMY_BIG_MULTIPLIER ทั้งเลือดและดาเมจ · เลือดรวมทั้งด่าน = HP ทหารฝ่ายรับเดิมเป๊ะ (Config.getStageEnemyStats)
+	ENEMY_BIG_PER_GROUP = 1,
+	ENEMY_SMALL_PER_GROUP = 5,
+	ENEMY_BIG_MULTIPLIER = 5,
+	-- ป้อมบนกำแพง: ยิงตัวหน้าสุดของเรา นัดละ turretDps ÷ อัตรานี้ · ยิงทั้งตอนสู้ศัตรูและตอนตีกำแพง
+	TURRET_SHOTS_PER_SECOND = 1,
+	-- auto-pause (ผู้ใช้กำหนด): ทหารเราตายติดกันครบเท่านี้ โดยที่ HP ศัตรูรวม + HP กำแพง **ไม่ลดเลย** → หยุดปล่อยเอง
+	-- ดูที่ HP ลด ไม่ใช่นับการฆ่า (ตีตัวใหญ่ที่ยังไม่ตายแต่ HP ลด = คืบหน้า)
+	AUTO_PAUSE_AFTER_DEATHS = 30,
+	-- tick ที่ห่างกว่านี้ (เซิร์ฟกระตุก) คิดแค่เท่านี้ — กันลูปเหตุการณ์ยาวผิดปกติ (ไม่มี offline catch-up อยู่แล้ว)
+	MAX_TICK_SECONDS = 5,
 
 	-- ⚠️ ห้ามระบบ auto ปล่อย "ตัวแม่" เด็ดขาด — auto ปล่อยได้เฉพาะตัวลูก
 	-- ผู้เล่นต้องกดเลือกและส่งแม่เองทีละครั้ง + กล่องยืนยัน
@@ -1871,7 +1892,8 @@ Balance.Combat = {
 
 	-- ══ แม่ในสนามรบ (battleRoster · Phase 3C-1) ══
 	-- จำนวนแม่ที่ส่งไปรบพร้อมกันได้สูงสุด — แม่ทั้ง roster ตายถาวรพร้อมกันตอนด่านที่กำลังตีพัง
-	-- แม่แต่ละตัวตีวินาทีละครั้ง แรง = Config.computeBattlePower (แม่ 1 ตัว = ลูก 10 ตัวต่อวินาที)
+	-- 5E-1: แม่ลงสนามทีละตัวที่ช่อง MOTHER_SLOT ตามลำดับ roster (ตัวอื่นรอคิว) · เลือด/ดาเมจสูตรเดียวกับลูก
+	--   (แม่หนัก 100 เท่าของลูก → แรง/อึด 10 เท่า) · **โดนฆ่ากลางสนาม = ตายถาวร** ออกจาก roster นับ mothersLost
 	-- ⚠️ ยามเวลาผ่านด่าน (assertProgressionIsSane) คิดจากผู้เล่นที่ไม่ส่งแม่ — ส่งแม่ = เร็วขึ้น
 	-- แลกกับเสียเครื่องผลิตถาวร ซึ่งเป็นการเลือกของผู้เล่นเอง
 	MAX_BATTLE_MOTHERS = 10,
@@ -2920,6 +2942,12 @@ function Config.formatStageClearedMessage(stage: number, eggCount: number, death
 	return title, table.concat(parts, " • ")
 end
 
+-- 5E-1: แม่โดนฆ่ากลางสนาม (ตายถาวร) — แจ้งทันทีทาง ActionResult · rosterLeft = แม่ที่ยังเหลือใน roster
+function Config.formatMotherFallenMessage(count: number, rosterLeft: number): string
+	local maxMothers = Config.Balance.Combat.MAX_BATTLE_MOTHERS
+	return `แม่ตายในสนามรบ {count} ตัว (ตายถาวร) · เหลือในสนามรบ {rosterLeft}/{maxMothers}`
+end
+
 -- จำนวนเต็มคั่นหลักพัน: 1234567 → "1,234,567" (เงินเป็นจำนวนเต็มเสมอ)
 function Config.formatCoins(value: number): string
 	local sign = if value < 0 then "-" else ""
@@ -2985,14 +3013,6 @@ function Config.getStackCap(): number
 	return Config.Balance.Production.STACK_CAP
 end
 
--- ประมาณจำนวนโมเดลทหารฝ่ายเราที่มีชีวิตพร้อมกันบนจอ
--- = อัตราปล่อย × เวลาเดินถึงกำแพง แล้วตัดที่ MAX_VISIBLE_UNITS
--- ส่วนเกินไม่ spawn โมเดล ให้รวมเป็นตัวเลขแทน (วิธีเดียวกับทหารฝ่ายรับ)
-function Config.getVisibleUnitCount(stage: number): number
-	local alive = Config.getReleaseRate(stage) * Config.Balance.Combat.WALK_SECONDS_TO_WALL
-	return math.min(math.ceil(alive), Config.Balance.Combat.MAX_VISIBLE_UNITS)
-end
-
 -- damage/HP ของหน่วย 1 ตัวตอนเข้ารบ = พลังพื้นฐาน × ตัวคูณตามด่าน
 -- ใช้ได้ทั้งแม่และลูก ส่ง weight ของตัวนั้นเข้ามา
 -- พลังจริงตอนเข้ารบ = พลังพื้นฐาน × ตัวคูณที่ซื้อไว้
@@ -3012,6 +3032,26 @@ function Config.computeBattlePower(
 	return Config.computePower(weight, charId, statuses)
 		* Config.getArmyDamageMultiplier(damageLevel)
 		* Config.getRobuxDamageMultiplier(robuxDamageSteps or 0)
+end
+
+-- ══ 5E-1 ทหารบนสนาม ══ (ใช้ได้ทั้งแม่และลูก — ส่งน้ำหนักของตัวนั้น · ลูก = Config.getChildWeight)
+-- เลือด = พลังฐาน (น้ำหนัก × คลาส × สถานะ) · ⚠️ ไม่รวมอัปดาเมจ/โบนัส Robux (ผู้ใช้กำหนด: ซื้อดาเมจ ไม่ได้ซื้อเลือด)
+function Config.getUnitHp(weight: number, charId: string?, statuses: { string }?): number
+	return Config.computePower(weight, charId, statuses)
+end
+
+-- ดาเมจ/วินาที = พลังเต็ม × อัตราปล่อยของด่าน ÷ จำนวนช่อง → ช่องเต็ม = "พลังเต็ม × อัตราปล่อย" เท่าระบบปล่อยต่อเนื่องเดิม
+function Config.getUnitDps(
+	stage: number,
+	weight: number,
+	charId: string?,
+	statuses: { string }?,
+	damageLevel: number,
+	robuxDamageSteps: number?
+): number
+	return Config.computeBattlePower(weight, charId, statuses, damageLevel, robuxDamageSteps)
+		* Config.getReleaseRate(stage)
+		/ Config.Balance.Combat.FIELD_SLOTS
 end
 
 --------------------------------------------------------------------------------
@@ -3870,14 +3910,72 @@ function Config.getStageDefenderCount(stage: number): number
 	return Config.getStage(stage).defenders
 end
 
--- damage/วินาที ที่อาวุธป้องกันของกำแพงยิงใส่กองทัพเรา
+-- damage/วินาที ที่ป้อมบนกำแพงยิงใส่ทหารเรา (ตัวหน้าสุด) — 5E-1: ยิงจริงแล้ว
+-- = TOLL × ลูกอ้างอิงที่เข้าสนามต่อวินาที (min(ผลิต, ปล่อย)) × เลือดลูกอ้างอิง
+-- → ป้อมฆ่าลูกอ้างอิงได้ TOLL ส่วนของที่ส่งเข้าไป (สัดส่วนเดิม แต่คิดเป็นเลือด ไม่ใช่ดาเมจ)
 function Config.getStageTurretDps(stage: number): number
 	local clamped = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
 	local toll = Config.Balance.Combat.TURRET_TOLL[clamped]
 	if toll <= 0 then
 		return 0
 	end
-	return toll * Config.getReferenceDps(clamped)
+	local ref = Config.getReferenceUnitStats(clamped)
+	return toll * math.min(ref.producedPerSecond, ref.releaseRate) * ref.hp
+end
+
+-- ดาเมจต่อนัดของป้อม (ยิง TURRET_SHOTS_PER_SECOND นัด/วิ · ทีละเป้า)
+function Config.getStageTurretShotDamage(stage: number): number
+	return Config.getStageTurretDps(stage) / Config.Balance.Combat.TURRET_SHOTS_PER_SECOND
+end
+
+-- ══ 5E-1 ศัตรู (ทหารฝ่ายรับ) ══ บนสนามชุดละ ใหญ่ nb + เล็ก ns · ตัวใหญ่ = ตัวเล็ก × k ทั้งเลือดและดาเมจ
+-- ตายแล้วตัว**ชนิดเดียวกัน**ลงช่องเดิม · ทหารเราตีช่องตรงหน้า → แต่ละช่องโดนดาเมจเท่ากัน
+-- ⚠️ จำนวนตัวของด่านจึงแบ่งให้ **เลือดรวมตัวใหญ่ : ตัวเล็ก = nb : ns** (= ตัวเล็ก k × ns ÷ nb ตัวต่อตัวใหญ่ 1 ตัว = 1 : 25)
+--   → สองชนิดหมดพร้อมกัน สนามเป็น "ใหญ่ 1 + เล็ก 5" ตลอดทั้งด่าน
+--   (ถ้าแบ่งจำนวน 1 : 5 ตัวเล็กหมดตอนตีไป 60% แล้ว 40% ท้ายด่านเหลือตัวใหญ่ตัวเดียว → ด่าน 2 เร็วกว่าเดิม 18%)
+-- เลือดตัวเล็ก ≈ พลังเต็มของลูกอ้างอิง ปรับนิดเดียวให้ **เลือดรวมทั้งด่าน = HP ทหารฝ่ายรับเดิมเป๊ะ**
+--   → เงินรวมทั้งด่านเท่าเดิม (จ่ายตาม HP ที่ลด · ตัวใหญ่ได้มากกว่าตามเลือด)
+-- ดาเมจตัวเล็ก = พลังฐานลูกอ้างอิง × อัตราปล่อย ÷ (nb × k + ns) → ทั้งชุดบนสนามรุมรวม = พลังฐาน × อัตราปล่อย
+-- ด่านที่ไม่มีทหารฝ่ายรับ (ด่าน 1) = 0 ทุกค่า
+export type StageEnemyStats = {
+	bigCount: number,
+	smallCount: number,
+	smallHp: number,
+	bigHp: number,
+	smallDps: number,
+	bigDps: number,
+	totalHp: number,
+}
+
+-- ตัวเล็กต่อตัวใหญ่ 1 ตัว (ทั้งด่าน) — เลือดสองชนิดเท่าสัดส่วนช่อง (validate บังคับให้เป็นจำนวนเต็ม)
+function Config.getEnemySmallPerBig(): number
+	local combat = Config.Balance.Combat
+	return combat.ENEMY_BIG_MULTIPLIER * combat.ENEMY_SMALL_PER_GROUP / combat.ENEMY_BIG_PER_GROUP
+end
+
+function Config.getStageEnemyStats(stage: number): StageEnemyStats
+	local combat = Config.Balance.Combat
+	local totalHp = Config.getStageDefenderHp(stage)
+	if totalHp <= 0 then
+		return { bigCount = 0, smallCount = 0, smallHp = 0, bigHp = 0, smallDps = 0, bigDps = 0, totalHp = 0 }
+	end
+	local nb, ns, k = combat.ENEMY_BIG_PER_GROUP, combat.ENEMY_SMALL_PER_GROUP, combat.ENEMY_BIG_MULTIPLIER
+	local smallPerBig = Config.getEnemySmallPerBig()
+	local ref = Config.getReferenceUnitStats(stage)
+	-- ตัวใหญ่ 1 ตัว + ตัวเล็กที่คู่กัน = เลือด (k + smallPerBig) ตัวเล็ก · ไม่น้อยกว่าช่องตัวใหญ่บนสนาม
+	local bigCount = math.max(nb, math.floor(totalHp / ((k + smallPerBig) * ref.fullPower) + 0.5))
+	local smallCount = bigCount * smallPerBig
+	local smallHp = totalHp / (bigCount * k + smallCount)
+	local smallDps = ref.hp * ref.releaseRate / (nb * k + ns)
+	return {
+		bigCount = bigCount,
+		smallCount = smallCount,
+		smallHp = smallHp,
+		bigHp = smallHp * k,
+		smallDps = smallDps,
+		bigDps = smallDps * k,
+		totalHp = totalHp,
+	}
 end
 
 function Config.getStageDefenderHp(stage: number): number
@@ -4016,26 +4114,112 @@ local function referenceCharForClass(class: string): string
 	error(`Config: BalanceCheck อ้างคลาส "{class}" ที่ไม่มีตัวละครที่เปิดใช้อยู่เลย`)
 end
 
--- damage/วินาทีของผู้เล่นชั้นกลางที่ด่านนั้น
--- ⚠️ ระบบปล่อยต่อเนื่อง: อัตราจริง = min(ผลิตได้, ปล่อยได้)
--- พอชนเพดานปล่อยแล้ว upgrade อัตราผลิตหยุดเพิ่ม damage ทันที
-function Config.getReferenceDps(stage: number): number
+-- ══ ลูกอ้างอิงของด่านนั้น (5E-1) ══ ผู้เล่นชั้นกลางที่ด่าน N: คอกเลเวล N · upgrade อัตราผลิตขั้น N-1 ·
+-- แม่คลาส/น้ำหนักอ้างอิง (ไม่ส่งแม่ไปรบ) · ⚠️ สมมติว่าซื้ออัปดาเมจครบเพดานของด่านนั้นแล้ว
+-- (สมมติได้อย่างซื่อสัตย์ เพราะเงินเป็นรายได้ที่คาดเดาได้ ต่างจากคลาสที่เป็นการสุ่ม · ยามราคาบังคับว่าจ่ายไหว)
+-- ศัตรู (getStageEnemyStats) และป้อม (getStageTurretDps) ผูกกับค่าชุดนี้ → จูนอย่างอื่นแล้วขยับตามเอง
+export type ReferenceUnitStats = {
+	charId: string,
+	childWeight: number,
+	hp: number, -- เลือดลูก 1 ตัว = พลังฐาน
+	fullPower: number, -- พลังเต็ม (รวมอัปดาเมจครบเพดาน)
+	releaseRate: number, -- อัตราปล่อยของด่าน (ตัวคูณดาเมจ/วิ)
+	producedPerSecond: number, -- ลูกที่คอกผลิตได้/วิ (ออนไลน์)
+}
+
+function Config.getReferenceUnitStats(stage: number): ReferenceUnitStats
+	local clamped = math.clamp(math.floor(stage), 1, Config.Balance.Stage.COUNT)
 	local check = Config.Balance.BalanceCheck
-	local weight = check.REFERENCE_WEIGHT[stage]
-	local charId = referenceCharForClass(check.REFERENCE_CLASS[stage])
+	local weight = check.REFERENCE_WEIGHT[clamped]
+	local charId = referenceCharForClass(check.REFERENCE_CLASS[clamped])
+	local childWeight = Config.getChildWeight(weight)
+	return {
+		charId = charId,
+		childWeight = childWeight,
+		hp = Config.getUnitHp(childWeight, charId, nil),
+		fullPower = Config.computeBattlePower(childWeight, charId, nil, Config.getMaxDamageLevel(clamped)),
+		releaseRate = Config.getReleaseRate(clamped),
+		producedPerSecond = Config.getPenCapacity(clamped)
+			* Config.getProductionPerMinute(weight, nil, clamped - 1, true)
+			/ 60,
+	}
+end
 
-	-- ผู้เล่นชั้นกลางที่ด่าน N: คอกเลเวล N · upgrade อัตราผลิตขั้น N-1
-	local producedPerSecond = Config.getPenCapacity(stage)
-		* Config.getProductionPerMinute(weight, nil, stage - 1, true)
-		/ 60
-	local effectiveRate = math.min(producedPerSecond, Config.getReleaseRate(stage))
+-- ══ โมเดลเวลาตีด่าน (5E-1 · รวมพล ค3) ══ — ยามสมดุลทุกตัวอ่านเวลาจากตรงนี้
+-- ผู้เล่นส่งลูกเลือด unitHp · พลังเต็ม unitFull · คอกผลิต producedPerSecond ตัว/วิ (ไม่ส่งแม่ · เปิดอัญเชิญตลอด)
+-- ช่องเต็ม → ดาเมจ = unitFull × อัตราปล่อย · ลูกตาย c = (ดาเมจที่โดน + ป้อม) ÷ unitHp ตัว/วิ (ทีละตัวที่หน้าสุด)
+--   c ≤ ผลิต → ช่องเต็มตลอด ดาเมจเต็ม
+--   c > ผลิต (ผลิตไม่ทัน · ด่าน 2) → รวมพล GATHER_SIZE แล้วสู้จนสนามว่าง วนไป:
+--     ดาเมจเฉลี่ย = ผลิต × (ดาเมจเต็ม ÷ c) × (1 − (FIELD_SLOTS − 1) ÷ (2 × GATHER_SIZE))
+--     (ช่วงท้ายของแต่ละรอบคลังสำรองหมด ช่องว่างลงทีละช่องตามจังหวะตาย — ตัวที่ยืนอยู่ตีได้เต็มจนตาย
+--      เฉลี่ยช่วงท้าย (S + 1) ÷ 2 ช่อง ไม่ใช่ S ÷ 2 แบบไหลต่อเนื่อง · เทียบเครื่องยนต์จริงใน tests/combat.spec.luau)
+-- ศัตรู: สนามเป็นใหญ่ + เล็กครบชุดตลอดด่าน (getStageEnemyStats แบ่งให้หมดพร้อมกัน) → โดนรุมเต็มชุดทั้งช่วง
+-- กำแพง: ศัตรูหมดแล้ว โดนแค่ป้อม
+export type ClearEstimate = {
+	enemyRate: number,
+	wallRate: number,
+	enemySeconds: number,
+	wallSeconds: number,
+	totalSeconds: number,
+}
 
-	-- ⚠️ สมมติว่าผู้เล่นซื้อ upgrade ครบเพดานของด่านนั้นแล้ว
-	-- สมมติแบบนี้ได้อย่างซื่อสัตย์ เพราะเงินเป็น "รายได้ที่คาดเดาได้" ต่างจากคลาสที่เป็นการสุ่ม
-	-- และยามราคาข้างล่างบังคับอยู่แล้วว่าราคาต้องอยู่ในวิสัยที่จ่ายไหว
-	local damageLevel = Config.getMaxDamageLevel(stage)
+function Config.getGatherEfficiency(): number
+	local combat = Config.Balance.Combat
+	return 1 - (combat.FIELD_SLOTS - 1) / (2 * combat.GATHER_SIZE)
+end
 
-	return effectiveRate * Config.computeBattlePower(Config.getChildWeight(weight), charId, nil, damageLevel)
+function Config.estimateStageClearSeconds(
+	stage: number,
+	unitHp: number,
+	unitFull: number,
+	producedPerSecond: number
+): ClearEstimate
+	local defenderHp = Config.getStageDefenderHp(stage)
+	local wallHp = Config.getStageWallHp(stage)
+	if defenderHp + wallHp <= 0 then
+		return { enemyRate = 0, wallRate = 0, enemySeconds = 0, wallSeconds = 0, totalSeconds = 0 }
+	end
+	local combat = Config.Balance.Combat
+	local nb, ns = combat.ENEMY_BIG_PER_GROUP, combat.ENEMY_SMALL_PER_GROUP
+	local fullOutput = unitFull * Config.getReleaseRate(stage)
+	local turretDps = Config.getStageTurretDps(stage)
+	local enemy = Config.getStageEnemyStats(stage)
+	local efficiency = Config.getGatherEfficiency()
+
+	local function rateUnder(incomingDps: number): number
+		local deathsPerSecond = (incomingDps + turretDps) / unitHp
+		if deathsPerSecond <= producedPerSecond then
+			return fullOutput
+		end
+		return producedPerSecond * fullOutput / deathsPerSecond * efficiency
+	end
+
+	local enemyRate = rateUnder(nb * enemy.bigDps + ns * enemy.smallDps)
+	local wallRate = rateUnder(0)
+	local enemySeconds = if defenderHp > 0 then defenderHp / enemyRate else 0
+	local wallSeconds = if wallHp > 0 then wallHp / wallRate else 0
+	return {
+		enemyRate = enemyRate,
+		wallRate = wallRate,
+		enemySeconds = enemySeconds,
+		wallSeconds = wallSeconds,
+		totalSeconds = enemySeconds + wallSeconds,
+	}
+end
+
+function Config.getReferenceClearEstimate(stage: number): ClearEstimate
+	local ref = Config.getReferenceUnitStats(stage)
+	return Config.estimateStageClearSeconds(stage, ref.hp, ref.fullPower, ref.producedPerSecond)
+end
+
+-- damage/วินาที **เฉลี่ยทั้งด่าน** ของผู้เล่นชั้นกลาง (HP รวม ÷ เวลาตี) — 0 = ด่านที่ไม่มีอะไรให้ตี
+-- ⚠️ 5E-1: เดิม = min(ผลิต, ปล่อย) × พลังเต็ม · ตอนนี้มาจากโมเดลรวมพลข้างบน (ป้อมไม่อ่านค่านี้แล้ว)
+function Config.getReferenceDps(stage: number): number
+	local seconds = Config.getReferenceClearEstimate(stage).totalSeconds
+	if seconds <= 0 then
+		return 0
+	end
+	return Config.getStageTotalHp(stage) / seconds
 end
 
 -- รายได้รวมที่ผู้เล่นอ้างอิงได้ "ตลอดการตีด่านนั้น"
@@ -4083,13 +4267,9 @@ function Config.getReferenceStageIncome(stage: number): number
 	return Config.getReferenceIncomePerHour(stage) * hours + Config.getStageDefenderRewardTotal(stage)
 end
 
--- ชั่วโมงที่ใช้ตีกำแพงด่านนั้นจนพัง (0 = ด่านที่ไม่มีกำแพง)
+-- ชั่วโมงที่ใช้ตีด่านนั้นจนพัง (0 = ด่านที่ไม่มีกำแพง) — 5E-1: จากโมเดลรวมพล (getReferenceClearEstimate)
 function Config.getReferenceClearHours(stage: number): number
-	local totalHp = Config.getStageTotalHp(stage)
-	if totalHp <= 0 then
-		return 0
-	end
-	return totalHp / (Config.getReferenceDps(stage) * 3600)
+	return Config.getReferenceClearEstimate(stage).totalSeconds / 3600
 end
 
 -- ไข่ที่ผู้เล่น 1 คนได้ต่อชั่วโมง ตาม "โมเดลสมดุล" (บอสเกิดเรื่อย ๆ หารกันทั้งเซิร์ฟ) — ยามเวลาฟาร์มใช้
@@ -4220,13 +4400,15 @@ local function assertTurretIsSurvivable()
 
 		-- ค่า damage ที่คำนวณออกมาต้องตรงกับสัดส่วนที่ตั้งใจเป๊ะ
 		-- (ดักกรณีมีคนเผลอไปเขียนทับ getStageTurretDps ให้คืนตัวเลขดิบอีก)
+		-- 5E-1: สัดส่วน = เลือดที่ป้อมยิง ÷ เลือดลูกอ้างอิงที่เข้าสนามต่อวินาที (min(ผลิต, ปล่อย) × เลือดต่อตัว)
 		if toll > 0 then
-			local ourDps = Config.getReferenceDps(stage)
-			assert(ourDps > 0, `Config: ด่าน {stage} คำนวณ damage/วินาที ได้ 0`)
+			local ref = Config.getReferenceUnitStats(stage)
+			local hpInPerSecond = math.min(ref.producedPerSecond, ref.releaseRate) * ref.hp
+			assert(hpInPerSecond > 0, `Config: ด่าน {stage} ลูกอ้างอิงเข้าสนามได้ 0`)
 			assert(
-				math.abs(Config.getStageTurretDps(stage) / ourDps - toll) < 1e-9,
+				math.abs(Config.getStageTurretDps(stage) / hpInPerSecond - toll) < 1e-9,
 				`Config: turretDps ด่าน {stage} ไม่ตรงกับ TURRET_TOLL ที่ตั้งไว้ `
-					.. `— getStageTurretDps ต้องคำนวณจาก TOLL × getReferenceDps เท่านั้น`
+					.. `— getStageTurretDps ต้องคำนวณจาก TOLL × min(ผลิต, ปล่อย) × เลือดลูกอ้างอิงเท่านั้น`
 			)
 		else
 			assert(
@@ -5821,9 +6003,54 @@ function Config.validate()
 		assert(rate >= previousRate, `Config: อัตราปล่อยของด่าน {index} น้อยกว่าด่านก่อนหน้า — ต้องเร่งขึ้นหรือเท่าเดิม`)
 		previousRate = rate
 	end
-	assert(combat.AUTO_PAUSE_AFTER_UNITS > 0, "Config: AUTO_PAUSE_AFTER_UNITS ต้องมากกว่า 0")
-	assert(combat.MAX_VISIBLE_UNITS > 0, "Config: MAX_VISIBLE_UNITS ต้องมากกว่า 0")
-	assert(combat.WALK_SECONDS_TO_WALL > 0, "Config: WALK_SECONDS_TO_WALL ต้องมากกว่า 0")
+	-- ══ 5E-1 รบแบบชุด ══
+	local function positiveInt(value: any): boolean
+		return type(value) == "number" and value > 0 and value % 1 == 0
+	end
+	assert(positiveInt(combat.FIELD_SLOTS), "Config: FIELD_SLOTS ต้องเป็นจำนวนเต็มบวก")
+	assert(
+		positiveInt(combat.MOTHER_SLOT) and combat.MOTHER_SLOT <= combat.FIELD_SLOTS,
+		"Config: MOTHER_SLOT ต้องเป็นช่องที่มีอยู่จริง (1..FIELD_SLOTS)"
+	)
+	assert(
+		positiveInt(combat.GATHER_SIZE) and combat.GATHER_SIZE >= combat.FIELD_SLOTS,
+		`Config: GATHER_SIZE ({combat.GATHER_SIZE}) ต้องไม่น้อยกว่า FIELD_SLOTS ({combat.FIELD_SLOTS}) — รวมพลน้อยกว่าช่อง = ลงไม่เต็มสนาม`
+	)
+	assert(
+		positiveInt(combat.ENEMY_BIG_PER_GROUP) and positiveInt(combat.ENEMY_SMALL_PER_GROUP),
+		"Config: ENEMY_BIG_PER_GROUP / ENEMY_SMALL_PER_GROUP ต้องเป็นจำนวนเต็มบวก"
+	)
+	assert(
+		combat.ENEMY_BIG_PER_GROUP + combat.ENEMY_SMALL_PER_GROUP == combat.FIELD_SLOTS,
+		"Config: ศัตรูหนึ่งชุด (ใหญ่ + เล็ก) ต้องเท่ากับจำนวนช่องบนสนาม — ช่องละตัว"
+	)
+	assert(combat.ENEMY_BIG_MULTIPLIER >= 1, "Config: ENEMY_BIG_MULTIPLIER ต้องไม่น้อยกว่า 1")
+	-- ตัวเล็กต่อตัวใหญ่ต้องเป็นจำนวนเต็ม ไม่งั้นเลือดสองชนิดไม่หมดพร้อมกัน (ท้ายด่านเหลือชนิดเดียว = เวลาเพี้ยนจากโมเดล)
+	local smallPerBig = Config.getEnemySmallPerBig()
+	assert(
+		smallPerBig >= 1 and smallPerBig % 1 == 0,
+		`Config: ENEMY_BIG_MULTIPLIER × ENEMY_SMALL_PER_GROUP ÷ ENEMY_BIG_PER_GROUP ต้องเป็นจำนวนเต็ม (ได้ {smallPerBig})`
+	)
+	assert(combat.TURRET_SHOTS_PER_SECOND > 0, "Config: TURRET_SHOTS_PER_SECOND ต้องมากกว่า 0")
+	assert(positiveInt(combat.AUTO_PAUSE_AFTER_DEATHS), "Config: AUTO_PAUSE_AFTER_DEATHS ต้องเป็นจำนวนเต็มบวก")
+	assert(combat.MAX_TICK_SECONDS > 0, "Config: MAX_TICK_SECONDS ต้องมากกว่า 0")
+	-- ค่าเก่าของระบบปล่อยต่อเนื่อง (ลบแล้วใน 5E-1) ห้ามเติมกลับ — ไม่มีโค้ดอ่านแล้ว ตั้งไว้จะหลอกว่ายังมีผล
+	for _, legacy in { "AUTO_PAUSE_AFTER_UNITS", "MAX_VISIBLE_UNITS", "WALK_SECONDS_TO_WALL" } do
+		assert(
+			(combat :: any)[legacy] == nil,
+			`Config: Balance.Combat.{legacy} เป็นของระบบปล่อยต่อเนื่องเดิม (ลบแล้วใน 5E-1) — ห้ามเติมกลับ`
+		)
+	end
+	-- เลือดรวมศัตรูต้องเท่า HP ทหารฝ่ายรับเดิมเป๊ะทุกด่าน (เงินรวมทั้งด่านผูกกับค่านี้)
+	for enemyStage = 1, Config.Balance.Stage.COUNT do
+		local enemy = Config.getStageEnemyStats(enemyStage)
+		local defenderHp = Config.getStageDefenderHp(enemyStage)
+		local sum = enemy.bigCount * enemy.bigHp + enemy.smallCount * enemy.smallHp
+		assert(
+			math.abs(sum - defenderHp) <= defenderHp * 1e-9,
+			`Config: เลือดรวมศัตรูด่าน {enemyStage} ({sum}) ไม่เท่า HP ทหารฝ่ายรับ ({defenderHp})`
+		)
+	end
 	-- ⚠️ กติกาที่ห้ามพลิก: ระบบห้ามปล่อยตัวแม่เอง และห้ามเลือกแม่จากคอก
 	assert(
 		combat.ALLOW_AUTO_RELEASE_MOTHERS == false,

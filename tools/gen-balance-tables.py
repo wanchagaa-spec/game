@@ -503,7 +503,7 @@ W('''<div class="note">ค่านี้พลาดมาแล้ว <b>ส�
 <tr class="hi"><td><b>✅</b></td><td><b>เก็บเป็นสัดส่วน ให้โค้ดคำนวณเอง</b></td><td><b>ไม่ต้องแก้มืออีกแล้ว</b></td></tr>
 </tbody></table></div>
 <div class="formula">Config.Balance.Combat.TURRET_TOLL = {{ {', '.join(f'{float(r[3]):.2f}' for r in TUR)} }}<br>
-turretDps(N) = TURRET_TOLL[N] × getReferenceDps(N)</div>''')
+turretDps(N) = TURRET_TOLL[N] × min(ผลิต, ปล่อย) × เลือดลูกอ้างอิง (5E-1: ป้อมยิงจริง ยิงตัวหน้าสุด)</div>''')
 rows = []
 for r in TUR:
     st, ourdps, tdps, ratio, sug, onfield, wipe, secs = r

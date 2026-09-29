@@ -1,18 +1,25 @@
 --!strict
--- egg-army-game :: เครื่องยนต์คำนวณรบฝั่ง server (Phase 3A — ไม่มีภาพ/UI)
+-- egg-army-game :: เครื่องยนต์คำนวณรบฝั่ง server
 --
--- ปล่อยทหาร (ลูกจากคลัง) ต่อเนื่องตามอัตราของด่านที่กำลังตี → สะสม damage →
--- ตีทหารฝ่ายรับก่อน (defendersRemaining) แล้วส่วนเกินไหลไปตีกำแพงในตาเดียวกัน
--- (wallHpRemaining) → จ่ายเงินตามสัดส่วน HP ทหารฝ่ายรับ (ไม่รวมกำแพง) ที่ลดไป
+-- ══ 5E-1 รบแบบชุด (ผู้ใช้ยืนยัน · docs/data-schema.md §7.13) ══ แทนระบบ "ปล่อยต่อเนื่องแล้วตีครั้งเดียวหาย" เดิม
+-- สนามมี 6 ช่องต่อฝ่าย (Config.Balance.Combat.FIELD_SLOTS) · ช่อง 1 = หน้าสุด · ช่อง MOTHER_SLOT = หลังสุด (แม่ยืน)
+--   ฝั่งเรา: แม่ 1 (ลำดับ battleRoster) + ลูก 5 (ลำดับ releaseOrder) · ตายแล้วตัวถัดไปลงช่องเดิม
+--     แม่หมด = ลูก 6 · ลูกหมด = แม่หลายตัว · เลือด = พลังฐาน · ดาเมจ/วิ = พลังเต็ม × อัตราปล่อย ÷ 6
+--   ฝั่งศัตรู: ใหญ่ 1 (ช่อง 1) + เล็ก 5 · ตายแล้วตัวชนิดเดียวกันลงช่องเดิมจนหมดจำนวนของด่าน
+--   ทหารเราตีศัตรูช่องเดียวกัน (ไม่มี = ตัวหน้าสุด) · ศัตรูทั้งหมดรุมทหารเราตัวหน้าสุด · ป้อมยิงตัวหน้าสุด
+--   ศัตรูหมดแล้วค่อยตีกำแพงได้ · ป้อมยิงทั้งสองช่วง
+-- รวมพล (ค3): สนามว่าง → รอพร้อมปล่อยครบ GATHER_SIZE ก่อน (ไม่มีทางถึง = ปล่อยเท่าที่มี) · ระหว่างสู้เติมทีละตัว
+--
+-- ⚠️ คำนวณแบบเหตุการณ์ต่อเนื่อง (เวลาจริง ไม่ใช่ขั้นเวลาตายตัว) — ผลแน่นอน ไม่สุ่ม · ไม่มีเศษเวลาหาย
+-- ⚠️ ลูกบนสนาม **ยังนับอยู่ในกองของตัวเอง** (data.children) จนกว่าจะตาย → หักทีละตัวตอนตาย
+--   ออกเกม/ปิดอัญเชิญ/กำแพงพัง/ติดล็อกบอส = ล้างสนาม ลูกที่รอด "กลับกอง" เองโดยไม่ต้องคืน (ไม่มีทางหายตอนเซฟ)
+-- ⚠️ ศัตรูที่บาดเจ็บอยู่ใน meta (memory) · stageProgress ยังเก็บ HP รวมเหมือนเดิม (ไม่แตะ schema)
+--   meta หาย (ออกเกม/เซิร์ฟใหม่/debug ตั้งค่า) = สร้างแถวศัตรูใหม่จาก HP รวม (buildEnemyState) · HP รวม + เงินตรงเป๊ะ
 --
 -- ⚠️ ปล่อยเฉพาะตอนออนไลน์เท่านั้น — ต่างจาก ProductionService ที่มี offline settlement
 -- ปิดเกม/ออกเกมแล้วหยุดสู้ทันที ไม่มี catch-up ย้อนหลัง (docs/data-schema.md §7.1)
--- เพราะงั้นฟังก์ชันหลักในไฟล์นี้ไม่ต้องพึ่ง os.time()/timestamp แบบ ProductionService เลย —
--- รับ elapsedSeconds ตรง ๆ จาก loop ที่เรียก (CombatService.start()) ทำให้เทสต์เรียกตรง ๆ
+-- ฟังก์ชันหลักรับ elapsedSeconds ตรง ๆ จาก loop ที่เรียก (CombatService.start()) ทำให้เทสต์เรียกตรง ๆ
 -- ได้เลยโดยไม่ต้องปลอมนาฬิกา
---
--- ⚠️ ยังไม่ทำในเฟสนี้ (ดู CLAUDE.md/ไม่ทำ turret/ระบบรบด้วยตัวเอง/ส่งแม่ไปรบ/บอส):
--- damage ในนี้จึงไหลทางเดียว (กองทัพเรา → ทหารฝ่ายรับ/กำแพง) ไม่มีความเสียหายย้อนกลับใส่เรา
 --
 -- ⚠️ require แบบสองทางเหมือน ProductionService/DataService เพื่อให้ tests/run.luau
 -- require ไฟล์นี้ได้ตรง ๆ โดยไม่ต้องเปิด Studio (โค้ดที่แตะ Roblox API จริงมีแค่ CombatService.start())
@@ -27,21 +34,65 @@ local CombatService = {}
 --------------------------------------------------------------------------------
 -- meta ต่อผู้เล่น — ของที่ **ห้ามเซฟ** ตายพร้อมเซสชัน (เหมือน EggService.sessionMeta)
 --------------------------------------------------------------------------------
--- ⚠️ ไม่มี offline catch-up ให้ระบบนี้อยู่แล้ว จึงไม่จำเป็นต้องเซฟเศษที่สะสมไว้เลย
--- เสียเศษไม่ถึง 1 หน่วย/1 เหรียญตอนออกเกมถือว่ายอมรับได้ (เทียบไม่ได้กับตัวเลขที่เล่นจริง)
--- และ "ไม่มี offline progress" ก็เป็นกติกาที่ตั้งใจอยู่แล้วด้วย
+-- สนามทั้งสองฝั่ง + นาฬิกาป้อม + ตัวนับ auto-pause · ไม่มี offline catch-up ให้ระบบนี้อยู่แล้ว
+-- ออกเกม = ทหารเราบนสนามกลับกอง (ไม่เคยถูกหักออก) · ศัตรูบาดเจ็บสร้างใหม่จาก HP รวมตอนกลับมา
+
+export type OurUnit = {
+	kind: "child" | "mother",
+	key: string?, -- stack key ของลูก (ตายแล้วหักจากกองนี้ 1 ตัว)
+	uid: string?, -- uid ของแม่ (ตายแล้วออกจาก battleRoster)
+	charId: string,
+	weight: number, -- น้ำหนักของตัวนี้เอง (ลูก = Config.getChildWeight)
+	statuses: { string }?,
+	hp: number,
+	maxHp: number,
+	dps: number,
+}
+
+export type EnemyUnit = {
+	kind: "big" | "small",
+	hp: number,
+	maxHp: number,
+	dps: number,
+}
+
+export type EnemyState = {
+	stage: number,
+	field: { [number]: EnemyUnit }, -- ช่อง 1..FIELD_SLOTS (ช่องว่าง = nil)
+	bigQueue: number, -- ตัวใหญ่ที่ยังไม่ลงสนาม
+	smallQueue: number,
+	knownDefenders: number, -- defendersRemaining ที่สถานะนี้ตรงอยู่ (ไม่ตรง = มีคนแก้จากข้างนอก → สร้างใหม่)
+}
 
 export type CombatMeta = {
-	releaseCarry: number, -- เศษจำนวนหน่วยที่ยังไม่ถึง 1 ตัว สะสมข้ามรอบ tick (กัน rate เศษหายตอนปัดเศษทุกรอบ)
-	coinCarry: number, -- เศษเหรียญที่ยังไม่ถึง 1 เหรียญ สะสมข้ามรอบ tick ด้วยเหตุผลเดียวกัน
-	unitsSinceProgress: number, -- ใช้กับ auto-pause (§7.6) — รีเซ็ตทุกครั้งที่ตีแล้ว HP ลดจริง
+	coinCarry: number, -- เศษเหรียญที่ยังไม่ถึง 1 เหรียญ สะสมข้ามรอบ tick
 	lastTickClock: number?, -- os.clock() ของ tick ก่อนหน้า ใช้เฉพาะใน loop จริง (ไม่ใช้ในเทสต์)
+	field: { [number]: OurUnit }, -- ทหารเราช่อง 1..FIELD_SLOTS (ช่องว่าง = nil)
+	enemy: EnemyState?,
+	turretClock: number, -- วินาทีที่สะสมตั้งแต่นัดล่าสุด
+	deathsSinceProgress: number, -- auto-pause: ทหารเราตายติดกันโดยที่ HP ฝั่งตรงข้ามไม่ลดเลย
+	gathering: boolean, -- กำลังรวมพล (สนามว่าง · รอให้ครบ GATHER_SIZE)
+	lastTurretShots: number, -- นัดที่ป้อมยิงใน tick ล่าสุด (ภาพเท่านั้น)
+	lastTurretTarget: number?, -- ช่องที่โดนนัดล่าสุด (ภาพเท่านั้น)
 }
 
 local combatMeta: { [number]: CombatMeta } = {}
 
+-- ป้อมเปิด/ปิดทั้งเซิร์ฟ — debugTurret(false) ใช้ทดสอบใน Studio เท่านั้น (ค่าเริ่มต้นเปิดเสมอ)
+local turretEnabled = true
+
 function CombatService.newMeta(): CombatMeta
-	return { releaseCarry = 0, coinCarry = 0, unitsSinceProgress = 0, lastTickClock = nil }
+	return {
+		coinCarry = 0,
+		lastTickClock = nil,
+		field = {},
+		enemy = nil,
+		turretClock = 0,
+		deathsSinceProgress = 0,
+		gathering = false,
+		lastTurretShots = 0,
+		lastTurretTarget = nil,
+	}
 end
 
 function CombatService.getOrCreateMeta(userId: number): CombatMeta
@@ -53,8 +104,21 @@ function CombatService.getOrCreateMeta(userId: number): CombatMeta
 	return meta
 end
 
+-- meta ที่มีอยู่แล้ว (ไม่สร้างใหม่) — sync ใช้แสดงสนาม
+function CombatService.getMeta(userId: number): CombatMeta?
+	return combatMeta[userId]
+end
+
 function CombatService.clearMeta(userId: number)
 	combatMeta[userId] = nil
+end
+
+function CombatService.setTurretEnabled(enabled: boolean)
+	turretEnabled = enabled == true
+end
+
+function CombatService.isTurretEnabled(): boolean
+	return turretEnabled
 end
 
 --------------------------------------------------------------------------------
@@ -101,67 +165,12 @@ end
 -- ⚠️ ไม่ลบ key ออกจาก releaseOrder แม้กองนั้นจะว่างแล้ว (เผื่อผลิตเพิ่มมาเติมทีหลัง
 -- จะได้ถูกปล่อยต่อในลำดับเดิมโดยไม่ต้องติ๊กใหม่) · เขียนได้ทางเดียวคือ handleSetReleaseOrder
 
--- ดึงทหาร `unitsToRelease` ตัวจากหัวคิว ข้ามกองที่ว่าง (count<=0/ไม่มี) โดยไม่ลบออกจากลำดับ
--- คืน (unitsActuallyReleased, totalPower) — totalPower ผ่าน Config.computeBattlePower() ต่อหน่วย
--- (รวมตัวคูณ damageLevel ที่ซื้อด้วยเงินไว้แล้ว) ตามน้ำหนักลูก+ตัวละคร+สถานะของกองนั้น ๆ
--- ⚠️ ถ้าทุกกองในลำดับว่างหมด (count=0) ไม่ error แค่คืน (0, 0) เฉย ๆ
-function CombatService.releaseFromQueue(data: Data, unitsToRelease: number): (number, number)
-	if unitsToRelease <= 0 then
-		return 0, 0
-	end
-
-	local remaining = unitsToRelease
-	local totalReleased = 0
-	local totalPower = 0
-
-	for _, key in data.releaseOrder do
-		if remaining <= 0 then
-			break
-		end
-
-		local available = data.children[key]
-		if available and available > 0 then
-			local charId, motherWeight, statuses = Config.parseStackKey(key)
-			-- key เพี้ยน (ไม่น่าเกิดเพราะสร้างจาก Config.makeStackKey() เท่านั้น) → ข้ามเงียบ ๆ
-			if charId and motherWeight then
-				local take = math.min(available, remaining)
-				local childWeight = Config.getChildWeight(motherWeight, statuses)
-				local power = Config.computeBattlePower(childWeight, charId, statuses, data.damageLevel, data.robuxDamageBonus)
-
-				totalReleased += take
-				totalPower += take * power
-				remaining -= take
-
-				local newCount = available - take
-				if newCount > 0 then
-					data.children[key] = newCount
-				else
-					data.children[key] = nil
-				end
-			end
-		end
-	end
-
-	return totalReleased, totalPower
-end
-
 --------------------------------------------------------------------------------
 -- battleRoster — แม่ที่ส่งไปรบ (Phase 3C-1)
 --------------------------------------------------------------------------------
 -- ⚠️ แม่หนึ่งตัวอยู่ได้ที่เดียว: ส่งไปรบ = ย้ายออกจาก mothersInBag มาไว้ data.battleRoster
--- ย้อนกลับไม่ได้ · ตายหมดพร้อมกันตอนด่านที่กำลังตีพัง (killRoster) · ไม่มี HP รายตัวในเฟสนี้
--- (วิสัยทัศน์ HP รายตัวอยู่ใน docs/combat-hp-vision.md — ไม่ใช่เงื่อนไขของเฟสนี้)
-
--- damage/วินาทีของแม่ทั้ง roster — แม่แต่ละตัวตีวินาทีละครั้ง แรงเท่าพลังของตัวเอง
--- ใช้ Config.computeBattlePower ตัวเดียวกับลูก (รวมตัวคูณคลาส/สถานะ/damageLevel แล้ว)
--- ลูกหนัก 1% ของแม่ → แรง 10% ของแม่ → แม่ 1 ตัว = ปล่อยลูก 10 ตัวต่อวินาที
-function CombatService.getRosterDps(data: Data): number
-	local total = 0
-	for _, mother in data.battleRoster do
-		total += Config.computeBattlePower(mother.weight, mother.charId, mother.statuses, data.damageLevel, data.robuxDamageBonus)
-	end
-	return total
-end
+-- ย้อนกลับไม่ได้ · ตายหมดพร้อมกันตอนด่านที่กำลังตีพัง (killRoster)
+-- 5E-1: แม่ลงสนามทีละตัวตามลำดับ roster (ช่องหลังสุด) · โดนฆ่ากลางสนาม = ตายถาวร ออกจาก roster ทันที
 
 -- ด่านที่กำลังตีรับแม่ได้ไหม · คืนเหตุผลภาษาไทยถ้าไม่ได้ (nil = ส่งได้)
 -- ⚠️ ใช้ร่วมกันทั้งส่งทีละตัวและส่งเป็นชุด (UI-3) — client ใช้ข้อความเดียวกันนี้ (ผ่าน sync) บอกว่าทำไมติ๊กแม่ไม่ได้
@@ -427,121 +436,685 @@ function CombatService.recomputeWallProgress(data: Data)
 end
 
 --------------------------------------------------------------------------------
+-- 5E-1 สนามรบ — ศัตรู
+--------------------------------------------------------------------------------
+
+local EPSILON = 1e-9
+-- ⚠️ กันลูปเหตุการณ์ยาวผิดปกติ (ค่าจริงไม่กี่สิบเหตุการณ์ต่อวินาที) · ชนแล้ว tick นั้นหยุดตรงนั้น ไม่พัง
+local MAX_EVENTS_PER_TICK = 20000
+
+local function slotCount(): number
+	return Config.Balance.Combat.FIELD_SLOTS
+end
+
+-- ช่องของศัตรูแต่ละชนิด: ใหญ่ = ช่อง 1..nb (หน้าสุด) · เล็ก = ช่องที่เหลือ
+local function enemySlotRange(kind: "big" | "small"): (number, number)
+	local nb = Config.Balance.Combat.ENEMY_BIG_PER_GROUP
+	if kind == "big" then
+		return 1, nb
+	end
+	return nb + 1, slotCount()
+end
+
+local function newEnemy(kind: "big" | "small", stats: any, hp: number?): EnemyUnit
+	local maxHp = if kind == "big" then stats.bigHp else stats.smallHp
+	return {
+		kind = kind,
+		hp = hp or maxHp,
+		maxHp = maxHp,
+		dps = if kind == "big" then stats.bigDps else stats.smallDps,
+	}
+end
+
+-- สร้างแถวศัตรูจาก HP ทหารฝ่ายรับที่เหลือ (stageProgress) — ใช้ตอนเริ่มด่าน / meta หาย / มีคนแก้ค่าจากข้างนอก
+-- แบ่ง HP ที่ตีไปแล้วระหว่างตัวใหญ่/เล็กตามสัดส่วนเลือดของแต่ละชนิด (แบบแผนปกติ: ทุกช่องโดนเท่ากัน → หมดพร้อมกัน)
+-- แผลรวมไว้ที่ตัวแรกของแต่ละชนิด · เลือดรวมตรงกับที่เหลือเป๊ะ (เงินจ่ายตาม HP ที่ลด จึงไม่มีได้ซ้ำ/หาย)
+function CombatService.buildEnemyState(stage: number, defendersRemaining: number): EnemyState
+	local state: EnemyState = {
+		stage = stage,
+		field = {},
+		bigQueue = 0,
+		smallQueue = 0,
+		knownDefenders = defendersRemaining,
+	}
+	local stats = Config.getStageEnemyStats(stage)
+	if stats.totalHp <= 0 or defendersRemaining <= 0 then
+		return state
+	end
+	local remaining = math.min(defendersRemaining, stats.totalHp)
+	local bigTotal = stats.bigCount * stats.bigHp
+	local bigRemaining = remaining * bigTotal / stats.totalHp
+	local smallRemaining = remaining - bigRemaining
+
+	local function place(kind: "big" | "small", kindRemaining: number, unitHp: number): number
+		if kindRemaining <= unitHp * EPSILON then
+			return 0
+		end
+		local full = math.floor(kindRemaining / unitHp + EPSILON)
+		local partial = kindRemaining - full * unitHp
+		if partial <= unitHp * EPSILON then
+			partial = 0
+		end
+		local first, last = enemySlotRange(kind)
+		local slot = first
+		if partial > 0 then
+			state.field[slot] = newEnemy(kind, stats, partial)
+			slot += 1
+		end
+		while slot <= last and full > 0 do
+			state.field[slot] = newEnemy(kind, stats)
+			full -= 1
+			slot += 1
+		end
+		return full
+	end
+
+	state.bigQueue = place("big", bigRemaining, stats.bigHp)
+	state.smallQueue = place("small", smallRemaining, stats.smallHp)
+	return state
+end
+
+local function ensureEnemyState(meta: CombatMeta, data: Data, stage: number): EnemyState
+	local progress = data.stageProgress[stage] :: StageProgress
+	local current = meta.enemy
+	local tolerance = math.max(1e-6, Config.getStageDefenderHp(stage) * EPSILON)
+	if current and current.stage == stage and math.abs(current.knownDefenders - progress.defendersRemaining) <= tolerance then
+		return current
+	end
+	local rebuilt = CombatService.buildEnemyState(stage, progress.defendersRemaining)
+	meta.enemy = rebuilt
+	return rebuilt
+end
+
+local function frontEnemySlot(enemy: EnemyState): number?
+	for slot = 1, slotCount() do
+		if enemy.field[slot] then
+			return slot
+		end
+	end
+	return nil
+end
+
+local function enemyQueueOf(enemy: EnemyState, kind: "big" | "small"): number
+	return if kind == "big" then enemy.bigQueue else enemy.smallQueue
+end
+
+local function setEnemyQueue(enemy: EnemyState, kind: "big" | "small", value: number)
+	if kind == "big" then
+		enemy.bigQueue = value
+	else
+		enemy.smallQueue = value
+	end
+end
+
+-- ศัตรูที่เหลือทั้งหมด (บนสนาม + รอลง) — HUD "เหลือศัตรูกี่ตัว"
+function CombatService.countEnemies(enemy: EnemyState?): (number, number)
+	if not enemy then
+		return 0, 0
+	end
+	local big, small = enemy.bigQueue, enemy.smallQueue
+	for slot = 1, slotCount() do
+		local unit = enemy.field[slot]
+		if unit then
+			if unit.kind == "big" then
+				big += 1
+			else
+				small += 1
+			end
+		end
+	end
+	return big, small
+end
+
+--------------------------------------------------------------------------------
+-- 5E-1 สนามรบ — ฝั่งเรา
+--------------------------------------------------------------------------------
+
+-- ลูกบนสนามต่อกอง (ยังนับอยู่ใน data.children) · client/sync ใช้หักออกจากจำนวนที่ "พร้อมปล่อย"
+function CombatService.getReservedChildren(meta: CombatMeta?): { [string]: number }
+	local reserved: { [string]: number } = {}
+	if not meta then
+		return reserved
+	end
+	for slot = 1, slotCount() do
+		local unit = meta.field[slot]
+		if unit and unit.kind == "child" and unit.key then
+			reserved[unit.key] = (reserved[unit.key] or 0) + 1
+		end
+	end
+	return reserved
+end
+
+local function motherOnField(meta: CombatMeta, uid: string): boolean
+	for slot = 1, slotCount() do
+		local unit = meta.field[slot]
+		if unit and unit.kind == "mother" and unit.uid == uid then
+			return true
+		end
+	end
+	return false
+end
+
+-- จำนวนทหารที่พร้อมลงสนาม = ลูกในกองที่ติ๊ก (ไม่นับตัวที่อยู่บนสนามแล้ว) + แม่ใน roster ที่ยังไม่ลงสนาม
+function CombatService.countAvailable(data: Data, meta: CombatMeta): number
+	local reserved = CombatService.getReservedChildren(meta)
+	local total = 0
+	for _, key in data.releaseOrder do
+		local count = data.children[key]
+		if count then
+			total += math.max(0, math.floor(count) - (reserved[key] or 0))
+		end
+	end
+	for _, mother in data.battleRoster do
+		if not motherOnField(meta, mother.uid) then
+			total += 1
+		end
+	end
+	return total
+end
+
+-- (ค3) คลังมีทางถึง GATHER_SIZE ไหม = มีกองที่ติ๊กไว้ที่แม่ในคอกยังผลิตเติมอยู่ (กองยังไม่เต็มเพดาน)
+-- ไม่มี = ปล่อยเท่าที่มี (แม่ใน roster เพิ่มเองไม่ได้ ผู้เล่นต้องส่งเอง)
+function CombatService.canReachGather(data: Data): boolean
+	local producing: { [string]: boolean } = {}
+	for _, mother in data.mothersInPen do
+		producing[Config.makeStackKey(mother.charId, mother.weight, mother.statuses)] = true
+	end
+	local cap = Config.getStackCap()
+	for _, key in data.releaseOrder do
+		if producing[key] and (data.children[key] or 0) < cap then
+			return true
+		end
+	end
+	return false
+end
+
+local function makeChildUnit(data: Data, stage: number, key: string): OurUnit?
+	local charId, motherWeight, statuses = Config.parseStackKey(key)
+	if not charId or not motherWeight then
+		return nil -- key เพี้ยน (ไม่น่าเกิด — ผ่าน makeStackKey เท่านั้น) → ข้าม
+	end
+	local weight = Config.getChildWeight(motherWeight, statuses)
+	local hp = Config.getUnitHp(weight, charId, statuses)
+	return {
+		kind = "child",
+		key = key,
+		uid = nil,
+		charId = charId,
+		weight = weight,
+		statuses = statuses,
+		hp = hp,
+		maxHp = hp,
+		dps = Config.getUnitDps(stage, weight, charId, statuses, data.damageLevel, data.robuxDamageBonus),
+	}
+end
+
+local function makeMotherUnit(data: Data, stage: number, mother: any): OurUnit
+	local hp = Config.getUnitHp(mother.weight, mother.charId, mother.statuses)
+	return {
+		kind = "mother",
+		key = nil,
+		uid = mother.uid,
+		charId = mother.charId,
+		weight = mother.weight,
+		statuses = mother.statuses,
+		hp = hp,
+		maxHp = hp,
+		dps = Config.getUnitDps(stage, mother.weight, mother.charId, mother.statuses, data.damageLevel, data.robuxDamageBonus),
+	}
+end
+
+local function nextChild(data: Data, meta: CombatMeta, stage: number): OurUnit?
+	local reserved = CombatService.getReservedChildren(meta)
+	for _, key in data.releaseOrder do
+		local count = data.children[key]
+		if count and math.floor(count) - (reserved[key] or 0) >= 1 then
+			local unit = makeChildUnit(data, stage, key)
+			if unit then
+				return unit
+			end
+		end
+	end
+	return nil
+end
+
+local function nextMother(data: Data, meta: CombatMeta, stage: number): OurUnit?
+	for _, mother in data.battleRoster do
+		if not motherOnField(meta, mother.uid) then
+			return makeMotherUnit(data, stage, mother)
+		end
+	end
+	return nil
+end
+
+local function fieldIsEmpty(meta: CombatMeta): boolean
+	for slot = 1, slotCount() do
+		if meta.field[slot] then
+			return false
+		end
+	end
+	return true
+end
+
+-- เติมช่องว่างตามกติกา — คืนจำนวนที่ลงสนามรอบนี้
+-- ช่องแม่ (หลังสุด) ← แม่ก่อน · ช่องอื่น ← ลูกก่อน · ลูกหมด → แม่ลงช่องอื่น · แม่หมด → ลูกลงช่องแม่
+function CombatService.fillField(data: Data, meta: CombatMeta, stage: number): number
+	local combat = Config.Balance.Combat
+	if fieldIsEmpty(meta) then
+		local available = CombatService.countAvailable(data, meta)
+		if available <= 0 then
+			meta.gathering = false
+			return 0
+		end
+		if available < combat.GATHER_SIZE and CombatService.canReachGather(data) then
+			meta.gathering = true
+			return 0
+		end
+	end
+	meta.gathering = false
+
+	local slots, motherSlot = combat.FIELD_SLOTS, combat.MOTHER_SLOT
+	local placed = 0
+	local function put(slot: number, unit: OurUnit?): boolean
+		if unit then
+			meta.field[slot] = unit
+			placed += 1
+			return true
+		end
+		return false
+	end
+
+	if not meta.field[motherSlot] then
+		put(motherSlot, nextMother(data, meta, stage))
+	end
+	for slot = 1, slots do
+		if slot ~= motherSlot and not meta.field[slot] then
+			put(slot, nextChild(data, meta, stage))
+		end
+	end
+	for slot = 1, slots do
+		if slot ~= motherSlot and not meta.field[slot] then
+			put(slot, nextMother(data, meta, stage))
+		end
+	end
+	if not meta.field[motherSlot] then
+		put(motherSlot, nextChild(data, meta, stage))
+	end
+	return placed
+end
+
+-- ล้างสนามฝั่งเรา — ลูกที่รอดกลับกองเอง (ไม่เคยถูกหัก) · แม่ที่รอดยังอยู่ใน roster
+-- ศัตรูไม่ถูกแตะ (บาดเจ็บค้างไว้รอรอบหน้า)
+function CombatService.clearField(meta: CombatMeta)
+	table.clear(meta.field)
+	meta.gathering = false
+end
+
+-- ตัดทหารบนสนามที่ของจริงหายไปแล้ว (debug ล้างคลัง · แม่ถูกย้ายออกจาก roster ทางอื่น) + อัปเดตดาเมจตามขั้นอัปล่าสุด
+local function refreshField(data: Data, meta: CombatMeta, stage: number)
+	local reserved: { [string]: number } = {}
+	local inRoster: { [string]: boolean } = {}
+	for _, mother in data.battleRoster do
+		inRoster[mother.uid] = true
+	end
+	for slot = 1, slotCount() do
+		local unit = meta.field[slot]
+		if unit then
+			local keep = true
+			if unit.kind == "child" then
+				local key = unit.key :: string
+				reserved[key] = (reserved[key] or 0) + 1
+				keep = reserved[key] <= math.floor(data.children[key] or 0)
+			else
+				keep = inRoster[unit.uid :: string] == true
+			end
+			if keep then
+				unit.dps = Config.getUnitDps(stage, unit.weight, unit.charId, unit.statuses, data.damageLevel, data.robuxDamageBonus)
+			else
+				meta.field[slot] = nil
+			end
+		end
+	end
+end
+
+local function frontOurSlot(meta: CombatMeta): number?
+	for slot = 1, slotCount() do
+		if meta.field[slot] then
+			return slot
+		end
+	end
+	return nil
+end
+
+--------------------------------------------------------------------------------
 -- tick หลัก — เรียกทุกครั้งที่ผู้เล่นออนไลน์ (loop จริงอยู่ใน CombatService.start())
 --------------------------------------------------------------------------------
 
 export type TickResult = {
-	unitsReleased: number,
-	damageDealt: number,
+	unitsReleased: number, -- ทหารที่ลงสนามใน tick นี้ (ลูก + แม่)
+	damageDealt: number, -- HP ศัตรู + กำแพงที่ลดจริง
 	coinsEarned: number,
 	stageCleared: boolean,
 	autoPaused: boolean,
-	mothersLost: number, -- แม่ใน roster ที่ตายในตานี้ (ด่านพัง) — 0 ถ้าด่านยังไม่พัง
+	mothersLost: number, -- แม่ใน roster ที่ตายตอนด่านพัง (killRoster) — popup ผ่านด่านใช้ค่านี้
+	mothersFallen: number, -- แม่ที่โดนฆ่ากลางสนาม (ตายถาวรเหมือนกัน · ไม่รวมใน mothersLost ข้างบน)
+	childrenLost: number, -- ลูกที่ตายใน tick นี้
+	enemiesKilled: number,
+	turretShots: number,
 	clearedStage: number?, -- ด่านที่เพิ่งพังในตานี้ (nil ถ้าไม่มี)
 	bonusEggs: number, -- ไข่ฟรีที่ต้องแจก (Phase 4A) — 0 ถ้าไม่มีด่านพัง หรือเคยได้รางวัลด่านนี้แล้ว
 }
 
-local EMPTY_RESULT: TickResult = {
-	unitsReleased = 0,
-	damageDealt = 0,
-	coinsEarned = 0,
-	stageCleared = false,
-	autoPaused = false,
-	mothersLost = 0,
-	clearedStage = nil,
-	bonusEggs = 0,
-}
+local function emptyResult(): TickResult
+	return {
+		unitsReleased = 0,
+		damageDealt = 0,
+		coinsEarned = 0,
+		stageCleared = false,
+		autoPaused = false,
+		mothersLost = 0,
+		mothersFallen = 0,
+		childrenLost = 0,
+		enemiesKilled = 0,
+		turretShots = 0,
+		clearedStage = nil,
+		bonusEggs = 0,
+	}
+end
 
--- auto-pause (§7.6): กันทหารถูกป้อนเข้าเครื่องบดหายถาวรโดยไม่ได้ damage เลย
--- นับจาก HP ที่ลดจริง (progressMade) ไม่ใช่จาก damage ที่ "พยายาม" ทำ — สองค่านี้ต่างกัน
--- เฉพาะตอนด่านเคลียร์ไปแล้วเท่านั้น (แยกเป็นฟังก์ชันของตัวเองให้เทสต์เรียกตรง ๆ ได้โดยไม่ต้อง
--- พึ่ง getActiveStage เลือกด่านให้ถูกจังหวะ)
--- ⚠️ ในเฟสนี้ (ยังไม่มี turret) เส้นทาง progressMade<=0 แทบไม่มีวันเกิดจริง เพราะ
--- Config.computeBattlePower มีพื้น minDamage บวก ๆ เสมอ — ใส่ไว้เป็นตาข่ายกันไว้ก่อนตามที่
--- ออกแบบ ให้ turret ในเฟสหลังเสียบเข้ามาได้โดยไม่ต้องแก้จุดนี้อีก
--- คืน true ถ้าการเรียกครั้งนี้ทำให้ auto-pause ทำงาน (ปิด summonEnabled ไปแล้ว)
-function CombatService.registerProgress(data: Data, meta: CombatMeta, unitsReleased: number, progressMade: number): boolean
-	if unitsReleased <= 0 then
-		return false
+-- ทหารเราตาย — ลูก: หักจากกอง 1 ตัว (+ สถิติ) · แม่: ออกจาก roster ถาวร (+ mothersLost)
+local function killOurUnit(data: Data, unit: OurUnit, result: TickResult)
+	if unit.kind == "child" then
+		local key = unit.key :: string
+		local count = (data.children[key] or 0) - 1
+		data.children[key] = if count > 0 then count else nil
+		data.stats.childrenLost = (data.stats.childrenLost or 0) + 1
+		result.childrenLost += 1
+	else
+		for index, mother in data.battleRoster do
+			if mother.uid == unit.uid then
+				table.remove(data.battleRoster, index)
+				data.stats.mothersLost = (data.stats.mothersLost or 0) + 1
+				result.mothersFallen += 1
+				break
+			end
+		end
 	end
+end
 
-	if progressMade > 0 then
-		meta.unitsSinceProgress = 0
-		return false
+-- เวลาที่เร็วที่สุดที่ศัตรูชนิดหนึ่งอาจมีช่องว่างลง (ต่ำกว่านี้รับประกันว่ายังเต็ม) — ใช้เลือกจังหวะเหตุการณ์
+-- คิวยังมี: ต้องตายอย่างน้อย คิว+1 ตัวก่อนช่องจะว่าง → ขั้นต่ำ = เลือดตัวที่น้อยสุด + ตัวเต็มที่ต้องฆ่าเพิ่ม
+-- คิวหมด: ตัวไหนตายก่อนก็ว่างเลย → เวลาตายจริงของแต่ละช่อง
+local function enemyKindEventTime(enemy: EnemyState, kind: "big" | "small", incoming: { [number]: number }): number
+	local first, last = enemySlotRange(kind)
+	local queue = enemyQueueOf(enemy, kind)
+	local best = math.huge
+	local minHp, totalRate, hitSlots, unitHp = math.huge, 0, 0, 0
+	for slot = first, last do
+		local unit = enemy.field[slot]
+		local rate = incoming[slot] or 0
+		if unit and rate > 0 then
+			if queue <= 0 then
+				best = math.min(best, unit.hp / rate)
+			else
+				minHp = math.min(minHp, unit.hp)
+				totalRate += rate
+				hitSlots += 1
+				unitHp = unit.maxHp
+			end
+		end
 	end
-
-	meta.unitsSinceProgress += unitsReleased
-	if meta.unitsSinceProgress >= Config.Balance.Combat.AUTO_PAUSE_AFTER_UNITS then
-		data.summonEnabled = false
-		data.combatAutoPaused = true
-		meta.unitsSinceProgress = 0
-		return true
+	if queue > 0 and totalRate > 0 then
+		best = (minHp + math.max(0, queue + 1 - hitSlots) * unitHp) / totalRate
 	end
+	return best
+end
 
-	return false
+-- ใส่ดาเมจ `amount` ให้ศัตรูช่อง slot — ตายแล้วตัวชนิดเดียวกันลงแทน (ดาเมจที่เหลือไหลเข้าตัวใหม่ในช่องเดิม)
+-- คืน (HP ที่ลดจริง, จำนวนที่ตาย)
+local function damageEnemySlot(enemy: EnemyState, slot: number, amount: number): (number, number)
+	local unit = enemy.field[slot]
+	if not unit or amount <= 0 then
+		return 0, 0
+	end
+	if amount < unit.hp - unit.maxHp * EPSILON then
+		unit.hp -= amount
+		return amount, 0
+	end
+	local dealt = unit.hp
+	local left = amount - unit.hp
+	local killed = 1
+	local kind: "big" | "small" = if unit.kind == "big" then "big" else "small"
+	local queue = enemyQueueOf(enemy, kind)
+	local unitHp = unit.maxHp
+	-- ตัวที่ลงแทนแล้วตายทั้งตัวในรอบเดียวกัน (ผู้เล่นแรงมาก) — คิดรวดเดียว ไม่วนทีละตัว
+	local fullKills = math.min(math.floor(left / unitHp + EPSILON), queue)
+	dealt += fullKills * unitHp
+	left = math.max(0, left - fullKills * unitHp)
+	killed += fullKills
+	queue -= fullKills
+	if queue > 0 then
+		queue -= 1
+		unit.hp = unitHp - left
+		dealt += left
+		if unit.hp <= unitHp * EPSILON then
+			-- เศษทศนิยมพอดีตัว = ตายด้วย (ไม่ทิ้งตัวเลือด 0 ไว้บนสนาม)
+			killed += 1
+			if queue > 0 then
+				queue -= 1
+				unit.hp = unitHp
+			else
+				enemy.field[slot] = nil
+			end
+		end
+	else
+		enemy.field[slot] = nil -- ชนิดนี้หมดแล้ว ช่องว่าง (ดาเมจที่เหลือเล็กน้อยทิ้งไป — เกิดครั้งเดียวต่อชนิดต่อด่าน)
+	end
+	setEnemyQueue(enemy, kind, queue)
+	return dealt, killed
+end
+
+-- เดินสนามรบไป `seconds` วินาที (เหตุการณ์ต่อเนื่อง) · ด่านต้องเริ่มแล้วและยังไม่พัง
+local function runBattle(data: Data, meta: CombatMeta, stage: number, seconds: number, result: TickResult)
+	local combat = Config.Balance.Combat
+	local slots = combat.FIELD_SLOTS
+	local progress = data.stageProgress[stage] :: StageProgress
+	local turretDps = if turretEnabled then Config.getStageTurretDps(stage) else 0
+	local shotPeriod = 1 / combat.TURRET_SHOTS_PER_SECOND
+	local shotDamage = turretDps * shotPeriod
+	local wallTotal = Config.getStageWallHp(stage)
+	local enemy = ensureEnemyState(meta, data, stage)
+
+	refreshField(data, meta, stage)
+	result.unitsReleased += CombatService.fillField(data, meta, stage)
+
+	local incoming: { [number]: number } = {}
+	local t = 0
+	local events = 0
+	while t < seconds - EPSILON do
+		events += 1
+		if events > MAX_EVENTS_PER_TICK then
+			warn(`[CombatService] เหตุการณ์เกิน {MAX_EVENTS_PER_TICK} ใน tick เดียว (ด่าน {stage}) — หยุด tick นี้ไว้ก่อน`)
+			break
+		end
+
+		-- อัตราดาเมจตอนนี้
+		table.clear(incoming)
+		local enemyFront = frontEnemySlot(enemy)
+		local wallRate = 0
+		for slot = 1, slots do
+			local unit = meta.field[slot]
+			if unit then
+				if enemyFront then
+					local target = if enemy.field[slot] then slot else enemyFront
+					incoming[target] = (incoming[target] or 0) + unit.dps
+				elseif progress.wallHpRemaining > 0 then
+					wallRate += unit.dps
+				end
+			end
+		end
+		local ourFront = frontOurSlot(meta)
+		local enemyDps = 0
+		if ourFront then
+			for slot = 1, slots do
+				local foe = enemy.field[slot]
+				if foe then
+					enemyDps += foe.dps
+				end
+			end
+		end
+
+		-- เหตุการณ์ถัดไป
+		local dt = seconds - t
+		if turretDps > 0 then
+			dt = math.min(dt, math.max(0, shotPeriod - meta.turretClock))
+		end
+		dt = math.min(dt, enemyKindEventTime(enemy, "big", incoming), enemyKindEventTime(enemy, "small", incoming))
+		if ourFront and enemyDps > 0 then
+			dt = math.min(dt, meta.field[ourFront].hp / enemyDps)
+		end
+		local wallEvent = false
+		if wallRate > 0 then
+			local wallTime = progress.wallHpRemaining / wallRate
+			if wallTime <= dt then
+				dt = wallTime
+				wallEvent = true
+			end
+		end
+		dt = math.max(0, dt)
+
+		-- เดินเวลา
+		t += dt
+		meta.turretClock += dt
+		local enemyDealt = 0
+		for slot = 1, slots do
+			local rate = incoming[slot]
+			if rate and rate > 0 and dt > 0 then
+				local dealt, killed = damageEnemySlot(enemy, slot, rate * dt)
+				enemyDealt += dealt
+				result.enemiesKilled += killed
+			end
+		end
+		if ourFront and enemyDps > 0 then
+			meta.field[ourFront].hp -= enemyDps * dt
+		end
+
+		-- บัญชี HP + เงิน (ตัวเดิม applyDamageToStage) · ⚠️ ช่วงศัตรูห้ามล้นไปกำแพง
+		local progressMade = 0
+		if enemyDealt > 0 and progress.defendersRemaining > 0 then
+			local amount = math.min(enemyDealt, progress.defendersRemaining)
+			local toDefenders, _, coins = CombatService.applyDamageToStage(data, meta, stage, amount)
+			progressMade += toDefenders
+			result.coinsEarned += coins
+		end
+		-- ศัตรูหมดทั้งด่าน → ปิดบัญชีเศษทศนิยมให้ HP ทหารฝ่ายรับเป็น 0 เป๊ะ (เงินครบตามรวม)
+		if not frontEnemySlot(enemy) and enemy.bigQueue <= 0 and enemy.smallQueue <= 0 and progress.defendersRemaining > 0 then
+			local toDefenders, _, coins = CombatService.applyDamageToStage(data, meta, stage, progress.defendersRemaining)
+			progressMade += toDefenders
+			result.coinsEarned += coins
+		end
+		if wallRate > 0 and dt > 0 then
+			local amount = wallRate * dt
+			if wallEvent or progress.wallHpRemaining - amount <= wallTotal * EPSILON then
+				amount = progress.wallHpRemaining
+			end
+			local _, toWall, coins = CombatService.applyDamageToStage(data, meta, stage, amount)
+			progressMade += toWall
+			result.coinsEarned += coins
+		end
+		result.damageDealt += progressMade
+		if progressMade > 0 then
+			meta.deathsSinceProgress = 0
+		end
+
+		-- ป้อมยิง (ตัวหน้าสุด · นัดเดียวต่อเป้า ส่วนเกินทิ้ง)
+		if turretDps > 0 and meta.turretClock >= shotPeriod - EPSILON then
+			meta.turretClock = math.max(0, meta.turretClock - shotPeriod)
+			local target = frontOurSlot(meta)
+			if target then
+				meta.field[target].hp -= shotDamage
+				result.turretShots += 1
+				meta.lastTurretTarget = target
+			end
+		end
+
+		-- ทหารเราตาย → ออกจากสนาม (ลูกหักกอง · แม่ตายถาวร)
+		for slot = 1, slots do
+			local unit = meta.field[slot]
+			if unit and unit.hp <= unit.maxHp * EPSILON then
+				meta.field[slot] = nil
+				killOurUnit(data, unit, result)
+				meta.deathsSinceProgress += 1
+			end
+		end
+		enemy.knownDefenders = progress.defendersRemaining
+
+		if progress.defendersRemaining <= 0 and progress.wallHpRemaining <= 0 then
+			result.stageCleared = true
+			break
+		end
+
+		-- auto-pause: ตายติดกันครบโดยที่ HP ฝั่งตรงข้ามไม่ลดเลย → หยุดปล่อย (ผู้เล่นต้องกดเปิดเอง)
+		if meta.deathsSinceProgress >= combat.AUTO_PAUSE_AFTER_DEATHS then
+			data.summonEnabled = false
+			data.combatAutoPaused = true
+			meta.deathsSinceProgress = 0
+			CombatService.clearField(meta)
+			result.autoPaused = true
+			break
+		end
+
+		result.unitsReleased += CombatService.fillField(data, meta, stage)
+	end
 end
 
 -- ⚠️ ไม่มี offline catch-up: ฟังก์ชันนี้รับ elapsedSeconds ตรง ๆ ไม่อ่าน os.time()/os.clock() เอง
 -- ปิดเกม/ออกเกม = ไม่มีใครเรียกฟังก์ชันนี้ = ไม่มีอะไรคืบหน้า (ตรงข้ามกับ ProductionService ที่มี
 -- offline settlement) — แค่ไม่เรียกก็พอ ไม่ต้องมี flag พิเศษกันไว้
 function CombatService.tick(data: Data, meta: CombatMeta, elapsedSeconds: number): TickResult
-	if not data.summonEnabled or elapsedSeconds <= 0 then
-		return EMPTY_RESULT
+	local result = emptyResult()
+	meta.lastTurretShots = 0
+	if not data.summonEnabled then
+		-- ปิดอัญเชิญ (เอง / auto-pause / ล็อกบอส) = ทหารที่รอดกลับกอง · ศัตรูบาดเจ็บค้างไว้
+		CombatService.clearField(meta)
+		return result
+	end
+	if elapsedSeconds <= 0 then
+		return result
 	end
 
 	local stage = CombatService.getActiveStage(data)
 	if not stage then
-		return EMPTY_RESULT -- ผ่านครบทุกด่านแล้ว ไม่มีอะไรให้ตีต่อ
+		CombatService.clearField(meta)
+		return result -- ผ่านครบทุกด่านแล้ว ไม่มีอะไรให้ตีต่อ
 	end
 
 	CombatService.ensureStageStarted(data, stage)
 
-	local rate = Config.getReleaseRate(stage)
-	local budget = meta.releaseCarry + rate * elapsedSeconds
-	local unitsToRelease = math.floor(budget)
-	meta.releaseCarry = budget - unitsToRelease
+	-- ด่านที่ไม่มีอะไรให้ตี (ด่าน 1) "พัง" ทันทีที่เปิดอัญเชิญ ไม่ต้องใช้ทหาร (ไม่มีกำแพง → ไม่ติดล็อกบอส · ไม่มีรางวัล)
+	if Config.getStageTotalHp(stage) > 0 then
+		runBattle(data, meta, stage, math.min(elapsedSeconds, Config.Balance.Combat.MAX_TICK_SECONDS), result)
+	else
+		result.stageCleared = true
+	end
+	meta.lastTurretShots = result.turretShots
 
-	local unitsReleased, childDamage = CombatService.releaseFromQueue(data, unitsToRelease)
-	-- แม่ใน roster ตีต่อเนื่องทุกวินาที ไม่ผ่านคิวปล่อย (ไม่นับเป็น "หน่วยที่ปล่อย" ของ auto-pause)
-	-- ⚠️ ตีเฉพาะตอนเปิดอัญเชิญ — ปิดอัญเชิญแล้ว return ตั้งแต่บรรทัดแรก แม่หยุดรอ ไม่ตาย ไม่ตี
-	local damageDealt = childDamage + CombatService.getRosterDps(data) * elapsedSeconds
-
-	local coinsEarned = 0
-	local stageCleared = false
-	local progressMade = 0
-	local mothersLost = 0
-	local bonusEggs = 0
-
-	if damageDealt > 0 then
-		local dmgToDefenders, dmgToWall, coins, cleared =
-			CombatService.applyDamageToStage(data, meta, stage, damageDealt)
-		coinsEarned = coins
-		stageCleared = cleared
-		progressMade = dmgToDefenders + dmgToWall
-
+	if result.stageCleared then
 		-- ⚠️ อัปเดตทันทีในตาที่พังใหม่ ไม่ต้องรอ tick ถัดไป — ระบบเงิน/เพดานอัปเกรดที่ผูกกับ
 		-- wallProgress (เช่น Config.getCoinsPerMinute/getMaxDamageLevel) จะได้ใช้ค่าล่าสุดทันที
-		if stageCleared then
-			CombatService.recomputeWallProgress(data)
-			-- ⚠️ แม่ทั้ง roster ตายถาวรพร้อมกันทันทีที่ด่านที่กำลังตีพัง
-			mothersLost = CombatService.killRoster(data, stage)
-			-- ⚠️ Phase 4A: รางวัลผูกกับจังหวะนี้ (เพิ่งพัง) ไม่ใช่กับสถานะ "พังอยู่" — ดู claimStageClearBonus
-			bonusEggs = CombatService.claimStageClearBonus(data, stage)
-		end
+		CombatService.recomputeWallProgress(data)
+		-- ⚠️ แม่ทั้ง roster ตายถาวรพร้อมกันทันทีที่ด่านที่กำลังตีพัง (กติกาเดิม ห้ามเปลี่ยน)
+		result.mothersLost = CombatService.killRoster(data, stage)
+		-- ⚠️ Phase 4A: รางวัลผูกกับจังหวะนี้ (เพิ่งพัง) ไม่ใช่กับสถานะ "พังอยู่" — ดู claimStageClearBonus
+		result.bonusEggs = CombatService.claimStageClearBonus(data, stage)
+		result.clearedStage = stage
+		-- ลูกที่รอดกลับกอง (ไม่เคยถูกหัก) · ด่านถัดไปเริ่มจากสนามว่าง + ศัตรูชุดใหม่
+		CombatService.clearField(meta)
+		meta.enemy = nil
+		meta.turretClock = 0
 	end
 
-	local autoPaused = CombatService.registerProgress(data, meta, unitsReleased, progressMade)
-
-	return {
-		unitsReleased = unitsReleased,
-		damageDealt = damageDealt,
-		coinsEarned = coinsEarned,
-		stageCleared = stageCleared,
-		autoPaused = autoPaused,
-		mothersLost = mothersLost,
-		clearedStage = if stageCleared then stage else nil,
-		bonusEggs = bonusEggs,
-	}
+	return result
 end
 
 -- ตานี้ต้องแจ้ง popup "ผ่านด่าน" ไหม (Phase 4B) — ด่านเพิ่งพัง **และ** มีอย่างน้อยหนึ่งอย่างให้บอก:
@@ -634,7 +1207,10 @@ function CombatService.handleSetSummonEnabled(data: Data, meta: CombatMeta, rawE
 	if rawEnabled then
 		-- ผู้เล่นกดเปิดเอง = รับทราบแจ้งเตือน auto-pause แล้ว เริ่มนับใหม่
 		data.combatAutoPaused = false
-		meta.unitsSinceProgress = 0
+		meta.deathsSinceProgress = 0
+	else
+		-- ปิดอัญเชิญ = ทหารที่รอดกลับกองทันที (ไม่รอ tick) · ศัตรูบาดเจ็บค้างไว้
+		CombatService.clearField(meta)
 	end
 	return true
 end
@@ -654,8 +1230,84 @@ type StageProgressView = {
 	cleared: boolean?,
 }
 
+-- 5E-1: สนามรบสำหรับภาพชั่วคราว + HUD — ทหารเรา/ศัตรูรายช่อง (list มี slot กำกับ · ช่องว่างไม่ส่ง)
+-- ⚠️ client แค่แสดง · ตัวเลขทั้งหมดมาจากสถานะจริงของ server
+local function buildBattleView(data: Data, meta: CombatMeta?, stage: number?)
+	local view = {
+		stage = stage,
+		phase = "idle", -- "enemies" | "wall" | "idle"
+		gathering = false,
+		available = 0, -- ทหารพร้อมลงสนาม (ลูกในกองที่ติ๊ก + แม่ใน roster ที่ยังไม่ลง)
+		gatherTarget = Config.Balance.Combat.GATHER_SIZE,
+		our = {},
+		enemies = {},
+		bigLeft = 0,
+		smallLeft = 0,
+		bigTotal = 0,
+		smallTotal = 0,
+		turretActive = false,
+		turretShots = 0,
+		turretTarget = nil :: number?,
+	}
+	if not stage then
+		return view
+	end
+	local stats = Config.getStageEnemyStats(stage)
+	view.bigTotal = stats.bigCount
+	view.smallTotal = stats.smallCount
+	view.turretActive = turretEnabled and Config.getStageTurretDps(stage) > 0
+	local progress = data.stageProgress[stage]
+	if type(progress) == "table" then
+		view.phase = if progress.defendersRemaining > 0
+			then "enemies"
+			elseif progress.wallHpRemaining > 0 then "wall"
+			else "idle"
+	else
+		view.phase = if stats.totalHp > 0 then "enemies" else "idle"
+		view.bigLeft, view.smallLeft = stats.bigCount, stats.smallCount
+	end
+	local enemy = if meta then meta.enemy else nil
+	if enemy and enemy.stage == stage then
+		view.bigLeft, view.smallLeft = CombatService.countEnemies(enemy)
+	elseif type(progress) == "table" and progress.defendersRemaining > 0 then
+		-- ยังไม่เคยสู้ในเซสชันนี้ — นับจากแถวที่จะสร้างจาก HP รวม (ไม่เก็บไว้ ไม่แตะ meta)
+		view.bigLeft, view.smallLeft = CombatService.countEnemies(CombatService.buildEnemyState(stage, progress.defendersRemaining))
+	end
+	if not meta then
+		return view
+	end
+	view.gathering = meta.gathering
+	view.available = CombatService.countAvailable(data, meta)
+	view.turretShots = meta.lastTurretShots
+	view.turretTarget = meta.lastTurretTarget
+	for slot = 1, slotCount() do
+		local unit = meta.field[slot]
+		if unit then
+			local character = Config.getCharacter(unit.charId)
+			table.insert(view.our, {
+				slot = slot,
+				kind = unit.kind,
+				charId = unit.charId,
+				class = if character then character.class else "?",
+				hp = unit.hp,
+				maxHp = unit.maxHp,
+			})
+		end
+	end
+	if enemy and enemy.stage == stage then
+		for slot = 1, slotCount() do
+			local foe = enemy.field[slot]
+			if foe then
+				table.insert(view.enemies, { slot = slot, kind = foe.kind, hp = foe.hp, maxHp = foe.maxHp })
+			end
+		end
+	end
+	return view
+end
+
 -- `bossLocked` (Phase 5A) มาจาก BossService ผ่านผู้เรียก (EggService.sync) — ไม่ส่ง = ไม่ล็อก
-function CombatService.buildSyncFields(data: Data, bossLocked: boolean?)
+-- `meta` (5E-1) = สนามรบของผู้เล่นคนนี้ (CombatService.getMeta) — ไม่ส่ง = สนามว่าง
+function CombatService.buildSyncFields(data: Data, bossLocked: boolean?, meta: CombatMeta?)
 	local stageProgress: { StageProgressView } = table.create(Config.Balance.Stage.COUNT)
 	for stage = 1, Config.Balance.Stage.COUNT do
 		local progress = data.stageProgress[stage]
@@ -703,7 +1355,92 @@ function CombatService.buildSyncFields(data: Data, bossLocked: boolean?)
 		-- ⚠️ แค่ช่วยแสดงผล server ปฏิเสธคำขอเปิดเองอยู่แล้ว (handleSetSummonEnabled)
 		summonBlockReason = CombatService.getSummonBlockReason(bossLocked),
 		bossLocked = bossLocked == true,
+		-- 5E-1: สนามรบ 6 ต่อ 6 + รวมพล + ป้อม (ภาพชั่วคราว/HUD/หน้าต่างอัญเชิญ "กำลังรวมพล 7/12")
+		battle = buildBattleView(data, meta, CombatService.getActiveStage(data)),
 	}
+end
+
+--------------------------------------------------------------------------------
+-- debug (Studio) — เรียกผ่าน EggService.debugBattleStatus / debugTurret
+--------------------------------------------------------------------------------
+
+-- สนามทั้ง 12 ช่อง + เลือด + คิวที่เหลือ เป็นข้อความหลายบรรทัด
+function CombatService.describeBattle(data: Data, meta: CombatMeta?): string
+	local stage = CombatService.getActiveStage(data)
+	local lines = {}
+	table.insert(
+		lines,
+		`ด่าน {stage or "-"} · อัญเชิญ {if data.summonEnabled then "เปิด" else "ปิด"}`
+			.. ` · ป้อม {if turretEnabled then "เปิด" else "ปิด (debug)"}`
+	)
+	if not stage then
+		return table.concat(lines, "\n")
+	end
+	local progress = data.stageProgress[stage]
+	if type(progress) == "table" then
+		table.insert(
+			lines,
+			string.format(
+				"HP ทหารฝ่ายรับ %.6g/%.6g · HP กำแพง %.6g/%.6g",
+				progress.defendersRemaining,
+				Config.getStageDefenderHp(stage),
+				progress.wallHpRemaining,
+				Config.getStageWallHp(stage)
+			)
+		)
+	end
+	local reserved = CombatService.getReservedChildren(meta)
+	for slot = 1, slotCount() do
+		local unit = if meta then meta.field[slot] else nil
+		local text = "ว่าง"
+		if unit then
+			text = string.format(
+				"%s %s เลือด %.4g/%.4g ดาเมจ %.4g/วิ",
+				if unit.kind == "mother" then "แม่" else "ลูก",
+				unit.charId,
+				unit.hp,
+				unit.maxHp,
+				unit.dps
+			)
+		end
+		local foe = if meta and meta.enemy and meta.enemy.stage == stage then meta.enemy.field[slot] else nil
+		local foeText = "ว่าง"
+		if foe then
+			foeText = string.format(
+				"%s เลือด %.4g/%.4g ดาเมจ %.4g/วิ",
+				if foe.kind == "big" then "ใหญ่" else "เล็ก",
+				foe.hp,
+				foe.maxHp,
+				foe.dps
+			)
+		end
+		table.insert(lines, `ช่อง {slot}: เรา [{text}]  vs  ศัตรู [{foeText}]`)
+	end
+	local big, small = CombatService.countEnemies(if meta then meta.enemy else nil)
+	local enemyQueueText = if meta and meta.enemy
+		then `ศัตรูรอลง: ใหญ่ {meta.enemy.bigQueue} · เล็ก {meta.enemy.smallQueue} (เหลือรวม ใหญ่ {big} · เล็ก {small})`
+		else "ศัตรูรอลง: (ยังไม่ได้สร้างแถว — สร้างตอน tick แรกที่อัญเชิญ)"
+	table.insert(lines, enemyQueueText)
+	local queueParts = {}
+	for _, key in data.releaseOrder do
+		local count = data.children[key] or 0
+		table.insert(queueParts, `{key}={math.max(0, count - (reserved[key] or 0))}`)
+	end
+	table.insert(lines, `คิวลูก (ติ๊กไว้ · ไม่นับตัวบนสนาม): {if #queueParts > 0 then table.concat(queueParts, ", ") else "-"}`)
+	local rosterParts = {}
+	for _, mother in data.battleRoster do
+		local onField = meta ~= nil and motherOnField(meta, mother.uid)
+		table.insert(rosterParts, `{mother.uid}{if onField then "(บนสนาม)" else ""}`)
+	end
+	table.insert(lines, `คิวแม่ (roster): {if #rosterParts > 0 then table.concat(rosterParts, ", ") else "-"}`)
+	if meta then
+		table.insert(
+			lines,
+			`พร้อมลง {CombatService.countAvailable(data, meta)} · รวมพล {if meta.gathering then "กำลังรอ" else "ไม่"}`
+				.. ` (เป้า {Config.Balance.Combat.GATHER_SIZE}) · ตายติดกันไม่คืบหน้า {meta.deathsSinceProgress}/{Config.Balance.Combat.AUTO_PAUSE_AFTER_DEATHS}`
+		)
+	end
+	return table.concat(lines, "\n")
 end
 
 --------------------------------------------------------------------------------
@@ -732,6 +1469,7 @@ function CombatService.start(onStageCleared: (Player, number, number, number) ->
 	local DataService = require(ServerScriptService.DataService)
 
 	local setReleaseOrderRequest = Remotes.waitFor(Config.RemoteNames.SET_RELEASE_ORDER_REQUEST)
+	local actionResult = Remotes.waitFor(Config.RemoteNames.ACTION_RESULT)
 	local setSummonEnabledRequest = Remotes.waitFor(Config.RemoteNames.SET_SUMMON_ENABLED_REQUEST)
 
 	setReleaseOrderRequest.OnServerEvent:Connect(function(player: Player, rawOrder: unknown)
@@ -759,7 +1497,7 @@ function CombatService.start(onStageCleared: (Player, number, number, number) ->
 
 	-- ⚠️ ลูปเดียวคุมทั้งการปล่อย+ตี ความละเอียด = Config.World.SYNC_INTERVAL (ค่าเดียวกับ
 	-- ลูป sync ของ EggService) ใช้ os.clock() วัด elapsed จริงระหว่างรอบ กัน drift จาก
-	-- task.wait() ที่ไม่เป๊ะ 1 วินาทีเป๊ะทุกรอบ (ตัวนับเศษ meta.releaseCarry รับส่วนที่เหลือไว้)
+	-- task.wait() ที่ไม่เป๊ะ 1 วินาทีเป๊ะทุกรอบ (สนามคิดเป็นเวลาต่อเนื่อง ไม่มีเศษหาย)
 	task.spawn(function()
 		while true do
 			task.wait(Config.World.SYNC_INTERVAL)
@@ -778,6 +1516,10 @@ function CombatService.start(onStageCleared: (Player, number, number, number) ->
 						CombatService.applyBossLock(data)
 					end
 					local result = CombatService.tick(data, meta, elapsed)
+					-- 5E-1: แม่โดนฆ่ากลางสนาม (ตายถาวร) — บอกทันที ไม่รอผ่านด่าน
+					if result.mothersFallen > 0 then
+						actionResult:FireClient(player, false, Config.formatMotherFallenMessage(result.mothersFallen, #data.battleRoster))
+					end
 					local clearedStage = result.clearedStage
 					-- Phase 5A: พังกำแพงด่านตัวเองเสร็จขณะบอสยังอยู่ → ล็อก + หยุดอัญเชิญ
 					-- 5B-2: บอสที่ดูคือ **บอสห้องของด่านที่เพิ่งพัง** (ห้อง N หลังกำแพง N) · ปลดเมื่อบอสห้องนั้นตาย
@@ -786,6 +1528,7 @@ function CombatService.start(onStageCleared: (Player, number, number, number) ->
 					if clearedStage and CombatService.shouldBossLock(clearedStage, bossAlive) then
 						bossGate.lockUser(player.UserId, clearedStage)
 						CombatService.applyBossLock(data)
+						CombatService.clearField(meta)
 						print(
 							`[CombatService] {player.Name} พังกำแพงด่าน {clearedStage} ขณะบอสห้อง {clearedStage} ยังอยู่`
 								.. ` → ล็อกอัญเชิญจนกว่าบอสห้องนั้นตาย`

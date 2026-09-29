@@ -85,6 +85,7 @@ local ColorSequenceKeypoint = { new = function(t, c) return typed("ColorSequence
 -- CFrame: lookAt (กล้องรูปตัวละคร) + new/Angles/คูณกัน (MotherModels.build ประกอบโมเดลจาก Part) — เก็บค่า ไม่คำนวณจริง
 local CFrameMeta = { __type = "CFrame" }
 CFrameMeta.__mul = function(a, _b) return a end
+CFrameMeta.__index = { Inverse = function(self) return self end } -- Weld.C0 ของ rig (MotherModels.build)
 local CFrame = {
 	lookAt = function(a, b) return setmetatable({ a = a, b = b, Position = a }, CFrameMeta) end,
 	new = function(x, y, z) return setmetatable({ Position = Vector3.new(x, y, z) }, CFrameMeta) end,
@@ -1550,7 +1551,7 @@ do
 	templates.Name = "MotherModelTemplates"
 	templates.Parent = services.ReplicatedStorage
 	local monkeyModel = Instance.new("Model")
-	monkeyModel.Name = tostring(Config.getCharacter("monkey").modelAssetId)
+	monkeyModel.Name = Config.getMotherTemplateName("monkey")
 	monkeyModel.Parent = templates
 
 	local ip = makePayload()
@@ -1579,11 +1580,16 @@ do
 	IndexWindow.close()
 end
 
-print("\n━━ โมเดลตัวละครประกอบจาก Part (11 ตัว): ประกอบได้ · ชิ้นไม่ชน · การ์ดจัดกรอบไม่ล้น · เงาดำทำงาน ━━")
+print("\n━━ โมเดลตัวละครประกอบจาก Part (12 ตัว · ลิง = rig R6): ประกอบได้ · ชิ้นไม่ชน · การ์ดจัดกรอบไม่ล้น · เงาดำทำงาน ━━")
 do
 	local MotherModels = loaded.MotherModels
 	local IndexWindow = loaded.IndexWindow
 	local templates = findDescendant(services.ReplicatedStorage, "MotherModelTemplates")
+	-- ลิงตัวเก่า (Model เปล่าจากส่วนเงาลิงข้างบน) ออกก่อน — ใส่ของจริงที่ประกอบจาก Part แทน
+	local oldMonkey = findDescendant(templates, "monkey")
+	if oldMonkey then
+		oldMonkey:Destroy()
+	end
 	local built = 0
 	local allParts, badParts, primaries = 0, 0, 0
 	for _, charId in Config.CharacterOrder do
@@ -1592,12 +1598,38 @@ do
 			if ok and model then
 				built += 1
 				local count = 0
+				local isRig = MotherModels.getBlueprint(charId).rig ~= nil
 				for _, part in model:GetChildren() do
 					count += 1
-					if part.CanCollide ~= false or part.Anchored ~= true or part.Massless ~= true
+					-- ไม่มี rig: ทุกชิ้น Anchored · rig: Anchored แค่ HumanoidRootPart (ชิ้นอื่นขยับตามข้อต่อ)
+					local wantAnchored = not isRig or part.Name == "HumanoidRootPart"
+					if part.CanCollide ~= false or part.Anchored ~= wantAnchored or part.Massless ~= true
 						or part.CanTouch ~= false or part.CanQuery ~= false then
 						badParts += 1
 					end
+				end
+				if isRig then
+					-- ข้อต่อ R6 6 ตัว (ชื่อ + ชิ้นตรง rig R6) · ชิ้นตกแต่งทุกชิ้นมี Weld
+					local motors, welds, wrong = {}, 0, 0
+					for _, part in model:GetChildren() do
+						for _, child in part:GetChildren() do
+							if child.__class == "Motor6D" then
+								motors[child.Name] = `{child.Part0.Name}>{child.Part1.Name}`
+							elseif child.__class == "Weld" then
+								welds += 1
+								if child.Part1 ~= part or child.Part0 == nil then
+									wrong += 1
+								end
+							end
+						end
+					end
+					check(`  {charId}: Motor6D ตรง R6 ครบ 6 ตัว`, motors.RootJoint == "HumanoidRootPart>Torso"
+						and motors.Neck == "Torso>Head"
+						and motors["Right Shoulder"] == "Torso>Right Arm" and motors["Left Shoulder"] == "Torso>Left Arm"
+						and motors["Right Hip"] == "Torso>Right Leg" and motors["Left Hip"] == "Torso>Left Leg", true)
+					check(`  {charId}: ชิ้นตกแต่ง {welds} ชิ้นมี Weld ติดชิ้น rig ครบ`, welds == count - #MotherModels.R6_PARTS and wrong == 0, true)
+					check(`  {charId}: PrimaryPart = HumanoidRootPart (ใส)`, model.PrimaryPart and model.PrimaryPart.Name == "HumanoidRootPart"
+						and model.PrimaryPart.Transparency == 1, true)
 				end
 				allParts += count
 				if model.PrimaryPart ~= nil and model.PrimaryPart.Parent == model then
@@ -1612,10 +1644,10 @@ do
 			end
 		end
 	end
-	check("ประกอบได้ครบ 11 ตัว", built, 11)
-	check("  ทุกชิ้น CanCollide/CanTouch/CanQuery ปิด · Anchored · Massless", badParts, 0)
-	check("  ทุกตัวมี PrimaryPart อยู่ในโมเดล", primaries, 11)
-	check("  charId ไม่มีแบบ → คืน nil (ใช้กล่องสีสำรอง)", MotherModels.build("monkey") == nil, true)
+	check("ประกอบได้ครบ 12 ตัว (ลิงด้วย)", built, 12)
+	check("  ทุกชิ้น CanCollide/CanTouch/CanQuery ปิด · Massless · Anchored ตามแบบ (rig = แค่ราก)", badParts, 0)
+	check("  ทุกตัวมี PrimaryPart อยู่ในโมเดล", primaries, 12)
+	check("  charId ไม่มีแบบ → คืน nil (ใช้กล่องสีสำรอง)", MotherModels.build("ghost_char") == nil, true)
 
 	-- การ์ดจัดกรอบไม่ล้น: ฉายมุม 8 มุมของกล่องล้อมรอบจริงของแต่ละตัวผ่านกล้องของ UiKit (มุมเฉียง 3/4) → ต้องอยู่ในมุมมองทุกมุม
 	local function sub(a, b) return { a[1] - b[1], a[2] - b[2], a[3] - b[3] } end

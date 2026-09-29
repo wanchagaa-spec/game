@@ -1236,15 +1236,10 @@ local Characters: { [string]: Character } = {
 	dragon_horse = { id = "dragon_horse", name = "ม้าขาวมังกร", class = "B", enabled = true },
 
 	-- C ×1
-	-- modelAssetId = โมเดลลิง (Model asset ที่ผู้ใช้ publish เอง · แทนกอริลลาเดิม ดู CLAUDE.md)
-	monkey = {
-		id = "monkey",
-		name = "ลิง",
-		class = "C",
-		enabled = true,
-		modelAssetId = 109724272624838,
-		animationIds = { walk = 107531970151372, idle = 120196087973871, punch = 108427117124537 },
-	},
+	-- ลิง: ⚠️ ผู้ใช้สั่งเลิกใช้ mesh แล้ว → ประกอบจาก Part + rig R6 + อนิเมชันตั้งต้นของ Roblox (src/shared/MotherModels.lua)
+	--   ของเดิมยังอยู่ในบัญชี เผื่อย้อนกลับ: model 109724272624838 · walk 107531970151372 · idle 120196087973871 · punch 108427117124537
+	--   (ใส่ modelAssetId กลับ = mesh มาก่อนแบบ Part เสมอ · ดู PenService.refreshMothers)
+	monkey = { id = "monkey", name = "ลิง", class = "C", enabled = true },
 	pig = { id = "pig", name = "หมู", class = "C", enabled = true },
 	horse = { id = "horse", name = "ม้า", class = "C", enabled = true },
 	fish = { id = "fish", name = "ปลา", class = "C", enabled = true },

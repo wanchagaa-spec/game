@@ -67,6 +67,8 @@ type Roamer = {
 	restPoses: { string }, -- ท่าพักที่ตัวนี้มีจริง เรียงตาม REST_POSE_ORDER (ว่าง = ไม่มีอนิเมชัน)
 	speed: number, -- studs/วิ (กล่องสี = MAP.Wander.Speed · โมเดล mesh = โตตามขนาดตัว)
 	animSpeed: number, -- ความเร็วเล่นอนิเมชัน (1 = ปกติ · ตัวใหญ่เล่นช้าลง ก้าวยาวขึ้น)
+	walkAnimScale: number, -- คูณเพิ่มเฉพาะท่าเดิน (rig R6: อนิเมชันเดินของ Roblox ตั้งมาเร็วกว่าแม่เดินมาก · MotherModels.walkAnimSpeed)
+	trackConnections: { RBXScriptConnection }, -- เล่นซ้ำตอนท่าจบ — ตัดทิ้งตอนเก็บแม่
 	inset: number, -- ระยะเว้นจากขอบคอก = ครึ่งความกว้างตัว กันตัวใหญ่ยื่นทะลุรั้ว
 }
 
@@ -89,7 +91,13 @@ local function getRestPoses(tracks: { [string]: AnimationTrack }?): { string }
 	return poses
 end
 
+local function poseSpeed(roamer: Roamer, track: AnimationTrack): number
+	local tracks = roamer.tracks
+	return roamer.animSpeed * (if tracks and track == tracks.walk then roamer.walkAnimScale else 1)
+end
+
 -- เปลี่ยนท่า — ขาดท่าที่ขอ (เช่นไม่ได้ใส่ sit) ใช้ท่ายืนพักแทน · ท่าเดินไม่มีท่าสำรอง
+-- ⚠️ ตั้ง roamer.playing เป็นท่าใหม่**ก่อน**สั่งหยุดท่าเก่า — ตัวเล่นซ้ำ (watchTrackEnds) เห็นว่าท่าเก่าไม่ใช่ท่าปัจจุบันแล้วจะไม่เล่นกลับ
 local function playPose(roamer: Roamer, pose: string)
 	local tracks = roamer.tracks
 	if tracks == nil or roamer.pose == pose then
@@ -101,13 +109,35 @@ local function playPose(roamer: Roamer, pose: string)
 	if nextTrack == roamer.playing then
 		return
 	end
-	if roamer.playing then
-		roamer.playing:Stop(POSE_FADE_SECONDS)
+	local previous = roamer.playing
+	roamer.playing = nextTrack
+	if previous then
+		previous:Stop(POSE_FADE_SECONDS)
 	end
 	if nextTrack then
-		nextTrack:Play(POSE_FADE_SECONDS, 1, roamer.animSpeed)
+		nextTrack:Play(POSE_FADE_SECONDS, 1, poseSpeed(roamer, nextTrack))
 	end
-	roamer.playing = nextTrack
+end
+
+-- ท่าที่ไม่ได้ตั้งให้วนในตัว asset (เช่นอนิเมชันตั้งต้นบางท่าของ Roblox) เล่นจบแล้วหยุด — จบแล้วยังเป็นท่าปัจจุบัน = เล่นใหม่
+-- ⚠️ ไม่ตั้ง AnimationTrack.Looped ฝั่ง server แทน: ค่านั้นไม่ส่งไป client → server วนอยู่คนเดียว ผู้เล่นเห็นท่าค้าง
+--   เล่นใหม่จาก server = Animator ส่งการเล่นรอบใหม่ให้ทุก client เอง · ท่าที่วนในตัว asset อยู่แล้ว Stopped ไม่ยิง = ไม่มีผล
+local function watchTrackEnds(roamer: Roamer)
+	local tracks = roamer.tracks
+	if tracks == nil then
+		return
+	end
+	for _, track in tracks do
+		table.insert(
+			roamer.trackConnections,
+			track.Stopped:Connect(function()
+				-- Length 0 = asset ยังโหลดไม่ได้/ไม่มีจริง → ไม่เล่นซ้ำ (กันวนเล่น-หยุดรัวทุกเฟรม)
+				if roamer.playing == track and roamer.visual.Parent ~= nil and track.Length > 0 then
+					track:Play(0, 1, poseSpeed(roamer, track))
+				end
+			end)
+		)
+	end
 end
 
 local pens: { Pen } = {}
@@ -240,7 +270,12 @@ end
 
 local function dropRoamersUnder(folder: Folder)
 	for index = #roamers, 1, -1 do
-		if roamers[index].visual:IsDescendantOf(folder) then
+		local roamer = roamers[index]
+		if roamer.visual:IsDescendantOf(folder) then
+			roamer.playing = nil -- ท่าที่กำลังเล่นหยุดตามโมเดลที่ถูกลบ — ห้ามเล่นซ้ำ
+			for _, connection in roamer.trackConnections do
+				connection:Disconnect()
+			end
 			table.remove(roamers, index)
 		end
 	end
@@ -605,9 +640,7 @@ local function loadPoseTracks(model: Model, animationIds: Config.CharacterAnimat
 			return animator:LoadAnimation(getAnimation(animationId))
 		end)
 		if ok and track then
-			-- ⚠️ ค่านี้ไม่ส่งไป client — ท่าที่ publish มาแบบไม่วนจะเล่นรอบเดียวแล้วค้างบนจอผู้เล่น
-			-- ต้องเปิด Loop ตอน publish ใน Animation Editor ด้วย
-			track.Looped = true
+			-- ⚠️ ไม่ตั้ง track.Looped (ค่านี้ไม่ส่งไป client) — ท่าที่ไม่วนในตัว asset เล่นใหม่เองตอนจบ (watchTrackEnds)
 			tracks[pose] = track
 		else
 			warn(`[PenService] โหลดอนิเมชันท่า {pose} ({animationId}) ไม่สำเร็จ: {track}`)
@@ -649,6 +682,7 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 		local tracks: { [string]: AnimationTrack }? = nil
 		local speed = MAP.Wander.Speed
 		local animSpeed = 1
+		local walkAnimScale = 1
 		local inset: number
 		local spot: Vector3
 
@@ -686,7 +720,13 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 			meshModel:PivotTo(CFrame.new(spot.X, restingY + pivotAboveCenter, spot.Z))
 			meshModel.Name = mother.uid
 			meshModel.Parent = pen.mothersFolder
-			tracks = loadPoseTracks(meshModel, if character then character.animationIds else nil)
+			-- อนิเมชัน: mesh = Character.animationIds · rig ที่ประกอบจาก Part = อนิเมชันตั้งต้นของ Roblox (MotherModels.getAnimations)
+			local animationIds: Config.CharacterAnimations? = if nativeHeight
+				then (if character then character.animationIds else nil)
+				else MotherModels.getAnimations(mother.charId) :: any
+			tracks = loadPoseTracks(meshModel, animationIds)
+			local blueprint = if nativeHeight == nil then MotherModels.getBlueprint(mother.charId) else nil
+			walkAnimScale = if blueprint and blueprint.walkAnimSpeed then blueprint.walkAnimSpeed else 1
 			visual = meshModel
 		else
 			-- ⚠️ ขนาดต่อตัว ไม่ใช่ค่าคงที่ร่วม — แม่แต่ละตัวหนักไม่เท่ากัน (Config.getMotherVisualSize)
@@ -764,9 +804,12 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 			restPoses = getRestPoses(tracks),
 			speed = speed,
 			animSpeed = animSpeed,
+			walkAnimScale = walkAnimScale,
+			trackConnections = {},
 			inset = inset,
 		}
 		-- เพิ่งเกิด = ยืนรอออกเดินรอบแรก
+		watchTrackEnds(roamer)
 		playPose(roamer, "idle")
 		pickNextTrip(roamer, roamer.waitUntil)
 		table.insert(roamers, roamer)
@@ -905,6 +948,7 @@ function PenService.debugShowcaseModels(): (boolean, string?)
 	local center = Config.getSpawnPoint()
 	local total = #Config.CharacterOrder
 	local summary: { string } = {}
+	local animated: { { model: Model, charId: string } } = {}
 
 	for index, charId in Config.CharacterOrder do
 		local character = Config.getCharacter(charId)
@@ -934,6 +978,10 @@ function PenService.debugShowcaseModels(): (boolean, string?)
 			model:PivotTo(CFrame.new(x, Config.getPenRestingY(boxSize.Y / 2) + pivotAboveCenter + lift, center.Z))
 			visual = model
 			depth, height = boxSize.Z, boxSize.Y
+			if nativeHeight == nil and MotherModels.getAnimations(charId) then
+				table.insert(animated, { model = model, charId = charId })
+				kind = "Part rig R6"
+			end
 		else
 			kind = "กล่องสำรอง"
 			local size = Config.getMotherVisualSize(SHOWCASE_WEIGHT, true)
@@ -950,13 +998,29 @@ function PenService.debugShowcaseModels(): (boolean, string?)
 		visual.Parent = folder
 
 		local parts = countParts(visual)
-		local detail = if kind == "Part" then `{parts} ชิ้น` elseif kind == "mesh" then `mesh {parts} ชิ้น` else "ยังไม่มีโมเดล/กำลังโหลด"
+		local detail = if kind == "Part" then `{parts} ชิ้น`
+			elseif kind == "Part rig R6" then `{parts} ชิ้น · rig R6`
+			elseif kind == "mesh" then `mesh {parts} ชิ้น`
+			else "ยังไม่มีโมเดล/กำลังโหลด"
 		local signPosition = Vector3.new(x, SHOWCASE_SIGN_SIZE.Y / 2, center.Z - depth / 2 - 1.2)
 		makeShowcaseSign(signPosition, `{character.name}\n{character.class} · {detail}`).Parent = folder
 		table.insert(summary, `{character.name} ({character.class}) {kind} {parts} ชิ้น สูง {string.format("%.1f", height)}`)
 	end
 
 	folder.Parent = Workspace
+	-- rig: เล่นท่ายืนของ Roblox วนไปเรื่อย ๆ (LoadAnimation ต้องหลังเข้า Workspace) · ท่าไม่วนในตัว = เล่นใหม่ตอนจบ
+	for _, entry in animated do
+		local tracks = loadPoseTracks(entry.model, MotherModels.getAnimations(entry.charId) :: any)
+		local idle = tracks and tracks.idle
+		if idle then
+			idle.Stopped:Connect(function()
+				if entry.model.Parent ~= nil and idle.Length > 0 then
+					idle:Play(0)
+				end
+			end)
+			idle:Play()
+		end
+	end
 	local text = table.concat(summary, " · ")
 	print(`[PenService] debugShowcaseModels: วาง {#summary} ตัวที่ทางเดินกลาง (ยืนฝั่ง −Z หันหน้าเข้าหา) — {text}`)
 	return true, text

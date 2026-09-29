@@ -1,5 +1,5 @@
 --!strict
--- egg-army-game :: โมเดลตัวละครแม่ที่ประกอบจาก Part ในโค้ด (11 ตัว · ลิงยังเป็น mesh จาก Character.modelAssetId)
+-- egg-army-game :: โมเดลตัวละครแม่ที่ประกอบจาก Part ในโค้ด (ครบ 12 ตัว · ลิงเปลี่ยนจาก mesh มาเป็นแบบนี้แล้ว)
 --
 -- สไตล์: บล็อกน่ารัก หัวโต (chibi) · ใช้แค่ Part ธรรมดา (Block/Ball/Cylinder) + WedgePart · ไม่มี asset ภายนอก · ไม่มี Union
 -- ⚠️ หน้าตาออกแบบเองจากภาพไซอิ๋วแบบทั่วไป — **ห้ามเลียนแบบตัวละครจากการ์ตูน/เกมที่มีลิขสิทธิ์**
@@ -16,6 +16,13 @@
 --   · Cylinder แกนยาว = X · Y = Z เสมอ (หมุนเอาเองด้วย rot)
 --   · Wedge ด้านสูงอยู่ +Z ด้านเตี้ย (สันศูนย์) อยู่ −Z · ≤ PART_LIMIT ชิ้นต่อตัว
 --   · rot = องศา (rx, ry, rz) แบบ CFrame.Angles (หมุน Z → Y → X ในกรอบโลก)
+--
+-- ══ rig R6 (ลิง · ผู้ใช้สั่ง "ทำ rig + ใช้อนิเมชันของ Roblox") ══
+--   แบบที่มี `rig = "R6"` ต้องมีชิ้นชื่อตรง R6 ครบ 7 ชิ้น (HumanoidRootPart · Torso · Head · Right/Left Arm · Right/Left Leg)
+--   → build() ต่อ Motor6D 6 ตัวชื่อ/ทิศตาม rig R6 มาตรฐานของ Roblox เป๊ะ (เฉพาะจุดหมุนขยับตามขนาดชิ้นของเรา · computeR6Joints)
+--   → **อนิเมชันตั้งต้นของ Roblox (R6) เล่นได้เลย** (เป็นของ Roblox → ทุกเกมใช้ได้ · R6_ANIMATIONS) ผ่าน AnimationController
+--     (⚠️ ไม่ใช่ Humanoid — กฎเดิม "ห้ามใช้ Humanoid กับแม่") · ชิ้นตกแต่งเชื่อมกับชิ้น rig ด้วย Weld (`attach`)
+--   → HumanoidRootPart (ใส · ไม่มีตัวตน) เป็น PrimaryPart และ**ชิ้นเดียวที่ Anchored** — ชิ้นอื่นขยับตามข้อต่อ (อนิเมชันขยับได้)
 --
 -- ⚠️ ไฟล์นี้**ไม่แตะ Roblox API ตอน require** (ข้อมูลล้วน + ฟังก์ชันคำนวณ) — เทสต์นอก Studio ได้
 --   build() เท่านั้นที่สร้าง Instance (เรียกจาก server ตอนบูต — PenService ใส่ต้นแบบลง ReplicatedStorage.MotherModelTemplates)
@@ -37,14 +44,47 @@ export type PartSpec = {
 	color: Vec, -- RGB 0–255
 	material: string?, -- ชื่อ Enum.Material · nil = SmoothPlastic
 	primary: boolean?,
+	transparency: number?, -- nil = 0 (ทึบ)
+	-- rig เท่านั้น: ชื่อชิ้น rig ที่ชิ้นตกแต่งนี้ติดไปด้วย (Weld) — ชิ้น rig เองไม่มี
+	attach: string?,
 }
 
--- "hop" = กระเด้งเบา ๆ ตอนเดิน (ไม่มีอนิเมชัน) · "float" = ลอยเหนือพื้นแล้วขยับขึ้นลงตลอด (ปลา)
-export type Motion = "hop" | "float"
+-- "hop" = กระเด้งเบา ๆ ตอนเดิน (ไม่มีอนิเมชัน) · "float" = ลอยเหนือพื้นแล้วขยับขึ้นลงตลอด (ปลา) ·
+-- "animated" = rig เล่นอนิเมชันจริง (ไม่กระเด้งเอง)
+export type Motion = "hop" | "float" | "animated"
 
 export type Blueprint = {
 	motion: Motion,
 	parts: { PartSpec },
+	rig: "R6"?, -- มี = ต่อข้อต่อ R6 + เล่นอนิเมชัน R6 ของ Roblox
+	-- ความเร็วเล่นท่าเดินที่ tier 1 (rig) — อนิเมชันเดิน R6 ของ Roblox ตั้งมาที่ 14.5 studs/วิ ขายาว 2 ·
+	-- แม่เดิน 4 studs/วิ ขาสั้นกว่า → ช้าลงให้เท้าไม่ไถล (ตัวใหญ่ PenService ช้าลงอีก √s เหมือนเดิม)
+	walkAnimSpeed: number?,
+}
+
+-- ══ rig R6 ══ ชื่อชิ้น + ข้อต่อ + ทิศข้อต่อ **ตาม rig R6 มาตรฐานของ Roblox** (อนิเมชัน R6 อ้างชื่อชิ้น + หมุนรอบแกนของข้อต่อ)
+-- ทิศ (เมทริกซ์ 3×3 แบบ CFrame.new(x, y, z, R00…R22)) ห้ามแก้ — แก้แล้วอนิเมชันหมุนผิดแกน (ขาแกว่งออกข้างแทนหน้า-หลัง)
+MotherModels.R6_PARTS = { "HumanoidRootPart", "Torso", "Head", "Right Arm", "Left Arm", "Right Leg", "Left Leg" }
+local R6_ROOT_ROTATION = { -1, 0, 0, 0, 0, 1, 0, 1, 0 }
+local R6_RIGHT_ROTATION = { 0, 0, 1, 0, 1, 0, -1, 0, 0 }
+local R6_LEFT_ROTATION = { 0, 0, -1, 0, 1, 0, 1, 0, 0 }
+export type JointSpec = {
+	name: string,
+	part0: string,
+	part1: string,
+	c0: Vec, -- จุดหมุนในกรอบของ part0 (ตำแหน่งเท่านั้น · ทิศ = rotation)
+	c1: Vec, -- จุดหมุนในกรอบของ part1
+	rotation: { number }, -- 9 ค่า
+}
+
+-- อนิเมชันตั้งต้นของ Roblox สำหรับ rig R6 (จากสคริปต์ Animate R6 ของ Roblox · เจ้าของคือ Roblox → ใช้ได้ทุกเกม)
+-- ท่าที่ PenService ใช้: walk ตอนเดิน · idle/punch วนตอนหยุดพัก (ดู REST_POSE_ORDER)
+-- ⚠️ ไม่ใส่ sit (178130996) — ท่านั่งของ R6 ต้องมีที่นั่ง ไม่มีแล้วขาเหยียดลอยกลางอากาศ
+-- ท่าอื่นที่มีให้ใช้ถ้าอยากเพิ่ม: wave 128777973 · cheer 129423030 · laugh 129423131 · dance 182435998 · point 128853357
+MotherModels.R6_ANIMATIONS = {
+	walk = 180426354,
+	idle = 180435571,
+	punch = 129967390, -- toolslash: เหวี่ยงแขนขวา (ใกล้ท่าต่อยที่สุดของชุดตั้งต้น)
 }
 
 -- ท่าขยับ (สัดส่วนของความสูงตัวที่วาดจริง — ตัวใหญ่ขยับมากตาม · PenService คูณเอง)
@@ -68,6 +108,8 @@ local function spec(shape: Shape, name: string, size: Vec, pos: Vec, color: Vec,
 		out.rot = extra.rot
 		out.material = extra.material
 		out.primary = extra.primary
+		out.transparency = extra.transparency
+		out.attach = extra.attach
 	end
 	return out
 end
@@ -90,9 +132,10 @@ local function wedge(name: string, sx: number, sy: number, sz: number, x: number
 	return spec("Wedge", name, { sx, sy, sz }, { x, y, z }, color, extra)
 end
 
--- กระจกเงาข้ามระนาบ X = 0 (ชิ้นซ้าย ↔ ขวา) — หมุนรอบ Y และ Z กลับทิศ รอบ X คงเดิม
+-- กระจกเงาข้ามระนาบ X = 0 (ชิ้นซ้าย ↔ ขวา) — หมุนรอบ Y และ Z กลับทิศ รอบ X คงเดิม · ติดกับแขน/ขาขวา → ซ้าย
 local function mirror(source: PartSpec, name: string): PartSpec
 	local rot = source.rot
+	local attach = source.attach
 	return {
 		name = name,
 		shape = source.shape,
@@ -102,6 +145,8 @@ local function mirror(source: PartSpec, name: string): PartSpec
 		color = source.color,
 		material = source.material,
 		primary = nil,
+		transparency = source.transparency,
+		attach = if attach then (string.gsub(attach, "^Right ", "Left ")) else nil,
 	}
 end
 
@@ -127,6 +172,8 @@ local function assemble(entries: { Entry }): { PartSpec }
 				rot = right.rot,
 				color = right.color,
 				material = right.material,
+				transparency = right.transparency,
+				attach = right.attach,
 			})
 			table.insert(parts, mirror(right, baseName .. "L"))
 		else
@@ -202,6 +249,39 @@ local FACING = { 0, 90, 0 } -- ทรงกระบอกหันหน้า 
 --------------------------------------------------------------------------------
 
 local BLUEPRINTS: { [string]: Blueprint } = {}
+
+-- ══ C · ลิง ══ (ผู้ใช้สั่ง: เลิกใช้ mesh เดิม · ทำใหม่เป็นบล็อกเข้าชุด + rig R6 เล่นอนิเมชันของ Roblox)
+-- ขนน้ำตาล · หน้า/พุง/มือ/เท้าสีครีม · หูกลมใหญ่ · หางม้วนขึ้น · ไม่มีเสื้อผ้า (ต่างจากซุนหงอคงที่ใส่ชุด+รัดเกล้า)
+-- ⚠️ ชิ้น rig ห้ามหมุน (จุดหมุนข้อต่อคำนวณจากกล่องของชิ้น) · ชิ้นตกแต่งทุกชิ้นต้องมี attach
+BLUEPRINTS.monkey = {
+	motion = "animated",
+	rig = "R6",
+	walkAnimSpeed = 0.55, -- = 4 ÷ 14.5 × (2 ÷ ขายาว 1.1) ≈ 0.5 · ปัดขึ้นให้ก้าวถี่นิด ๆ แบบลิง
+	parts = assemble({
+		block("HumanoidRootPart", 1.0, 1.0, 0.6, 0, 1.8, 0, COLOR.brown, { primary = true, transparency = 1 }),
+		block("Torso", 1.7, 1.4, 1.0, 0, 1.8, 0, COLOR.brown),
+		block("Head", 2.3, 2.0, 2.0, 0, 3.5, 0, COLOR.brown),
+		block("Right Arm", 0.55, 1.3, 0.6, 1.125, 1.85, 0, COLOR.brown),
+		block("Left Arm", 0.55, 1.3, 0.6, -1.125, 1.85, 0, COLOR.brown),
+		block("Right Leg", 0.7, 1.1, 0.75, 0.45, 0.55, 0, COLOR.brown),
+		block("Left Leg", 0.7, 1.1, 0.75, -0.45, 0.55, 0, COLOR.brown),
+		-- หน้า
+		block("Face", 1.7, 1.45, 0.1, 0, 3.4, -1.03, COLOR.tan, { attach = "Head" }),
+		block("Muzzle", 1.0, 0.55, 0.35, 0, 2.95, -1.2, COLOR.tan, { attach = "Head" }),
+		block("Nose", 0.3, 0.12, 0.06, 0, 3.1, -1.39, COLOR.brownDark, { attach = "Head" }),
+		block("Mouth", 0.45, 0.08, 0.06, 0, 2.86, -1.39, COLOR.brownDark, { attach = "Head" }),
+		pair(block("Eye", 0.25, 0.32, 0.08, 0.4, 3.62, -1.1, COLOR.eye, { attach = "Head" })),
+		pair(cyl("Ear", 0.18, 0.85, 1.22, 3.5, 0, COLOR.tan, { attach = "Head" })),
+		wedge("HairTuft", 0.5, 0.35, 0.6, 0, 4.67, -0.3, COLOR.brownDark, { attach = "Head" }),
+		-- ตัว
+		block("Belly", 1.1, 1.0, 0.08, 0, 1.75, -0.52, COLOR.tan, { attach = "Torso" }),
+		pair(ball("Hand", 0.55, 1.125, 1.2, 0, COLOR.tan, { attach = "Right Arm" })),
+		pair(block("Foot", 0.72, 0.2, 0.9, 0.45, 0.1, -0.1, COLOR.tan, { attach = "Right Leg" })),
+		block("Tail1", 0.26, 1.2, 0.26, 0, 1.3, 0.85, COLOR.brown, { rot = { 60, 0, 0 }, attach = "Torso" }),
+		block("Tail2", 0.26, 1.0, 0.26, 0, 2.05, 1.45, COLOR.brown, { rot = { 10, 0, 0 }, attach = "Torso" }),
+		ball("TailTip", 0.36, 0, 2.6, 1.5, COLOR.brownDark, { attach = "Torso" }),
+	}),
+}
 
 -- ══ C · หมู ══ ตัวกลมสีชมพู จมูกแบน หูตก หางขด
 BLUEPRINTS.pig = {
@@ -502,6 +582,67 @@ function MotherModels.listCharIds(): { string }
 	return ids
 end
 
+-- ท่าอนิเมชันของตัวที่เป็น rig (nil = ไม่มี rig · ใช้ท่ากระเด้ง/ลอยแทน)
+function MotherModels.getAnimations(charId: string): { [string]: number }?
+	local blueprint = BLUEPRINTS[charId]
+	if blueprint and blueprint.rig == "R6" then
+		return MotherModels.R6_ANIMATIONS
+	end
+	return nil
+end
+
+-- ข้อต่อ R6 จากขนาด/ตำแหน่งชิ้น rig (ท่ายืนตรง) — จุดหมุนตามสัดส่วนของ rig R6 มาตรฐาน:
+--   RootJoint กลาง Torso · Neck ขอบบน Torso · Shoulder ขอบข้าง Torso ต่ำจากบนแขนเท่าครึ่งความกว้างแขน ·
+--   Hip ขอบล่าง Torso ที่ขอบนอกของขา · c0/c1 = จุดหมุน − กลางชิ้น (ชิ้น rig ไม่หมุน)
+-- ⚠️ กับขนาด R6 จริง (Torso 2×2×1 · แขน/ขา 1×2×1 · หัว 2×1×1) ได้ C0/C1 ตรงกับของ Roblox ทุกข้อ (tests/models.spec.luau)
+function MotherModels.computeR6Joints(parts: { PartSpec }): { JointSpec }?
+	local byName: { [string]: PartSpec } = {}
+	for _, part in parts do
+		byName[part.name] = part
+	end
+	for _, name in MotherModels.R6_PARTS do
+		if not byName[name] then
+			return nil
+		end
+	end
+	local function center(name: string): Vec
+		return byName[name].pos
+	end
+	local function half(name: string, axis: number): number
+		return byName[name].size[axis] / 2
+	end
+	local function joint(name: string, part0: string, part1: string, point: Vec, rotation: { number }): JointSpec
+		local c0, c1 = center(part0), center(part1)
+		return {
+			name = name,
+			part0 = part0,
+			part1 = part1,
+			c0 = { point[1] - c0[1], point[2] - c0[2], point[3] - c0[3] },
+			c1 = { point[1] - c1[1], point[2] - c1[2], point[3] - c1[3] },
+			rotation = rotation,
+		}
+	end
+	local torso = center("Torso")
+	local torsoTop = torso[2] + half("Torso", 2)
+	local torsoBottom = torso[2] - half("Torso", 2)
+	local function shoulder(side: number, armName: string): Vec
+		local arm = center(armName)
+		return { torso[1] + side * half("Torso", 1), arm[2] + half(armName, 2) - half(armName, 1), arm[3] }
+	end
+	local function hip(side: number, legName: string): Vec
+		local leg = center(legName)
+		return { leg[1] + side * half(legName, 1), torsoBottom, leg[3] }
+	end
+	return {
+		joint("RootJoint", "HumanoidRootPart", "Torso", torso, R6_ROOT_ROTATION),
+		joint("Neck", "Torso", "Head", { torso[1], torsoTop, torso[3] }, R6_ROOT_ROTATION),
+		joint("Right Shoulder", "Torso", "Right Arm", shoulder(1, "Right Arm"), R6_RIGHT_ROTATION),
+		joint("Left Shoulder", "Torso", "Left Arm", shoulder(-1, "Left Arm"), R6_LEFT_ROTATION),
+		joint("Right Hip", "Torso", "Right Leg", hip(1, "Right Leg"), R6_RIGHT_ROTATION),
+		joint("Left Hip", "Torso", "Left Leg", hip(-1, "Left Leg"), R6_LEFT_ROTATION),
+	}
+end
+
 function MotherModels.getPartCount(charId: string): number
 	local blueprint = BLUEPRINTS[charId]
 	return if blueprint then #blueprint.parts else 0
@@ -570,8 +711,47 @@ function MotherModels.validate(): { string }
 		table.insert(problems, message)
 	end
 	for charId, blueprint in BLUEPRINTS do
-		if blueprint.motion ~= "hop" and blueprint.motion ~= "float" then
-			fail(`{charId}: motion ต้องเป็น "hop" หรือ "float"`)
+		local isRig = blueprint.rig == "R6"
+		if blueprint.rig ~= nil and not isRig then
+			fail(`{charId}: rig รองรับแค่ "R6"`)
+		end
+		if isRig and blueprint.motion ~= "animated" then
+			fail(`{charId}: rig ต้องใช้ motion = "animated" (เล่นอนิเมชันจริง ไม่กระเด้งเอง)`)
+		end
+		if not isRig and blueprint.motion ~= "hop" and blueprint.motion ~= "float" then
+			fail(`{charId}: motion ต้องเป็น "hop" หรือ "float" (ไม่มี rig)`)
+		end
+		if isRig then
+			local partNames: { [string]: PartSpec } = {}
+			for _, part in blueprint.parts do
+				partNames[part.name] = part
+			end
+			for _, rigName in MotherModels.R6_PARTS do
+				local rigPart = partNames[rigName]
+				if not rigPart then
+					fail(`{charId}: rig R6 ขาดชิ้น "{rigName}"`)
+				elseif rigPart.rot or rigPart.attach then
+					fail(`{charId}.{rigName}: ชิ้น rig ห้ามหมุนและห้ามมี attach`)
+				end
+			end
+			local root = partNames.HumanoidRootPart
+			if root and not root.primary then
+				fail(`{charId}: HumanoidRootPart ต้องเป็น PrimaryPart (ชิ้นเดียวที่ Anchored)`)
+			end
+			for _, part in blueprint.parts do
+				if table.find(MotherModels.R6_PARTS, part.name) == nil then
+					local target = part.attach
+					if target == nil or partNames[target] == nil or table.find(MotherModels.R6_PARTS, target) == nil then
+						fail(`{charId}.{part.name}: ชิ้นตกแต่งของ rig ต้อง attach กับชิ้น rig (ได้ {tostring(target)})`)
+					end
+				end
+			end
+		else
+			for _, part in blueprint.parts do
+				if part.attach then
+					fail(`{charId}.{part.name}: attach ใช้ได้เฉพาะแบบที่เป็น rig`)
+				end
+			end
 		end
 		if #blueprint.parts > MotherModels.PART_LIMIT then
 			fail(`{charId}: {#blueprint.parts} ชิ้น เกินเพดาน {MotherModels.PART_LIMIT}`)
@@ -616,15 +796,19 @@ end
 -- สร้าง Instance (Roblox เท่านั้น)
 --------------------------------------------------------------------------------
 
--- สร้างโมเดลจากแบบ — nil = charId นี้ไม่มีแบบ · ทุกชิ้น Anchored · CanCollide/CanTouch/CanQuery ปิด · Massless
--- (เหมือนที่ PenService บังคับกับโมเดล mesh: ขยับด้วย PivotTo ล้วน ผู้เล่นเดินทะลุได้)
+-- สร้างโมเดลจากแบบ — nil = charId นี้ไม่มีแบบ · CanCollide/CanTouch/CanQuery ปิด · Massless ทุกชิ้น
+-- ไม่มี rig: ทุกชิ้น Anchored (เหมือนที่ PenService บังคับกับโมเดล mesh: ขยับด้วย PivotTo ล้วน ผู้เล่นเดินทะลุได้)
+-- rig R6: Anchored แค่ HumanoidRootPart · ชิ้น rig ต่อ Motor6D (ทิศ R6) · ชิ้นตกแต่ง Weld กับชิ้นที่ attach
+--   ⚠️ ตั้ง CFrame ทุกชิ้นให้ตรงท่ายืนก่อนต่อข้อต่อ — ต้นแบบใน ReplicatedStorage/ViewportFrame ไม่มีฟิสิกส์มาจัดให้
 function MotherModels.build(charId: string): Model?
 	local blueprint = BLUEPRINTS[charId]
 	if not blueprint then
 		return nil
 	end
+	local isRig = blueprint.rig == "R6"
 	local model = Instance.new("Model")
 	model.Name = charId
+	local built: { [string]: BasePart } = {}
 	for _, partSpec in blueprint.parts do
 		local part: BasePart
 		if partSpec.shape == "Wedge" then
@@ -646,14 +830,42 @@ function MotherModels.build(charId: string): Model?
 		part.Material = (Enum.Material :: any)[partSpec.material or "SmoothPlastic"]
 		part.TopSurface = Enum.SurfaceType.Smooth
 		part.BottomSurface = Enum.SurfaceType.Smooth
-		part.Anchored = true
+		part.Transparency = partSpec.transparency or 0
+		part.Anchored = not isRig or partSpec.name == "HumanoidRootPart"
 		part.CanCollide = false
 		part.CanTouch = false
 		part.CanQuery = false
 		part.Massless = true
 		part.Parent = model
+		built[partSpec.name] = part
 		if partSpec.primary then
 			model.PrimaryPart = part
+		end
+	end
+	if isRig then
+		-- ข้อต่อ R6: ชื่อ + part0/part1 + ทิศตาม rig มาตรฐาน (อนิเมชันของ Roblox หาข้อต่อจากชื่อชิ้น)
+		for _, jointSpec in MotherModels.computeR6Joints(blueprint.parts) :: { JointSpec } do
+			local r = jointSpec.rotation
+			local motor = Instance.new("Motor6D")
+			motor.Name = jointSpec.name
+			motor.Part0 = built[jointSpec.part0]
+			motor.Part1 = built[jointSpec.part1]
+			motor.C0 = CFrame.new(jointSpec.c0[1], jointSpec.c0[2], jointSpec.c0[3], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9])
+			motor.C1 = CFrame.new(jointSpec.c1[1], jointSpec.c1[2], jointSpec.c1[3], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9])
+			motor.Parent = built[jointSpec.part0]
+		end
+		-- ชิ้นตกแต่งติดกับชิ้น rig ที่ attach (Weld แบบกำหนด C0 เอง — แน่นอนกว่า WeldConstraint ตอนยังไม่อยู่ใน Workspace)
+		for _, partSpec in blueprint.parts do
+			local target = partSpec.attach
+			if target then
+				local part0, part1 = built[target], built[partSpec.name]
+				local weld = Instance.new("Weld")
+				weld.Name = "Attach"
+				weld.Part0 = part0
+				weld.Part1 = part1
+				weld.C0 = part0.CFrame:Inverse() * part1.CFrame
+				weld.Parent = part1
+			end
 		end
 	end
 	-- pivot = เท้ากลางตัว หันหน้า −Z (ลำตัวไม่หมุน → กล่องล้อมรอบแนวเดียวกับ pivot)

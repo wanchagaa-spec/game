@@ -33,7 +33,7 @@ return function(t, Config)
 	end
 
 	----------------------------------------------------------------------------
-	print("── ทุกตัวละครมีโมเดล: mesh (ลิง) หรือประกอบจาก Part (11 ตัว) · ไม่มีแบบเกิน ──")
+	print("── ทุกตัวละครมีโมเดลประกอบจาก Part ครบ 12 ตัว (ลิงเลิกใช้ mesh แล้ว) · ไม่มีแบบเกิน ──")
 	----------------------------------------------------------------------------
 	do
 		local missing, both, partCount = {}, {}, 0
@@ -52,9 +52,10 @@ return function(t, Config)
 			end
 		end
 		check("ทุก charId ใน Config มีโมเดล", table.concat(missing, ","), "")
-		check("  ไม่มีตัวไหนมีทั้ง mesh และแบบ Part (ลิงคง mesh เดิม)", table.concat(both, ","), "")
-		check("  ประกอบจาก Part 11 ตัว", partCount, 11)
-		check("  ลิงยังเป็น mesh เดิม (ไม่ถูกเปลี่ยน)", Config.getCharacter("monkey").modelAssetId, 109724272624838)
+		check("  ไม่มีตัวไหนมีทั้ง mesh และแบบ Part", table.concat(both, ","), "")
+		check("  ประกอบจาก Part ครบ 12 ตัว", partCount, 12)
+		check("  ลิงเลิกใช้ mesh (ไม่มี modelAssetId/animationIds แล้ว)",
+			Config.getCharacter("monkey").modelAssetId == nil and Config.getCharacter("monkey").animationIds == nil, true)
 		local stray = {}
 		for _, charId in MotherModels.listCharIds() do
 			if Config.getCharacter(charId) == nil then
@@ -62,8 +63,8 @@ return function(t, Config)
 			end
 		end
 		check("  ไม่มีแบบของ charId ที่ไม่มีใน Config", table.concat(stray, ","), "")
-		check("ชื่อต้นแบบ: mesh = เลข asset (เดิม)", Config.getMotherTemplateName("monkey"), "109724272624838")
-		check("  ประกอบจาก Part = charId", Config.getMotherTemplateName("pig"), "pig")
+		check("ชื่อต้นแบบ: ประกอบจาก Part = charId", Config.getMotherTemplateName("monkey"), "monkey")
+		check("  (หมู)", Config.getMotherTemplateName("pig"), "pig")
 	end
 
 	----------------------------------------------------------------------------
@@ -130,5 +131,80 @@ return function(t, Config)
 		end
 		print(`   tier 7: {table.concat(report, " · ")}`)
 		print(`   กว้างสุด = {worstId} ครึ่งเส้นทแยง {string.format("%.1f", worst)} / ในรั้ว {innerHalf}`)
+	end
+
+	----------------------------------------------------------------------------
+	print("── rig R6 (ลิง): ข้อต่อตรง rig R6 มาตรฐานของ Roblox · อนิเมชันตั้งต้นของ Roblox ──")
+	----------------------------------------------------------------------------
+	do
+		local function vecEq(a, b)
+			return math.abs(a[1] - b[1]) < 1e-9 and math.abs(a[2] - b[2]) < 1e-9 and math.abs(a[3] - b[3]) < 1e-9
+		end
+		-- rig R6 ขนาดจริงของ Roblox (ยืนตรง · กลางลำตัว Y = 3) → ต้องได้ C0/C1 เท่ากับ rig R6 ตั้งต้นทุกข้อ
+		local function rigPart(name, sx, sy, sz, x, y)
+			return { name = name, shape = "Block", size = { sx, sy, sz }, pos = { x, y, 0 }, color = { 0, 0, 0 } }
+		end
+		local standard = MotherModels.computeR6Joints({
+			rigPart("HumanoidRootPart", 2, 2, 1, 0, 3),
+			rigPart("Torso", 2, 2, 1, 0, 3),
+			rigPart("Head", 2, 1, 1, 0, 4.5),
+			rigPart("Right Arm", 1, 2, 1, 1.5, 3),
+			rigPart("Left Arm", 1, 2, 1, -1.5, 3),
+			rigPart("Right Leg", 1, 2, 1, 0.5, 1),
+			rigPart("Left Leg", 1, 2, 1, -0.5, 1),
+		})
+		-- ค่าจาก rig R6 ตั้งต้นของ Roblox (C0 / C1 ตำแหน่ง)
+		local expected = {
+			RootJoint = { { 0, 0, 0 }, { 0, 0, 0 } },
+			Neck = { { 0, 1, 0 }, { 0, -0.5, 0 } },
+			["Right Shoulder"] = { { 1, 0.5, 0 }, { -0.5, 0.5, 0 } },
+			["Left Shoulder"] = { { -1, 0.5, 0 }, { 0.5, 0.5, 0 } },
+			["Right Hip"] = { { 1, -1, 0 }, { 0.5, 1, 0 } },
+			["Left Hip"] = { { -1, -1, 0 }, { -0.5, 1, 0 } },
+		}
+		local rotations = {
+			RootJoint = { -1, 0, 0, 0, 0, 1, 0, 1, 0 },
+			Neck = { -1, 0, 0, 0, 0, 1, 0, 1, 0 },
+			["Right Shoulder"] = { 0, 0, 1, 0, 1, 0, -1, 0, 0 },
+			["Left Shoulder"] = { 0, 0, -1, 0, 1, 0, 1, 0, 0 },
+			["Right Hip"] = { 0, 0, 1, 0, 1, 0, -1, 0, 0 },
+			["Left Hip"] = { 0, 0, -1, 0, 1, 0, 1, 0, 0 },
+		}
+		check("rig ขนาดมาตรฐาน: ได้ 6 ข้อต่อ", standard and #standard, 6)
+		for _, joint in standard or {} do
+			local want = expected[joint.name]
+			check(`  {joint.name}: C0/C1 ตรง rig R6 ของ Roblox`, want ~= nil and vecEq(joint.c0, want[1]) and vecEq(joint.c1, want[2]), true)
+			check(`  {joint.name}: ทิศข้อต่อตรง R6`, table.concat(joint.rotation, ","), table.concat(rotations[joint.name], ","))
+		end
+		check("ขาดชิ้น rig → nil", MotherModels.computeR6Joints({ rigPart("Torso", 2, 2, 1, 0, 3) }), nil)
+
+		local monkey = MotherModels.getBlueprint("monkey")
+		check("ลิงเป็น rig R6", monkey.rig, "R6")
+		check("  motion = animated (ไม่กระเด้งเอง)", monkey.motion, "animated")
+		local byName = {}
+		for _, part in monkey.parts do
+			byName[part.name] = part
+		end
+		local joints = MotherModels.computeR6Joints(monkey.parts)
+		check("  ข้อต่อครบ 6", joints and #joints, 6)
+		local consistent = true
+		for _, joint in joints or {} do
+			-- ท่ายืน: กลาง part1 = กลาง part0 + c0 − c1 (ชิ้นวางตรงข้อต่อพอดี ไม่มีอะไรกระโดดตอนต่อข้อ)
+			local p0, p1 = byName[joint.part0].pos, byName[joint.part1].pos
+			local want = { p0[1] + joint.c0[1] - joint.c1[1], p0[2] + joint.c0[2] - joint.c1[2], p0[3] + joint.c0[3] - joint.c1[3] }
+			if not vecEq(want, p1) then
+				consistent = false
+			end
+		end
+		check("  ท่ายืนตรงกับข้อต่อทุกข้อ", consistent, true)
+		check("  HumanoidRootPart = PrimaryPart ใส (ไม่เห็น)", byName.HumanoidRootPart.primary == true and byName.HumanoidRootPart.transparency == 1, true)
+		local _, _, size = MotherModels.getBounds("monkey")
+		check(`  สูง {string.format("%.2f", size[2])} ≈ 5 (เท่าลิง mesh เดิม · MOTHER_MESH_BASE_HEIGHT)`, size[2] > 4.5 and size[2] < 5.5, true)
+		local animations = MotherModels.getAnimations("monkey")
+		check("อนิเมชันของ Roblox: เดิน 180426354", animations and animations.walk, 180426354)
+		check("  ยืน 180435571", animations and animations.idle, 180435571)
+		check("  เหวี่ยงแขน (punch) 129967390", animations and animations.punch, 129967390)
+		check("  ไม่ใส่ท่านั่ง (R6 ต้องมีที่นั่ง ไม่งั้นขาลอย)", animations and animations.sit, nil)
+		check("ตัวที่ไม่มี rig → ไม่มีอนิเมชัน", MotherModels.getAnimations("pig"), nil)
 	end
 end

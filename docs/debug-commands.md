@@ -249,7 +249,7 @@ EggService.debugWipeSavedData(player, player.Name)  -- ต้องส่งช�
 | `debugBossStatus()` | ดูสถานะอย่างเดียว ไม่เปลี่ยนอะไร — บรรทัดแรก phase/เวลา/ล็อก · ตามด้วยบรรทัดละห้อง (HP · ผู้ทำดาเมจ · ไข่) |
 | `debugBossEggs(room?)` | น้ำหนัก · วาง/ถือ/เก็บแล้ว · ใครถือ ของไข่ + บอกว่าหยิบได้หรือยัง · ใส่ห้อง = ห้องเดียว · **ไม่ใส่ = ทุกห้อง** |
 | `debugBossAttack(on)` (5D) | เปิด/ปิด**บอสฟาด**ทั้งเซิร์ฟชั่วคราว · รับ `true/false` · `"on"/"off"` · `1/0` · ปิด = วงแดงที่ง้างค้างหายทันที ไม่มีใครโดน · ไม่แตะ `BossCycle.BOSS_ATTACK_ENABLED` (เซิร์ฟเปิดใหม่กลับเป็นค่าใน Config = เปิด) · ค่าแปลก = ไม่แตะอะไร |
-| `debugSetHealth(player, n)` (5D) | ตั้งเลือดผู้เล่น 0–เลือดเต็ม (100) · นับเป็น "เพิ่งโดนตี" → ยังไม่ฟื้นจนไม่โดนตีครบ 5 วิ · ⚠️ ยืนในเซฟโซน = เต็มทันทีใน 0.25 วิ (กติกา) — ทดสอบฟื้นเลือดให้ยืนในเลน · `0` = ตาย (ในสนามรบ → เกิดหน้าทางเข้าเลน · ในเซฟโซน → คอก) |
+| `debugSetHealth(player, n)` (5D) | ตั้งเลือดผู้เล่น 0–เลือดเต็ม (100) · นับเป็น "เพิ่งโดนตี" → ยังไม่ฟื้นจนไม่โดนตีครบ 10 วิ แล้วฟื้นทีละนิด (20/วิ) · ⚠️ ยืนในเซฟโซน = เต็มทันทีใน 0.25 วิ (กติกา) — ทดสอบฟื้นเลือดให้ยืนในเลน · `0` = ตาย (ในสนามรบ → เกิดหน้าทางเข้าเลน · ในเซฟโซน → คอก) |
 
 ```lua
 local P1 = game.Players:GetPlayers()[1]
@@ -266,7 +266,7 @@ print(game.ServerStorage.EggServiceDebug:Invoke("debugBossEggs"))         -- ท
 print(game.ServerStorage.EggServiceDebug:Invoke("debugBossEggs", 3))      -- ห้อง 3
 print(game.ServerStorage.EggServiceDebug:Invoke("debugBossAttack", false)) -- 5D: ปิดบอสฟาดทั้งเซิร์ฟ (ตีบอสสบาย ๆ)
 print(game.ServerStorage.EggServiceDebug:Invoke("debugBossAttack", true))  -- 5D: เปิดกลับ
-print(game.ServerStorage.EggServiceDebug:Invoke("debugSetHealth", P1, 40)) -- 5D: เลือด 40 (ฟื้นเต็มเมื่อไม่โดนตี 5 วิ)
+print(game.ServerStorage.EggServiceDebug:Invoke("debugSetHealth", P1, 40)) -- 5D: เลือด 40 (ไม่โดนตี 10 วิแล้วฟื้นทีละนิด)
 print(game.ServerStorage.EggServiceDebug:Invoke("debugSetHealth", P1, 0))  -- 5D: ตายทันที (ทดสอบจุดเกิดใหม่)
 ```
 

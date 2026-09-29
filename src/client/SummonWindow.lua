@@ -522,8 +522,9 @@ local function refreshConfirm()
 	local childLine = if children > 0
 		then `ลูก {children} กอง ปล่อยตามลำดับที่ติ๊ก`
 		else "ไม่ได้ติ๊กลูก — ลูกจะไม่ถูกปล่อย"
-	confirmText.Text =
-		`ส่งแม่ {mothers} ตัว — แม่ทุกตัวจะตายถาวรทันทีที่ด่านที่กำลังตีพัง ดึงกลับไม่ได้\n\n{childLine}`
+	-- 5E-1 (ผู้ใช้สั่ง): แม่ลงสนามจริงแล้ว โดนศัตรู/ป้อมฆ่าระหว่างรบได้ + ที่รอดตายหมดตอนด่านพัง (กติกาเดิม)
+	confirmText.Text = `ส่งแม่ {mothers} ตัว — แม่อาจตายถาวรระหว่างรบ (โดนศัตรู/ป้อมยิง)`
+		.. ` และแม่ที่เหลือทั้งหมดจะตายถาวรทันทีที่ด่านที่กำลังตีพัง ดึงกลับไม่ได้\n\n{childLine}`
 end
 
 refreshHeader = function()
@@ -538,7 +539,13 @@ refreshHeader = function()
 
 	local summoning = payload.summonEnabled == true
 	local stage = if payload.activeStage then `ด่าน {payload.activeStage}` else "ผ่านครบทุกด่านแล้ว"
-	statusLabel.Text = `{if summoning then "🟢 กำลังอัญเชิญ" else "⏸ หยุดอยู่"} · ด่านที่กำลังตี: {stage}`
+	-- 5E-1 (ค3): สนามว่าง → server รอพร้อมปล่อยครบ GATHER_SIZE ก่อนลงสนาม · ตัวเลขมาจาก server (payload.battle)
+	local battle = payload.battle
+	local summonText = if not summoning
+		then "⏸ หยุดอยู่"
+		elseif battle and battle.gathering then `⏳ กำลังรวมพล {battle.available}/{battle.gatherTarget}`
+		else "🟢 กำลังอัญเชิญ"
+	statusLabel.Text = `{summonText} · ด่านที่กำลังตี: {stage}`
 		.. ` · แม่ในสนามรบ {rosterCount()}/{MAX_BATTLE_MOTHERS}`
 
 	-- ⚠️ Phase 5A: รวมเหตุผลทุกข้อที่บล็อกอยู่ (ไม่แทนที่กัน) — ล็อกบอสขึ้นก่อนเพราะเป็นตัวที่ห้ามกดส่งจริง

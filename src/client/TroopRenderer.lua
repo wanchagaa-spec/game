@@ -1,70 +1,63 @@
 --!strict
--- egg-army-game :: โมเดลทหารฝ่ายเรา/ฝ่ายรับระหว่างการรบ (Phase 3B-1 — ภาพประกอบ ยังไม่ polish)
+-- egg-army-game :: สนามรบ 6 ต่อ 6 (5E-1 — ภาพชั่วคราวพอให้ทดสอบใน Studio · โมเดลจริงทำ 5E-2)
 --
--- ⚠️ **โมเดลที่เห็นเป็นภาพประกอบ ไม่ใช่ตัวแทนจริงของ damage** — CombatService (3A) คำนวณ
--- damage เป็นก้อนรวมต่อ tick ไม่มีแนวคิด "ทหารตัวที่ 47 ตีตอนไหน" การเดิน/สปอนของโมเดลที่นี่
--- จึงเป็นแค่ simulation ฝั่ง client ล้วน ๆ ไม่ผูกกับ event การตีจริงจาก server แบบ 1:1 —
--- แค่ทำให้ "รู้สึกสอดคล้อง" กับอัตราปล่อยจริง (Config.getReleaseRate) เท่านั้น
+-- ⚠️ วาดตาม **สถานะจริงจาก server** (payload.battle ใน FarmStateSync ~1 ครั้ง/วิ) ไม่จำลองอะไรเองแล้ว
+--   ช่อง 1..6 ฝั่งเรา (ช่อง 1 = หน้าสุด · ช่อง 6 = หลังสุด ที่แม่ยืน) ยืนตรงข้ามศัตรูช่องเดียวกัน
+--   ศัตรูยืนแถวหน้ากำแพงด่านที่กำลังตี · ตัวใหญ่ใหญ่กว่า · ศัตรูหมด = ทหารเราเดินเข้าไปตีกำแพง
+--   แถบเลือดเหนือหัวทุกตัว · ป้อม = กล่องบนกำแพง + เส้นยิงสั้น ๆ ไปที่ตัวที่โดน
+-- ⚠️ ไม่ตัดสินอะไรเลย (server เป็นเจ้าของทุกอย่าง) · ตัวไหน "ใหม่" ดูจากเลือดที่เพิ่มขึ้น/ชนิดเปลี่ยน
 --
--- ⚠️ **ห้ามใช้ Humanoid** — เหตุผลเดียวกับ PenService (แม่เดินในคอก): ทหารเต็มจอ (สูงสุด
--- MAX_VISIBLE_UNITS ต่อฝ่าย) × ผู้เล่นเต็มเซิร์ฟ = Humanoid หลักร้อยตัว หนักเกินไปมาก
--- ใช้โมเดลคนบล็อก ๆ ประกอบจาก Part (หัว-ลำตัว-แขน-ขา แบบ Roblox classic) แล้วขยับทั้งก้อน
--- ด้วย Model:PivotTo() แทน — เหมือนหลักการเดียวกับ CFrame lerp ที่ PenService ใช้กับตัวแม่
---
--- ⚠️ แสดงเฉพาะทหารของผู้เล่นคนนั้นเอง (FarmStateSync ยิงหาเจ้าของข้อมูลเท่านั้นอยู่แล้ว
--- จึงไม่ต้องกรองเพิ่ม) และวาดฝั่ง client เท่านั้นด้วยเหตุผลเดียวกับ WallRenderer
+-- ⚠️ **ห้ามใช้ Humanoid** — โมเดลคนบล็อก ๆ ประกอบจาก Part ขยับทั้งก้อนด้วย Model:PivotTo()
+-- ⚠️ ทหารบนจอสูงสุด 12 ตัว (6 + 6) + ป้อม 1 — เบากว่าเดิมมาก (เดิมสูงสุด 120 ต่อฝ่าย)
+-- ⚠️ แสดงเฉพาะของผู้เล่นคนนั้นเอง (FarmStateSync ยิงหาเจ้าของข้อมูลเท่านั้น) · วาดฝั่ง client เหมือน WallRenderer
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local Debris = game:GetService("Debris")
 local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage.Shared.Config)
--- ⚠️ Phase 3B-2: เอฟเฟกต์ตอนทหารฝ่ายรับตาย (แทนที่จะ pop หายเฉย ๆ) — ดูเหตุผล require
--- แบบ WaitForChild เดียวกับที่ Main.client.lua ใช้กับไฟล์นี้เอง (StarterPlayerScripts
--- ก็อปมาเป็น PlayerScripts ช้ากว่าที่สคริปต์นี้เริ่มทำงาน)
 local CombatEffects = require(script.Parent:WaitForChild("CombatEffects"))
 
 local TroopRenderer = {}
 
 local MAP = Config.MapDimensions
 local COMBAT = Config.Balance.Combat
+local SLOTS = COMBAT.FIELD_SLOTS
 
--- ⚠️ ใช้ค่าเดียวกับที่ Config.getVisibleUnitCount() สมมติไว้แล้ว (WALK_SECONDS_TO_WALL = 30)
--- ไม่งั้นจำนวนโมเดลที่ "ควรจะ" ลอยอยู่พร้อมกันตามสูตรนั้น กับที่ TroopRenderer สปอนจริง
--- จะคนละตัวเลขกัน — เดินด้วยเวลาคงที่ ไม่ใช่ความเร็วคงที่ (ระยะทางต่างกันมากตามด่านที่ตีอยู่
--- ด่าน 2 ห่างจากจุดปล่อยแค่ ~180 studs ด่าน 9 ห่างเกือบ 1,600 studs) — ยอมรับว่าความเร็วที่เห็น
--- จะไม่เท่ากันทุกด่าน เพราะเป็นแค่ simulation ไม่ใช่ของจริง (ดูคอมเมนต์หัวไฟล์)
-local WALK_SECONDS = COMBAT.WALK_SECONDS_TO_WALL
+-- สี/ขนาด/ระยะ — เรื่องหน้าตาล้วน ไม่กระทบกติกา (ค่าคงที่ท้องถิ่นแบบ WALL_COLOR ใน WallRenderer)
+local CHILD_COLOR = Color3.fromRGB(70, 200, 90)
+local MOTHER_COLOR = Color3.fromRGB(245, 195, 60)
+local ENEMY_COLOR = Color3.fromRGB(170, 45, 45)
+local BIG_ENEMY_SCALE = 1.7
+local MOTHER_SCALE = 1.25
+local ENEMY_LINE_GAP = 10 -- แถวศัตรูห่างจากกำแพง
+local LINE_GAP = 9 -- แถวเราห่างจากแถวศัตรู
+local RANK_STEP = 1.5 -- ช่องหลัง ๆ ถอยหลังนิดหน่อย (แม่ยืนหลังสุด)
+local WALL_ATTACK_GAP = 6 -- ศัตรูหมดแล้ว ทหารเรายืนห่างกำแพงเท่านี้
+local MOVE_LERP_PER_SECOND = 6
+local SWING_SPEED = 9
+local SWING_DISTANCE = 0.6
+local HP_BAR_WIDTH = 3.2
+local HP_BAR_HEIGHT = 0.35
+local HP_OUR_COLOR = Color3.fromRGB(80, 220, 110)
+local HP_ENEMY_COLOR = Color3.fromRGB(235, 70, 70)
+local TURRET_COLOR = Color3.fromRGB(60, 62, 70)
+local SHOT_COLOR = Color3.fromRGB(255, 170, 60)
+local SHOT_SECONDS = 0.2
 
--- ⚠️ Phase 3B-2: sync เดียวลดจำนวนโมเดลได้มากสุดถึง MAX_VISIBLE_UNITS ตัวพร้อมกัน (เช่น สต็อกใหญ่
--- ปล่อยรวดเดียวจบทั้งด่าน) — เล่นเอฟเฟกต์ตายจริงแค่ไม่กี่ตัวแรกต่อรอบ sync พอ ไม่งั้นเกิด
--- ParticleEmitter เป็นร้อยตัวพร้อมกันในเฟรมเดียว ("ต้องเบา" ตามที่สั่ง) ตัวที่เหลือยัง pop หายปกติ
-local DEATH_EFFECT_CAP_PER_UPDATE = 12
-
-local OUR_COLOR = Color3.fromRGB(70, 200, 90)
-local DEFENDER_COLOR = Color3.fromRGB(150, 45, 45)
-
--- ทรงคน blockout แบบคลาสสิก (หัว-ลำตัว-แขน-ขา) — ตัวเลขล้วนเรื่อง "หน้าตา" ไม่กระทบกติกา
--- เก็บเป็นค่าคงที่ท้องถิ่นแบบเดียวกับ WALL_COLOR ใน WallRenderer.lua ไม่ต้องขึ้น Config
--- (คนละเรื่องกับ Config.MapDimensions.Blockout ที่ผูกกับตารางน้ำหนัก/tier ของไข่-แม่)
+-- ทรงคน blockout (หัว-ลำตัว-แขน-ขา) · เว้นช่องระหว่างชิ้นให้ตาแยกออก
 local LIMB_SIZE = Vector3.new(1, 2, 1)
 local TORSO_SIZE = Vector3.new(2, 2, 1)
 local HEAD_SIZE = Vector3.new(1.2, 1.2, 1.2)
-
--- ⚠️ ช่องว่างระหว่างชิ้นส่วน — เดิมไม่มีเลย (ขาสองข้างชนกันพอดีที่กึ่งกลาง แขนชิดผิวลำตัว
--- พอดีเป๊ะที่ความสูงเดียวกับลำตัว ขาชนสะโพกพอดีไม่มีรอยต่อ) ทำให้ Torso+ArmL+ArmR+LegL+LegR
--- กลืนเป็นแท่งทึบก้อนเดียว เห็นแค่หัว (ทรงกลม) แยกออกมาชัด — ใส่ช่องว่างเล็ก ๆ ตรงนี้แทน
--- เพื่อให้ตาแยกออกว่าเป็นหัว-ลำตัว-แขน 2-ขา 2 จริง ไม่ต้องเป๊ะเหมือนโมเดลจริง
-local LEG_GAP = 0.2 -- ช่องว่างระหว่างขาซ้าย-ขวา (แนวนอน)
-local ARM_GAP = 0.2 -- ช่องว่างระหว่างขอบลำตัวกับแขน (แนวนอน)
-local HIP_GAP = 0.2 -- ช่องว่างระหว่างขอบบนขากับขอบล่างลำตัว (แนวตั้ง — รอยต่อ "สะโพก")
-
--- ความสูงจากพื้น (Y=0) ของจุดศูนย์กลางแต่ละชิ้น — ขายังวางแตะพื้นพอดีเป๊ะเหมือนเดิม
--- (LEG_CENTER_Y ไม่เปลี่ยน — HIP_GAP เพิ่มระยะห่างด้วยการยกลำตัว/หัวขึ้นแทน ไม่ใช่ยืด/หดขา)
+local LEG_GAP = 0.2
+local ARM_GAP = 0.2
+local HIP_GAP = 0.2
 local LEG_CENTER_Y = LIMB_SIZE.Y / 2
 local TORSO_CENTER_Y = LIMB_SIZE.Y + HIP_GAP + TORSO_SIZE.Y / 2
 local HEAD_CENTER_Y = LIMB_SIZE.Y + HIP_GAP + TORSO_SIZE.Y + HEAD_SIZE.Y / 2
+local MODEL_HEIGHT = HEAD_CENTER_Y + HEAD_SIZE.Y / 2
 
 --------------------------------------------------------------------------------
 -- โฟลเดอร์ — แบบเดียวกับ WallRenderer (กัน StarterPlayerScripts→PlayerScripts ก็อปซ้อน)
@@ -76,13 +69,11 @@ local function ensureFolder(): Folder
 	if folder and folder.Parent then
 		return folder
 	end
-
 	local existing = Workspace:FindFirstChild("LocalTroops")
 	if existing and existing:IsA("Folder") then
 		folder = existing
 		return existing
 	end
-
 	local created = Instance.new("Folder")
 	created.Name = "LocalTroops"
 	created.Parent = Workspace
@@ -90,23 +81,18 @@ local function ensureFolder(): Folder
 	return created
 end
 
-local function ensureSubFolder(name: string): Folder
-	local parent = ensureFolder()
-	local existing = parent:FindFirstChild(name)
-	if existing and existing:IsA("Folder") then
-		return existing
-	end
-	local created = Instance.new("Folder")
-	created.Name = name
-	created.Parent = parent
-	return created
-end
+--------------------------------------------------------------------------------
+-- โมเดลคน blockout + แถบเลือด
+--------------------------------------------------------------------------------
 
---------------------------------------------------------------------------------
--- โมเดลคน blockout — ประกอบครั้งเดียว วางที่ (0, y, 0) แล้วประกาศ pivot ที่จุดแตะพื้น (0,0,0)
--- เพื่อให้ PivotTo(cframe) ในภายหลังย้ายทั้งก้อนโดยให้ "เท้า" ไปอยู่ตรง cframe เป๊ะ
--- (ไม่ใช่ default pivot ที่อิง PrimaryPart ซึ่งจะเอาลำตัวไปวางตรงจุดนั้นแทน แล้วขาจมพื้น)
---------------------------------------------------------------------------------
+type Unit = {
+	model: Model,
+	fill: Frame,
+	kind: string,
+	hp: number,
+	target: CFrame,
+	scale: number,
+}
 
 local function buildPersonModel(color: Color3, name: string): Model
 	local model = Instance.new("Model")
@@ -119,7 +105,9 @@ local function buildPersonModel(color: Color3, name: string): Model
 		p.Color = color
 		p.Anchored = true
 		p.CanCollide = false
-		p.CastShadow = false -- ⚠️ สูงสุด ~240 ตัวต่อคน × 6 ชิ้น/ตัว — ปิดเงากันภาระเรนเดอร์
+		p.CanQuery = false
+		p.CanTouch = false
+		p.CastShadow = false
 		p.Material = Enum.Material.SmoothPlastic
 		p.TopSurface = Enum.SurfaceType.Smooth
 		p.BottomSurface = Enum.SurfaceType.Smooth
@@ -130,325 +118,274 @@ local function buildPersonModel(color: Color3, name: string): Model
 
 	local torso = part("Torso", TORSO_SIZE, 0, TORSO_CENTER_Y)
 	model.PrimaryPart = torso
-
 	local head = part("Head", HEAD_SIZE, 0, HEAD_CENTER_Y)
-	head.Shape = Enum.PartType.Ball -- ⚠️ Shape=Ball ต้องตั้งขนาดเท่ากันทั้งสามแกน (กฎเดียวกับไข่)
-
-	-- ⚠️ ARM_GAP/LEG_GAP เว้นช่องว่างจริงจากขอบลำตัว/จากกึ่งกลางตามลำดับ — ไม่ใช่ชิดขอบพอดีเป๊ะ
-	-- เหมือนเดิมที่ทำให้แขน/ขากลืนเป็นก้อนเดียวกับลำตัว (ดูคอมเมนต์ตรงค่าคงที่ด้านบน)
+	head.Shape = Enum.PartType.Ball -- ⚠️ Shape=Ball ต้องตั้งขนาดเท่ากันทั้งสามแกน
 	part("ArmL", LIMB_SIZE, -(TORSO_SIZE.X / 2 + ARM_GAP + LIMB_SIZE.X / 2), TORSO_CENTER_Y)
 	part("ArmR", LIMB_SIZE, TORSO_SIZE.X / 2 + ARM_GAP + LIMB_SIZE.X / 2, TORSO_CENTER_Y)
 	part("LegL", LIMB_SIZE, -(LEG_GAP / 2 + LIMB_SIZE.X / 2), LEG_CENTER_Y)
 	part("LegR", LIMB_SIZE, LEG_GAP / 2 + LIMB_SIZE.X / 2, LEG_CENTER_Y)
-
-	-- ประกาศ pivot ที่จุดแตะพื้น (world origin ตอนสร้าง = (0,0,0)) โดยไม่ขยับชิ้นไหนเลย
+	-- pivot ที่จุดแตะพื้น → PivotTo วาง "เท้า" ตรงจุดเป๊ะ
 	model.WorldPivot = CFrame.new(0, 0, 0)
-
 	return model
 end
 
---------------------------------------------------------------------------------
--- ด่านที่กำลังตี → ตำแหน่ง X เป้าหมาย (กำแพง หรือปลายช่วงด่านถ้าด่านนั้นไม่มีกำแพง เช่นด่าน 1)
---------------------------------------------------------------------------------
+-- แถบเลือดเหนือหัว — ⚠️ ขนาดเป็น studs ในโลก (fromScale) ไม่ใช่พิกเซล (tools/check-billboard-world-size.py)
+local function attachHpBar(model: Model, color: Color3, scale: number): Frame
+	local head = model:FindFirstChild("Head") :: BasePart
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.fromScale(HP_BAR_WIDTH * scale, HP_BAR_HEIGHT * scale)
+	billboard.Name = "HpBar"
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, (HEAD_SIZE.Y / 2 + 0.8) * scale, 0)
+	billboard.AlwaysOnTop = false
+	billboard.LightInfluence = 0
+	billboard.Adornee = head
+	billboard.Parent = model
 
-local function getStageTargetX(stage: number): number
-	local wallX = Config.getWallX(stage)
-	if wallX then
-		return wallX
-	end
-	return Config.getStageStartX(stage) + MAP.Lane.LengthPerStage
+	local back = Instance.new("Frame")
+	back.Size = UDim2.fromScale(1, 1)
+	back.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
+	back.BackgroundTransparency = 0.2
+	back.BorderSizePixel = 0
+	back.Parent = billboard
+
+	local fill = Instance.new("Frame")
+	fill.Name = "Fill"
+	fill.Size = UDim2.fromScale(1, 1)
+	fill.BackgroundColor3 = color
+	fill.BorderSizePixel = 0
+	fill.Parent = back
+	return fill
 end
 
---------------------------------------------------------------------------------
--- ทหารฝ่ายเรา — สปอนที่จุดปล่อย เดินเข้าไปหาด่านที่กำลังตี
---
--- ⚠️ ถ้ามีทหารฝ่ายรับ "ยืนรอ" อยู่ (idle ใน defenderModels) ตอนสปอน จะดึงมาเดินออกมาพบกันกึ่งกลาง
--- เลนแทนที่จะเดินยาวไปกำแพงตรง ๆ — ทั้งคู่หายไปตอนถึงจุดชน (ดูรายละเอียดที่ spawnOurTroop
--- และ updateOurTroops) ถ้าไม่มีทหารฝ่ายรับเหลือให้ดึง (targetCount = 0 หรือดึงไปหมดแล้วชั่วคราว)
--- เดินยาวไปกำแพงเลยเหมือน 3B-1 เดิม ไม่มีอะไรผิดปกติ — เป็นพฤติกรรมที่ตั้งใจ
---------------------------------------------------------------------------------
-
-type OurTroop = {
-	model: Model,
-	from: Vector3,
-	to: Vector3,
-	spawnedAt: number, -- os.clock()
-	-- ⚠️ ทหารฝ่ายรับที่ถูกดึงมาเดินออกมาชนคู่กับทหารตัวนี้ (nil = ไม่มีคู่ เดินยาวไปกำแพงเลย)
-	-- เดิน/หายไปพร้อมกันโดยใช้ alpha เดียวกับทหารเรา (ดู updateOurTroops) ไม่ต้องมี array
-	-- ติดตามแยกต่างหาก
-	pairedDefender: Model?,
-	defenderFrom: Vector3?, -- ตำแหน่งยืนเดิมของ pairedDefender ก่อนถูกดึงออกมาเดิน
-}
-
-local ourTroops: { OurTroop } = {}
-local spawnCarry = 0
-
--- ⚠️ ประกาศล่วงหน้าตรงนี้ (แทนที่จะประกาศในหัวข้อ "ทหารฝ่ายรับ" ข้างล่างเหมือนเดิม) เพราะ
--- spawnOurTroop ต้องดึงโมเดลจากพูลนี้มาจับคู่เดินออกมาชน — รายละเอียดวิธีใช้อยู่ในหัวข้อ
--- "ทหารฝ่ายรับ" ตามเดิม ย้ายมาแค่จุดประกาศตัวแปรเท่านั้น
-local defenderModels: { Model } = {}
-local lastDefenderStage: number? = nil
-
--- ⚠️ UI-3: นับเฉพาะกองที่ติ๊กให้ปล่อย (releaseOrder) — กองที่ไม่ติ๊กไม่ถูกปล่อยจริง ภาพจึงห้ามเดินออกมาเอง
-local function releasableStock(payload: any): number
-	local ordered: { [string]: boolean } = {}
-	for _, key in payload.releaseOrder or {} do
-		ordered[key] = true
+local function newUnit(kind: string, target: CFrame, isEnemy: boolean): Unit
+	local color = if isEnemy then ENEMY_COLOR elseif kind == "mother" then MOTHER_COLOR else CHILD_COLOR
+	local scale = if kind == "big" then BIG_ENEMY_SCALE elseif kind == "mother" then MOTHER_SCALE else 1
+	local model = buildPersonModel(color, if isEnemy then "Enemy" else "Troop")
+	if scale ~= 1 then
+		model:ScaleTo(scale)
 	end
-	local total = 0
-	for _, stack in payload.children do
-		if ordered[stack.key] then
-			total += stack.count
-		end
-	end
-	return total
-end
-
-local function spawnOurTroop(stage: number)
-	local oursFolder = ensureSubFolder("Ours")
-
-	-- UI-3: โผล่บนแท่นอัญเชิญ (5B-fix: แท่นย้ายเข้าเลนที่ X 177 · เดิม X 148 — ภาพล้วน เวลาเดินคงที่ 30 วิเท่าเดิม)
-	-- แล้วค่อยกระจายออกทั้งความกว้างเลนระหว่างเดิน · ภาพล้วน ไม่ผูกกับการรบ
-	local pedestal = Config.getSummonPedestalCenter()
-	local startX = pedestal.X
-	local startHalf = MAP.SummonPedestal.CoreDiameter / 2 * 0.8
-	local startZ = pedestal.Z + (math.random() * 2 - 1) * startHalf
-	-- ⚠️ เว้นขอบจากผนังเลนทั้งสองข้างกันโมเดลโผล่ทะลุกำแพงข้างเลน
-	local laneHalf = math.max(MAP.Lane.Width / 2 - 6, 1)
-	local z = (math.random() * 2 - 1) * laneHalf
-
-	local wallX = getStageTargetX(stage)
-	local from = Vector3.new(startX, 0, startZ)
-	local to = Vector3.new(wallX, 0, z)
-
-	-- ⚠️ ดึงทหารฝ่ายรับที่ยืนรออยู่ (ถ้ามี) ออกจากพูล defenderModels มาเดินออกมาชนกึ่งกลางเลน
-	-- — ดึงออกจากพูลเดิม ไม่ใช่สร้างเพิ่ม ไม่งั้นจำนวนที่โชว์รวมกันจะเกินสัดส่วน defendersRemaining
-	-- จริง พูลที่พร่องไปจะถูกเติมกลับเองในรอบ sync ถัดไปถ้า targetCount ยังไม่ถึง 0 (updateDefenders)
-	local pairedDefender: Model? = nil
-	local defenderFrom: Vector3? = nil
-	if #defenderModels > 0 then
-		local defenderModel = table.remove(defenderModels)
-		if defenderModel then
-			pairedDefender = defenderModel
-			defenderFrom = defenderModel:GetPivot().Position
-			-- ⚠️ จุด "ชนกัน" กึ่งกลางระหว่างแท่นอัญเชิญกับกำแพงด่านที่กำลังตี — ปรับตามความยาว
-			-- เลนจริงของด่านนั้นเองเพราะ wallX เปลี่ยนไปตามด่าน (ด่าน 2 ใกล้กว่าด่าน 9 มาก)
-			to = Vector3.new((startX + wallX) / 2, 0, z)
-		end
-	end
-
-	local model = buildPersonModel(OUR_COLOR, "Troop")
-	model.Parent = oursFolder
-	model:PivotTo(CFrame.new(from))
-
-	table.insert(ourTroops, {
+	model.Parent = ensureFolder()
+	-- ตัวใหม่เดินเข้าช่องจากด้านหลังแถวของตัวเอง (+Z ของโมเดล = ด้านหลัง · ภาพล้วน)
+	model:PivotTo(target * CFrame.new(0, 0, 4))
+	return {
 		model = model,
-		from = from,
-		to = to,
-		spawnedAt = os.clock(),
-		pairedDefender = pairedDefender,
-		defenderFrom = defenderFrom,
-	})
+		fill = attachHpBar(model, if isEnemy then HP_ENEMY_COLOR else HP_OUR_COLOR, scale),
+		kind = kind,
+		hp = math.huge,
+		target = target,
+		scale = scale,
+	}
 end
 
--- ⚠️ ถึงจุดชน (หรือถึงกำแพงถ้าไม่มีคู่) แล้วทำลาย pairedDefender ไปด้วยเงียบ ๆ ไม่มี burst —
--- จำลองว่าปะทะกันตาย ต่างจาก pattern เดิมใน 3B-2 (CombatEffects.onDefenderDeath) ที่ใช้กับกรณี
--- defendersRemaining ลดจริงจาก sync เท่านั้น ไม่ใช่กรณีจำลองการชนแบบ visual ล้วน ๆ นี้
-local function destroyTroopPair(troop: OurTroop)
-	troop.model:Destroy()
-	if troop.pairedDefender and troop.pairedDefender.Parent then
-		troop.pairedDefender:Destroy()
+local function removeUnit(unit: Unit, withEffect: boolean)
+	if withEffect and unit.model.Parent then
+		CombatEffects.onDefenderDeath(unit.model:GetPivot().Position + Vector3.new(0, MODEL_HEIGHT * unit.scale / 2, 0))
 	end
-end
-
-local function updateOurTroops()
-	local now = os.clock()
-	for index = #ourTroops, 1, -1 do
-		local troop = ourTroops[index]
-		if troop.model.Parent == nil then
-			if troop.pairedDefender and troop.pairedDefender.Parent then
-				troop.pairedDefender:Destroy()
-			end
-			table.remove(ourTroops, index)
-			continue
-		end
-
-		local alpha = (now - troop.spawnedAt) / WALK_SECONDS
-		if alpha >= 1 then
-			destroyTroopPair(troop)
-			table.remove(ourTroops, index)
-		else
-			local position = troop.from:Lerp(troop.to, alpha)
-			local direction = troop.to - troop.from
-			local cf = if direction.Magnitude > 0.01
-				then CFrame.lookAt(position, position + direction.Unit)
-				else CFrame.new(position)
-			troop.model:PivotTo(cf)
-
-			-- ⚠️ ใช้ alpha เดียวกับทหารเรา — เดินจากจุดยืนเดิมมาบรรจบที่จุดชนเดียวกันพอดี
-			-- ทั้งสองฝั่งถึงพร้อมกันเป๊ะ (alpha=1 พร้อมกัน) โดยไม่ต้องเช็คระยะห่างจริงเลย
-			if troop.pairedDefender and troop.defenderFrom and troop.pairedDefender.Parent then
-				local defenderPosition = troop.defenderFrom:Lerp(troop.to, alpha)
-				local defenderDirection = troop.to - troop.defenderFrom
-				local defenderCf = if defenderDirection.Magnitude > 0.01
-					then CFrame.lookAt(defenderPosition, defenderPosition + defenderDirection.Unit)
-					else CFrame.new(defenderPosition)
-				troop.pairedDefender:PivotTo(defenderCf)
-			end
-		end
-	end
-end
-
--- อัตราสปอน ≈ อัตราปล่อยจริงของด่าน (ไม่ต้องเป๊ะ — ดูคอมเมนต์หัวไฟล์) หยุดสปอนถ้า:
--- ปิดปุ่มอัญเชิญ · ไม่มีด่านให้ตี (ผ่านครบแล้ว) · กองที่ติ๊กว่างหมด · โมเดลชนเพดาน MAX_VISIBLE_UNITS
-local function updateSpawning(payload: any?, delta: number)
-	if not payload then
-		return
-	end
-	if not payload.summonEnabled then
-		return
-	end
-	local stage = payload.activeStage
-	if not stage then
-		return
-	end
-	if releasableStock(payload) <= 0 then
-		return
-	end
-
-	local rate = Config.getReleaseRate(stage)
-	spawnCarry += rate * delta
-	while spawnCarry >= 1 do
-		spawnCarry -= 1
-		if #ourTroops < COMBAT.MAX_VISIBLE_UNITS then
-			spawnOurTroop(stage)
-		end
-	end
+	unit.model:Destroy()
 end
 
 --------------------------------------------------------------------------------
--- ทหารฝ่ายรับ — พูล "ยืนรอ" หน้ากำแพงด่านที่กำลังถูกตี จำนวนในพูลลดตามสัดส่วน defendersRemaining
---
--- ⚠️ ตัวที่ยืนรออยู่ในพูลนี้ (defenderModels — ประกาศไว้ก่อน spawnOurTroop ข้างบนแล้ว) อาจถูก
--- spawnOurTroop ดึงออกไปเดินออกมาชนกับทหารเราได้ตลอดเวลา (ดูหัวข้อ "ทหารฝ่ายเรา") จำนวนที่
--- พร่องไปจากการดึงจะถูกเติมกลับเองที่นี่ในรอบ sync ถัดไป ตราบใดที่ targetCount (คำนวณจาก
--- defendersRemaining จริง) ยังไม่ถึง 0 — ไม่ต้องมี logic พิเศษเพิ่มสำหรับกรณีนี้เลย
+-- ตำแหน่งช่อง
 --------------------------------------------------------------------------------
 
-local function defenderRatio(payload: any, stage: number): number
-	local info = payload.stageProgress[stage]
-	if type(info) ~= "table" or info.started ~= true then
-		return 1 -- ยังไม่เคยแตะด่านนี้ = ทหารฝ่ายรับเต็มจำนวน
-	end
-	if info.defendersTotal <= 0 then
-		return 0 -- ด่านที่ไม่มีทหารฝ่ายรับเลย (ด่าน 1)
-	end
-	return info.defendersRemaining / info.defendersTotal
+local function slotZ(slot: number, x: number): number
+	local laneHalf = math.max(Config.getLaneHalfWidthAt(x) - 6, 1)
+	local spacing = math.min(8, laneHalf * 2 / math.max(SLOTS - 1, 1))
+	return (slot - (SLOTS + 1) / 2) * spacing
 end
 
--- ⚠️ ตัวที่ยืนรอ (idle) ใน defenderModels ถูกเคลียร์เป็น 0 ตัวได้เองอยู่แล้วตอน targetCount=0
--- (ลูป shrink ข้างล่าง) แต่ตัวที่ถูก spawnOurTroop ดึงออกไป "เดินออกมาชน" แล้ว (เก็บอยู่ใน
--- ourTroops[i].pairedDefender ไม่ใช่ defenderModels อีกต่อไป) จะไม่ถูกแตะเลย — เดินต่อไปจนครบ
--- WALK_SECONDS ของตัวเอง (สูงสุด 30 วิ) ทั้งที่ defendersRemaining จริงเป็น 0 ไปแล้ว ผู้เล่นจึงเห็น
--- ทหารฝ่ายรับ "ยังสู้อยู่" หลังตายจริงไปแล้ว — ฟังก์ชันนี้กวาดทิ้งทันทีตอน targetCount เป็น 0
--- (เล่นเอฟเฟกต์ตายตามปกติ ไม่ pop เฉย ๆ) แล้วให้ทหารเราที่เหลือเดินทะลุไปกำแพงต่อแบบไม่มีคู่ปะทะ
--- (path เดียวกับตอนไม่มีทหารฝ่ายรับให้จับคู่ตั้งแต่แรกใน spawnOurTroop)
-local function retreatOrphanedDefenders(stage: number?)
-	local wallX = if stage then getStageTargetX(stage) else nil
-	local deathEffectsPlayed = 0
-
-	for _, troop in ourTroops do
-		local defender = troop.pairedDefender
-		if defender then
-			if defender.Parent and deathEffectsPlayed < DEATH_EFFECT_CAP_PER_UPDATE then
-				CombatEffects.onDefenderDeath(defender:GetPivot().Position)
-				deathEffectsPlayed += 1
-			end
-			defender:Destroy()
-			troop.pairedDefender = nil
-			troop.defenderFrom = nil
-
-			-- ⚠️ เริ่มเดินใหม่จากตำแหน่งปัจจุบันจริง (กันโมเดลกระโดดไปตำแหน่งอื่น) ไปกำแพงแทน
-			-- จุดชนเดิมที่ไม่มีอะไรให้ชนแล้ว — รีสตาร์ตนาฬิกาเดิน (ยอมรับว่าความเร็วที่เห็นจะไม่
-			-- คงเส้นคงวา เพราะทั้งไฟล์นี้เป็นแค่ simulation ไม่ใช่ของจริงอยู่แล้ว — ดูคอมเมนต์หัวไฟล์)
-			if wallX then
-				local currentPosition = troop.model:GetPivot().Position
-				troop.from = currentPosition
-				troop.to = Vector3.new(wallX, 0, currentPosition.Z)
-				troop.spawnedAt = os.clock()
-			end
-		end
-	end
+-- หันหน้าไปทาง +X (ฝั่งเรา) / −X (ศัตรู) — CFrame.lookAt มองตามแกน −Z ของโมเดล
+local function facing(position: Vector3, towardX: number): CFrame
+	return CFrame.lookAt(position, Vector3.new(towardX, position.Y, position.Z))
 end
 
-local function updateDefenders(payload: any?)
-	local stage = if payload then payload.activeStage else nil
+local function ourTarget(slot: number, wallX: number, enemiesPresent: boolean): CFrame
+	local enemyX = wallX - ENEMY_LINE_GAP
+	local frontX = if enemiesPresent then enemyX - LINE_GAP else wallX - WALL_ATTACK_GAP
+	local x = frontX - (slot - 1) * RANK_STEP
+	return facing(Vector3.new(x, 0, slotZ(slot, x)), wallX + 100)
+end
 
-	-- ด่านที่กำลังตีเปลี่ยนไป (หรือผ่านครบทุกด่านแล้ว) → เคลียร์ของเก่าทิ้งแล้ววางใหม่ทั้งชุด
-	-- (ตำแหน่งผูกกับด่านเดิม ใช้ต่อกับด่านใหม่ไม่ได้) ระหว่างด่านเดิม ปรับแค่ "จำนวน" ไม่ขยับ
-	-- ตัวที่เหลืออยู่แล้ว กันโมเดลกระโดดตำแหน่งทุกครั้งที่ sync มา (ทุก ~1 วิ)
-	if stage ~= lastDefenderStage then
-		for _, model in defenderModels do
-			model:Destroy()
-		end
-		defenderModels = {}
-		lastDefenderStage = stage
-	end
-
-	local targetCount = 0
-	local targetX = 0
-	if stage and payload then
-		targetCount = math.min(Config.getDisplayModelCount(defenderRatio(payload, stage)), COMBAT.MAX_VISIBLE_UNITS)
-		targetX = getStageTargetX(stage)
-	end
-
-	-- ⚠️ targetCount=0 ↔ defendersRemaining<=0 เป๊ะ (Config.getDisplayModelCount คืน 0 ตรง ๆ
-	-- ตอน ratio<=0) เรียกซ้ำได้ปลอดภัยทุก sync — รอบแรกกวาดของค้าง รอบถัดไปไม่มีอะไรให้กวาดแล้ว
-	if targetCount == 0 then
-		retreatOrphanedDefenders(stage)
-	end
-
-	local deathEffectsPlayed = 0
-
-	while #defenderModels > targetCount do
-		local model = table.remove(defenderModels)
-		if model then
-			if deathEffectsPlayed < DEATH_EFFECT_CAP_PER_UPDATE then
-				-- ⚠️ ตำแหน่งเดิมของโมเดลก่อนทำลาย — ต้องอ่านก่อน Destroy เสมอ
-				CombatEffects.onDefenderDeath(model:GetPivot().Position)
-				deathEffectsPlayed += 1
-			end
-			model:Destroy()
-		end
-	end
-
-	if targetCount > #defenderModels then
-		local defendersFolder = ensureSubFolder("Defenders")
-		local laneHalf = math.max(Config.getLaneHalfWidthAt(targetX) - 4, 1)
-		while #defenderModels < targetCount do
-			local model = buildPersonModel(DEFENDER_COLOR, "Defender")
-			model.Parent = defendersFolder
-			local z = (math.random() * 2 - 1) * laneHalf
-			local xJitter = math.random() * 10 - 5
-			model:PivotTo(CFrame.new(targetX + xJitter, 0, z))
-			table.insert(defenderModels, model)
-		end
-	end
+local function enemyTarget(slot: number, wallX: number): CFrame
+	local x = wallX - ENEMY_LINE_GAP
+	return facing(Vector3.new(x, 0, slotZ(slot, x)), wallX - 100)
 end
 
 --------------------------------------------------------------------------------
--- ต่อสาย
+-- ป้อมบนกำแพง
 --------------------------------------------------------------------------------
 
-local currentPayload: any = nil
+local turret: Model? = nil
 
--- ⚠️ เรียกทุกครั้งที่ FarmStateSync มาใหม่ (ดู Main.client.lua) — อัปเดตพูล "ยืนรอ" ของ
--- ทหารฝ่ายรับทันทีตามจำนวนล่าสุด (ตัวที่ถูกดึงไปเดินออกมาชนแล้วไม่ถูกแตะตรงนี้ — จบเองใน
--- updateOurTroops) ส่วนทหารฝ่ายเราใช้ payload นี้แค่ตัดสินว่าควรสปอนต่อไหม (ดู updateSpawning
--- ที่ทำงานในลูป Heartbeat แยกต่างหาก)
+local function ensureTurret(wallX: number)
+	local current = turret
+	if not current or not current.Parent then
+		local model = Instance.new("Model")
+		model.Name = "Turret"
+		local base = Instance.new("Part")
+		base.Name = "Base"
+		base.Size = Vector3.new(5, 3, 5)
+		base.Color = TURRET_COLOR
+		base.Material = Enum.Material.Metal
+		base.Anchored = true
+		base.CanCollide = false
+		base.CanQuery = false
+		base.CanTouch = false
+		base.Parent = model
+		local barrel = Instance.new("Part")
+		barrel.Name = "Barrel"
+		barrel.Size = Vector3.new(4, 1, 1)
+		barrel.Color = TURRET_COLOR
+		barrel.Material = Enum.Material.Metal
+		barrel.Anchored = true
+		barrel.CanCollide = false
+		barrel.CanQuery = false
+		barrel.CanTouch = false
+		barrel.Parent = model
+		model.PrimaryPart = base
+		model.Parent = ensureFolder()
+		current = model
+		turret = model
+	end
+	local model = current :: Model
+	local baseY = MAP.Lane.WallHeight + 1.5
+	local base = model:FindFirstChild("Base") :: BasePart
+	local barrel = model:FindFirstChild("Barrel") :: BasePart
+	base.CFrame = CFrame.new(wallX, baseY, 0)
+	barrel.CFrame = CFrame.new(wallX - 3, baseY + 0.5, 0)
+end
+
+local function removeTurret()
+	if turret then
+		turret:Destroy()
+		turret = nil
+	end
+end
+
+local function drawShot(from: Vector3, to: Vector3)
+	local distance = (to - from).Magnitude
+	if distance < 0.1 then
+		return
+	end
+	local beam = Instance.new("Part")
+	beam.Name = "TurretShot"
+	beam.Anchored = true
+	beam.CanCollide = false
+	beam.CanQuery = false
+	beam.CanTouch = false
+	beam.CastShadow = false
+	beam.Material = Enum.Material.Neon
+	beam.Color = SHOT_COLOR
+	beam.Size = Vector3.new(0.3, 0.3, distance)
+	beam.CFrame = CFrame.lookAt((from + to) / 2, to)
+	beam.Parent = ensureFolder()
+	Debris:AddItem(beam, SHOT_SECONDS)
+end
+
+--------------------------------------------------------------------------------
+-- อัปเดตจาก sync
+--------------------------------------------------------------------------------
+
+local ours: { [number]: Unit } = {}
+local enemies: { [number]: Unit } = {}
+local fighting = false
+
+local function clearSide(side: { [number]: Unit }, withEffect: boolean)
+	for slot, unit in side do
+		removeUnit(unit, withEffect)
+		side[slot] = nil
+	end
+end
+
+-- entries = รายการจาก server ({ slot, kind, hp, maxHp }) · ตัวใหม่ = ชนิดเปลี่ยนหรือเลือดเพิ่มขึ้น (ตัวเก่าตาย ตัวใหม่ลงแทน)
+local function syncSide(side: { [number]: Unit }, entries: { any }, isEnemy: boolean, targetOf: (number) -> CFrame)
+	local seen: { [number]: boolean } = {}
+	for _, entry in entries do
+		local slot = entry.slot
+		if type(slot) == "number" and slot >= 1 and slot <= SLOTS then
+			seen[slot] = true
+			local target = targetOf(slot)
+			local existing: Unit? = side[slot]
+			if existing and (existing.kind ~= entry.kind or entry.hp > existing.hp + 1e-6) then
+				removeUnit(existing, true)
+				existing = nil
+			end
+			local current: Unit = existing or newUnit(entry.kind, target, isEnemy)
+			side[slot] = current
+			current.target = target
+			current.hp = entry.hp
+			local ratio = if entry.maxHp > 0 then math.clamp(entry.hp / entry.maxHp, 0, 1) else 0
+			current.fill.Size = UDim2.fromScale(ratio, 1)
+		end
+	end
+	for slot, unit in side do
+		if not seen[slot] then
+			removeUnit(unit, true)
+			side[slot] = nil
+		end
+	end
+end
+
+-- ⚠️ เรียกทุกครั้งที่ FarmStateSync มาใหม่ (Main.client.lua)
 function TroopRenderer.updateFromPayload(payload: any)
-	currentPayload = payload
-	updateDefenders(payload)
+	local battle = payload and payload.battle
+	local stage = battle and battle.stage
+	local wallX = if stage then Config.getWallX(stage) else nil
+	if not battle or not stage or not wallX then
+		-- ไม่มีด่านที่มีกำแพงให้ตี (ด่าน 1 / ผ่านครบ) → เก็บทุกอย่าง
+		clearSide(ours, false)
+		clearSide(enemies, false)
+		removeTurret()
+		fighting = false
+		return
+	end
+	local wall = wallX :: number
+
+	-- ปิดอัญเชิญ = ทหารเรากลับคลัง (ไม่ใช่ตาย) → เก็บเงียบ ๆ ไม่มีเอฟเฟกต์ · ศัตรูบาดเจ็บยังยืนรอ
+	if not payload.summonEnabled then
+		clearSide(ours, false)
+	end
+	local enemyEntries = battle.enemies or {}
+	syncSide(enemies, enemyEntries, true, function(slot: number): CFrame
+		return enemyTarget(slot, wall)
+	end)
+	local enemiesPresent = #enemyEntries > 0
+	if payload.summonEnabled then
+		syncSide(ours, battle.our or {}, false, function(slot: number): CFrame
+			return ourTarget(slot, wall, enemiesPresent)
+		end)
+	end
+	fighting = next(ours) ~= nil
+
+	if battle.turretActive then
+		ensureTurret(wall)
+		local target = if battle.turretShots and battle.turretShots > 0 and battle.turretTarget
+			then ours[battle.turretTarget]
+			else nil
+		if target then
+			-- ปลายกระบอกป้อม (ตำแหน่งเดียวกับ Barrel ใน ensureTurret) → กลางตัวที่โดน
+			local muzzle = Vector3.new(wall - 5, MAP.Lane.WallHeight + 2, 0)
+			drawShot(muzzle, target.model:GetPivot().Position + Vector3.new(0, MODEL_HEIGHT * target.scale * 0.6, 0))
+		end
+	else
+		removeTurret()
+	end
+end
+
+--------------------------------------------------------------------------------
+-- เฟรม — เลื่อนเข้าช่อง + ท่าฟันเล็ก ๆ ตอนกำลังสู้ (ภาพล้วน)
+--------------------------------------------------------------------------------
+
+local function stepSide(side: { [number]: Unit }, alpha: number, swing: number)
+	for slot, unit in side do
+		if unit.model.Parent then
+			-- พุ่งไปข้างหน้า (−Z ของโมเดล = ทิศที่หันอยู่) เป็นจังหวะ ๆ ตอนกำลังสู้
+			local lunge = if fighting then math.max(0, math.sin(swing + slot * 1.3)) * SWING_DISTANCE else 0
+			local goal = unit.target * CFrame.new(0, 0, -lunge)
+			local current = unit.model:GetPivot()
+			unit.model:PivotTo(current:Lerp(goal, alpha))
+		end
+	end
 end
 
 function TroopRenderer.start()
@@ -456,12 +393,12 @@ function TroopRenderer.start()
 	if not player then
 		return
 	end
-
 	ensureFolder()
-
 	RunService.Heartbeat:Connect(function(delta: number)
-		updateSpawning(currentPayload, delta)
-		updateOurTroops()
+		local alpha = math.clamp(delta * MOVE_LERP_PER_SECOND, 0, 1)
+		local swing = os.clock() * SWING_SPEED
+		stepSide(ours, alpha, swing)
+		stepSide(enemies, alpha, swing)
 	end)
 end
 

@@ -491,24 +491,39 @@ local function updateCombatHud()
 		setHudBar(defendersHudFill, defendersHudText, "ทหารฝ่ายรับ", 0)
 		setHudBar(wallHudFill, wallHudText, "กำแพง", 0)
 	else
-		combatStageLabel.Text = `กำลังตีด่าน {activeStage}`
+		-- 5E-1: รวมพล (ค3) ขึ้นต่อท้ายชื่อด่าน · ตัวเลขทั้งหมดมาจาก server (payload.battle)
+		local battle = lastPayload.battle
+		local gatherText = if battle and battle.gathering
+			then ` · ⏳ กำลังรวมพล {battle.available}/{battle.gatherTarget}`
+			else ""
+		combatStageLabel.Text = `กำลังตีด่าน {activeStage}{gatherText}`
 
 		local info = lastPayload.stageProgress[activeStage]
 		local defendersRatio = 1
 		local wallRatio = 1
+		local wallHp = if info.started then info.wallHpRemaining else nil
 		if info.started then
 			defendersRatio = if info.defendersTotal > 0 then info.defendersRemaining / info.defendersTotal else 0
 			wallRatio = if info.wallHpTotal > 0 then info.wallHpRemaining / info.wallHpTotal else 1
 		end
 
-		setHudBar(defendersHudFill, defendersHudText, "ทหารฝ่ายรับ", defendersRatio)
+		-- 5E-1: หลอดศัตรูบอก "เหลือกี่ตัว" (ใหญ่ + เล็ก) · หลอดกำแพงบอกเลือดที่เหลือ
+		local enemiesLeft = if battle then (battle.bigLeft or 0) + (battle.smallLeft or 0) else nil
+		setHudBar(defendersHudFill, defendersHudText, "ศัตรู", defendersRatio)
+		if enemiesLeft then
+			defendersHudText.Text = `ศัตรูเหลือ {formatCommaNumber(enemiesLeft)} ตัว · {math.floor(math.clamp(defendersRatio, 0, 1) * 100)}%`
+		end
 		setHudBar(wallHudFill, wallHudText, "กำแพง", wallRatio)
+		if wallHp then
+			wallHudText.Text = `กำแพง {formatCommaNumber(math.ceil(wallHp))} HP · {math.floor(math.clamp(wallRatio, 0, 1) * 100)}%`
+		end
 	end
 
 	local totalStock = 0
 	for _, stack in lastPayload.children do
 		totalStock += stack.count
 	end
+	-- 5E-1: ลูกที่ยืนอยู่บนสนามไม่นับ (server หักออกจากจำนวนในกองให้แล้ว)
 	combatStockpileLabel.Text = `ทหารรวมในคลัง: {formatCommaNumber(totalStock)} ตัว`
 
 	local roster = lastPayload.battleRoster or {}
@@ -968,7 +983,11 @@ farmStateSync.OnClientEvent:Connect(function(payload)
 	-- ⚠️ Phase 3B-1: กำแพง (WallRenderer) กับโมเดลทหาร (TroopRenderer) อ่านจากของจริงที่ sync
 	-- มานี้เสมอ ไม่ใช่ default อีกต่อไป — อัปเดตทุกครั้งที่ sync มาใหม่ (real-time ตามที่กำลังตีอยู่)
 	WallRenderer.setStageProgress(payload.stageProgress)
-	TroopRenderer.updateFromPayload(payload)
+	-- 5E-1: ภาพสนามรบชั่วคราว — พังเมื่อไหร่ต้องไม่ลากเลขดาเมจลอยข้างล่างหยุดไปด้วย
+	local troopsOk, troopsError = pcall(TroopRenderer.updateFromPayload, payload)
+	if not troopsOk then
+		warn(`[Main] TroopRenderer.updateFromPayload ล้มเหลว: {troopsError}`)
+	end
 	-- ⚠️ Phase 3B-2: เทียบ defendersRemaining/wallHpRemaining ของด่านที่กำลังตีกับรอบ sync
 	-- ก่อนหน้า (state เก็บอยู่ในตัว CombatEffects เอง) แล้วโชว์เลขลอย+burst ถ้ามี damage เกิดขึ้นจริง
 	CombatEffects.onSync(payload)

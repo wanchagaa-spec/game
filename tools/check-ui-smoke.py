@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Smoke test ของ UI ฝั่ง client (UI-1 · UI-2 · UI-3 · UI-4 · UI-5 · Phase 5A · 5C · 5D): Hotbar · BagWindow · SidePanels · UiKit · SellWindow
-· MapSigns · SummonWindow · IndexWindow · RobuxShopWindow · BossHud · WeaponShopWindow · HealthBar · NightSky
+"""Smoke test ของ UI ฝั่ง client (UI-1 · UI-2 · UI-3 · UI-4 · UI-5 · Phase 5A · 5C · 5D · 5E-1): Hotbar · BagWindow · SidePanels · UiKit · SellWindow
+· MapSigns · SummonWindow · IndexWindow · RobuxShopWindow · BossHud · WeaponShopWindow · HealthBar · NightSky · TroopRenderer
 
     python3 tools/check-ui-smoke.py
 
@@ -18,7 +18,7 @@ LUAU = os.environ.get('LUAU') or shutil.which('luau')
 if not LUAU:
     sys.exit('หา luau CLI ไม่เจอ — ติดตั้งแล้วใส่ใน PATH หรือสั่ง LUAU=/path/to/luau python3 ...')
 
-MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns', 'SummonWindow', 'IndexWindow', 'RobuxShopWindow', 'BossHud', 'WeaponShopWindow', 'HealthBar', 'NightSky']
+MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns', 'SummonWindow', 'IndexWindow', 'RobuxShopWindow', 'BossHud', 'WeaponShopWindow', 'HealthBar', 'NightSky', 'TroopRenderer']
 
 MOCK = r'''--!nocheck
 local Config = require("./src/shared/Config")
@@ -64,6 +64,8 @@ function Vector3.new(x, y, z)
 	return setmetatable({ X = x, Y = y, Z = z, Magnitude = math.sqrt(x * x + y * y + z * z) }, Vector3Meta)
 end
 Vector3Meta.__add = function(a, b) return Vector3.new(a.X + b.X, a.Y + b.Y, a.Z + b.Z) end
+Vector3Meta.__sub = function(a, b) return Vector3.new(a.X - b.X, a.Y - b.Y, a.Z - b.Z) end
+Vector3Meta.__div = function(a, b) return Vector3.new(a.X / b, a.Y / b, a.Z / b) end
 Vector3Meta.__mul = function(a, b)
 	if type(a) == "number" then a, b = b, a end
 	return Vector3.new(a.X * b, a.Y * b, a.Z * b)
@@ -85,7 +87,10 @@ local ColorSequenceKeypoint = { new = function(t, c) return typed("ColorSequence
 -- CFrame: lookAt (กล้องรูปตัวละคร) + new/Angles/คูณกัน (MotherModels.build ประกอบโมเดลจาก Part) — เก็บค่า ไม่คำนวณจริง
 local CFrameMeta = { __type = "CFrame" }
 CFrameMeta.__mul = function(a, _b) return a end
-CFrameMeta.__index = { Inverse = function(self) return self end } -- Weld.C0 ของ rig (MotherModels.build)
+CFrameMeta.__index = {
+	Inverse = function(self) return self end, -- Weld.C0 ของ rig (MotherModels.build)
+	Lerp = function(self) return self end, -- 5E-1: TroopRenderer เลื่อนทหารเข้าช่อง
+}
 local CFrame = {
 	lookAt = function(a, b) return setmetatable({ a = a, b = b, Position = a }, CFrameMeta) end,
 	new = function(x, y, z) return setmetatable({ Position = Vector3.new(x, y, z) }, CFrameMeta) end,
@@ -231,7 +236,14 @@ function Methods.GetBoundingBox(_self)
 	return typed("CFrame", { Position = Vector3.new(0, 2, 0) }), Vector3.new(2, 4, 2)
 end
 function Methods.GetPivot(_self)
-	return typed("CFrame", { Position = Vector3.new(0, 0, 0), LookVector = Vector3.new(0, 0, -1), RightVector = Vector3.new(1, 0, 0) })
+	return setmetatable({ Position = Vector3.new(0, 0, 0), LookVector = Vector3.new(0, 0, -1), RightVector = Vector3.new(1, 0, 0) }, CFrameMeta)
+end
+-- 5E-1: TroopRenderer ขยับ/ย่อขยายโมเดลทหาร (เก็บค่าเฉย ๆ)
+function Methods.PivotTo(self, cf)
+	rawget(self, "__props").__pivot = cf
+end
+function Methods.ScaleTo(self, scale)
+	rawget(self, "__props").__scale = scale
 end
 function Methods.IsA(self, className)
 	local own = rawget(self, "__class")
@@ -304,6 +316,9 @@ local services = {
 	Workspace = workspaceMock,
 	ReplicatedStorage = newInstance("ReplicatedStorage"),
 	Players = { LocalPlayer = localPlayer },
+	-- 5E-1: TroopRenderer (ภาพสนามรบชั่วคราว)
+	RunService = { Heartbeat = newSignal() },
+	Debris = { AddItem = function() end },
 	-- UI-5: RobuxShopWindow ดึงราคาแสดงผลผ่านตัวนี้ (ไม่ได้ยิงซื้อจริงจากในโมดูล — นั่นอยู่ที่ actions.buyProduct)
 	MarketplaceService = {
 		GetProductInfo = function(_, productId, infoType)
@@ -1313,6 +1328,9 @@ do
 	check("  บอกจำนวน + ตายถาวร + ดึงกลับไม่ได้", string.find(confirmTextNow, "ส่งแม่ 3 ตัว", 1, true) ~= nil
 		and string.find(confirmTextNow, "ตายถาวร", 1, true) ~= nil
 		and string.find(confirmTextNow, "ดึงกลับไม่ได้", 1, true) ~= nil, true)
+	-- 5E-1 (ผู้ใช้สั่ง): แม่อาจตายระหว่างรบ + ที่เหลือตายหมดเมื่อด่านพัง
+	check("  5E-1: บอกว่าแม่อาจตายระหว่างรบ", string.find(confirmTextNow, "อาจตายถาวรระหว่างรบ", 1, true) ~= nil)
+	check("  5E-1: บอกว่าแม่ที่เหลือตายหมดเมื่อด่านพัง", string.find(confirmTextNow, "แม่ที่เหลือทั้งหมดจะตายถาวรทันทีที่ด่านที่กำลังตีพัง", 1, true) ~= nil)
 	findDescendant(confirm, "ConfirmCancel").Activated:Fire()
 	check("  ยกเลิก → กล่องปิด ไม่ยิงอะไรเลย", confirm.Visible == false and #summonCalls == before, true)
 	check("  ยกเลิกแล้วที่ติ๊กไว้ยังอยู่", #SummonWindow.getTicks("mothers"), 3)
@@ -1333,6 +1351,16 @@ do
 	before = #summonCalls
 	stopButton.Activated:Fire()
 	check("  กดหยุด → setSummonEnabled(false)", callNames(before) == "setSummonEnabled" and summonCalls[before + 1].args[1] == false, true)
+
+	-- 5E-1 (ค3): กำลังรวมพล → หัวหน้าต่างบอก "กำลังรวมพล 7/12" (ตัวเลขจาก server)
+	local statusLabel = findDescendant(win, "Status")
+	sp.battle = { gathering = true, available = 7, gatherTarget = Config.Balance.Combat.GATHER_SIZE, our = {}, enemies = {} }
+	SummonWindow.setPayload(sp)
+	check("5E-1 กำลังรวมพล → หัวหน้าต่างบอกจำนวน", string.find(statusLabel.Text, `กำลังรวมพล 7/{Config.Balance.Combat.GATHER_SIZE}`, 1, true) ~= nil)
+	sp.battle.gathering = false
+	SummonWindow.setPayload(sp)
+	check("  สู้อยู่ → กลับเป็น 'กำลังอัญเชิญ'", string.find(statusLabel.Text, "กำลังอัญเชิญ", 1, true) ~= nil)
+	sp.battle = nil
 
 	-- auto-pause → เตือนในหัวหน้าต่าง
 	sp.combatAutoPaused = true
@@ -2134,6 +2162,92 @@ do
 	check("  ความสว่าง/exposure กลับค่าเดิมของเกมนี้", lighting2.Brightness == 3 and lighting2.ExposureCompensation == 0.2, true)
 end
 
+print("\n━━ TroopRenderer: สนามรบ 6 ต่อ 6 ตามสถานะจาก server (5E-1 ภาพชั่วคราว) ━━")
+do
+	local TroopRenderer = loaded.TroopRenderer
+	local effects = loaded.CombatEffects
+	local troops = workspaceMock
+	local function countModels(name)
+		local folderNow = troops:FindFirstChild("LocalTroops")
+		local n = 0
+		if folderNow then
+			for _, child in folderNow:GetChildren() do
+				if child.Name == name then
+					n += 1
+				end
+			end
+		end
+		return n
+	end
+	local function entries(kinds, hp)
+		local list = {}
+		for slot, kind in kinds do
+			table.insert(list, { slot = slot, kind = kind, hp = hp, maxHp = 10 })
+		end
+		return list
+	end
+	local payload = {
+		summonEnabled = true,
+		battle = {
+			stage = 3,
+			our = entries({ "child", "child", "child", "child", "child", "mother" }, 10),
+			enemies = entries({ "big", "small", "small", "small", "small", "small" }, 10),
+			turretActive = true,
+			turretShots = 1,
+			turretTarget = 1,
+		},
+	}
+	check("start ไม่ error", pcall(TroopRenderer.start))
+	check("sync สนามเต็ม ไม่ error", pcall(TroopRenderer.updateFromPayload, payload))
+	check("  ทหารเรา 6 ตัว", countModels("Troop"), 6)
+	check("  ศัตรู 6 ตัว", countModels("Enemy"), 6)
+	check("  ป้อม 1 อัน", countModels("Turret"), 1)
+	check("  มีเส้นยิงของป้อม", countModels("TurretShot") >= 1, true)
+	check("  ทหาร + ศัตรูบนจอไม่เกิน 12", countModels("Troop") + countModels("Enemy") <= 12, true)
+	check("  ตัวใหญ่ถูกขยาย", (function()
+		for _, child in troops:FindFirstChild("LocalTroops"):GetChildren() do
+			if child.Name == "Enemy" and rawget(child, "__props").__scale then
+				return true
+			end
+		end
+		return false
+	end)(), true)
+	check("  ทุกตัวมีแถบเลือด", (function()
+		for _, child in troops:FindFirstChild("LocalTroops"):GetChildren() do
+			if (child.Name == "Troop" or child.Name == "Enemy") and not child:FindFirstChild("HpBar") then
+				return false
+			end
+		end
+		return true
+	end)(), true)
+	services.RunService.Heartbeat:Fire(1 / 60)
+	check("  เฟรมเลื่อนทหารไม่ error", true)
+
+	-- ศัตรูช่อง 2 ตาย (ไม่มีตัวมาแทน) + ช่อง 1 ของเราตายแล้วตัวใหม่ลงแทน (เลือดเพิ่ม)
+	local deathsBefore = effects.deaths
+	payload.battle.enemies = entries({ "big", nil, "small", "small", "small", "small" }, 5)
+	payload.battle.our[1].hp = 3
+	TroopRenderer.updateFromPayload(payload)
+	payload.battle.our[1].hp = 10 -- ตัวใหม่
+	check("ศัตรูหายแล้วสนามอัปเดต ไม่ error", pcall(TroopRenderer.updateFromPayload, payload))
+	check("  ศัตรูเหลือ 5", countModels("Enemy"), 5)
+	check("  เล่นเอฟเฟกต์ตาย (ศัตรู 1 + ทหารเราที่ถูกแทน 1)", effects.deaths - deathsBefore, 2)
+
+	-- ปิดอัญเชิญ → ทหารเรากลับคลัง (เก็บเงียบ ๆ) · ศัตรูบาดเจ็บยังยืนอยู่
+	deathsBefore = effects.deaths
+	payload.summonEnabled = false
+	payload.battle.our = {}
+	TroopRenderer.updateFromPayload(payload)
+	check("ปิดอัญเชิญ → ทหารเราหายหมด", countModels("Troop"), 0)
+	check("  ไม่เล่นเอฟเฟกต์ตาย (กลับคลัง ไม่ใช่ตาย)", effects.deaths, deathsBefore)
+	check("  ศัตรูบาดเจ็บยังยืนรอ", countModels("Enemy"), 5)
+
+	-- ไม่มีด่านที่มีกำแพง (ผ่านครบ) → เก็บทุกอย่าง
+	check("ไม่มีด่าน → ไม่ error", pcall(TroopRenderer.updateFromPayload, { summonEnabled = true, battle = { stage = nil } }))
+	check("  ไม่มีทหาร/ศัตรู/ป้อมค้าง", countModels("Troop") + countModels("Enemy") + countModels("Turret"), 0)
+	check("payload ไม่มี battle → ไม่ error", pcall(TroopRenderer.updateFromPayload, { summonEnabled = true }))
+end
+
 print(string.format("\n=== ผ่าน %d / ตก %d ===", passCount, failCount))
 if failCount > 0 then
 	error(`มีเทสต์ตก {failCount} เคส`, 0)
@@ -2157,6 +2271,10 @@ def module_source(name: str, folder: str = 'client') -> str:
 def build_harness() -> str:
     loads = []
     for name, folder in [(n, 'shared') for n in SHARED_MODULES] + [(n, 'client') for n in MODULES]:
+        if name == 'TroopRenderer':
+            # 5E-1: เอฟเฟกต์ตาย (ParticleEmitter/Tween) ไม่ใช่สิ่งที่ตรวจตรงนี้ → ใส่ตัวแทนที่นับจำนวนครั้งแทน
+            loads.append('do local m = Instance.new("ModuleScript"); m.Name = "CombatEffects"; m.Parent = clientFolder; '
+                         'loaded.CombatEffects = { deaths = 0, onDefenderDeath = function() loaded.CombatEffects.deaths += 1 end } end')
         src = module_source(name, folder)
         escaped = src.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
         loads.append(f'loadModule("{name}", "{escaped}")')

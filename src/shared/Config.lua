@@ -1601,11 +1601,30 @@ Balance.BossCycle = {
 	PLAYER_ATTACK_COOLDOWN = 0.5, -- วินาทีต่อครั้ง (server นับเอง ห้ามเชื่อ client)
 	PLAYER_ATTACK_RANGE = 14, -- ระยะแนวราบจากกึ่งกลางบอสถึงตัวผู้เล่น (บอสกว้าง 10 → ยืนชิดตัวได้ 9)
 
-	-- บอสตีกลับ — **ปิดไว้ก่อน** (ยังไม่มีระบบตาย/เกิดใหม่เต็มรูปแบบของ Phase 4)
-	BOSS_ATTACK_ENABLED = false,
-	BOSS_ATTACK_DAMAGE = 10, -- ต่อครั้ง (Humanoid.Health เต็ม 100)
-	BOSS_ATTACK_INTERVAL = 2, -- วินาที
-	BOSS_ATTACK_RANGE = 14, -- แนวราบจากกึ่งกลางบอส
+	-- ══ 5D: บอสตีกลับ = "ฟาดพื้นรอบตัว" ท่าเดียว (ผู้ใช้ยืนยันดีไซน์ · docs/boss-plan.md §6) ══
+	-- วงแดงบนพื้นขึ้นตอนเริ่มง้าง → ฟาดลงหลัง WINDUP วินาที → ใครอยู่ใน "วงที่ตัดสิน" ตอนฟาด (ตำแหน่งที่ server เห็น) = โดน
+	--   → พัก REST วินาที → ง้างใหม่ (รอบละ WINDUP + REST) · เริ่มง้าง**เฉพาะเมื่อมีผู้เล่นอยู่ในวงที่วาด** (ไม่ฟาดเปล่า ๆ)
+	--   · ตีทุกคนในวง รวมคนวิ่งผ่านห้อง · ไม่ฟาดตอนกลางคืน/ตอนบอสตาย · ไม่มี PvP
+	-- ⚠️ ไม่มีตัวเลขดิบของรัศมี/ดาเมจ — คำนวณจากค่าข้างล่าง (Config.getBossSlamRadius / getBossSlamHitRadius / getBossSlamDamage)
+	--   วงที่วาด = ระยะตีกระบอง + BOSS_SLAM_RADIUS_EXTRA → ยืนตีที่ระยะสุดก็ยังอยู่ในวง ต้องถอยออก
+	--   วงที่ตัดสิน = วงที่วาด − BOSS_SLAM_HIT_MARGIN (เล็กกว่า — เผื่อเน็ตหน่วย กันคนที่เห็นว่าออกทันแล้วยังโดน)
+	--   ดาเมจต่อครั้ง = PLAYER_MAX_HEALTH ÷ BOSS_HITS_TO_KILL_PLAYER → โดนครบกี่ครั้งตายพอดี เท่ากันทุกห้อง
+	-- ⚠️ การหลบกินเวลาตี → validate() + เทสต์เวลาตีบอสใช้ค่าที่หักการหลบแล้ว (Config.getClubSoloKillSecondsWithDodge)
+	-- ⚠️ ทางวิ่งทุกห้องต้องอยู่นอกวงที่วาด (validate()) — วงใหญ่ขึ้นจนทับทางวิ่ง = เซิร์ฟไม่บูต ห้ามย้ายบอส/ไข่/กำแพงแก้
+	BOSS_ATTACK_ENABLED = true, -- สวิตช์ใหญ่ (debugBossAttack เปิด/ปิดชั่วคราวทั้งเซิร์ฟได้โดยไม่แตะค่านี้)
+	BOSS_SLAM_RADIUS_EXTRA = 4, -- studs → วงที่วาด 14 + 4 = 18
+	BOSS_SLAM_HIT_MARGIN = 2, -- studs → วงที่ตัดสิน 18 − 2 = 16 (≈ 60 มิลลิวินาทีของการวิ่งที่ความเร็ว 32)
+	BOSS_SLAM_WINDUP_SECONDS = 1.0, -- วงแดงขึ้นก่อนฟาดเท่านี้
+	BOSS_SLAM_REST_SECONDS = 4.0, -- ฟาดแล้วพักเท่านี้ก่อนง้างใหม่
+
+	-- ══ 5D: เลือดผู้เล่น (Humanoid.Health ปกติ · เท่ากันทุกคน · ยังไม่มีเกราะ/เลือดที่อัปได้) ══
+	PLAYER_MAX_HEALTH = 100,
+	BOSS_HITS_TO_KILL_PLAYER = 5, -- โดนบอสฟาดกี่ครั้งตาย → ดาเมจต่อครั้ง 100 ÷ 5 = 20
+	-- ไม่ฟื้นเลือดเองระหว่างสู้ · ไม่โดนตีครบเท่านี้ (วินาที) → เต็มทันที · เข้าเซฟโซน/เกิดใหม่ = เต็มทันที
+	-- ⚠️ สคริปต์ฟื้นเลือดเริ่มต้นของ Roblox (Script "Health" ในตัวละคร · 1%/วิ) ขัดกติกานี้ → BossService ถอดทิ้งทุกครั้งที่เกิด
+	PLAYER_REGEN_DELAY_SECONDS = 5,
+	-- ตายแล้วรอเกิดใหม่กี่วินาที (Players.RespawnTime) · ตายในสนามรบ = เกิดหน้าทางเข้าเลน (จุดวาปกลางคืน) · ตายในเซฟโซน = เกิดที่คอก
+	PLAYER_RESPAWN_SECONDS = 5,
 
 	-- ══ 5B: ไข่บอส ══ เกิดพร้อมบอสต้นกลางคืน หลังตัวบอสมุมเดียวกัน · หยิบได้หลังบอสห้องนั้นตายเท่านั้น
 	-- ชนิดไข่ห้อง N = Config.getBossEggId(N) (5B-2 · เดิม EGG_ID = "egg_stage1" ห้องเดียว — ลบแล้ว)
@@ -1620,11 +1639,15 @@ Balance.BossCycle = {
 	HEAVY_EGG_ALERT_KG = 100000,
 }
 
--- 5B-2: ค่าห้องเดียวของ 5A/5B ที่ลบแล้ว — แทนด้วยค่าต่อห้อง (validate() กันไม่ให้เติมกลับ มีสองแหล่งแล้วอ่านผิดแหล่ง)
+-- ค่าที่ลบแล้ว — validate() กันไม่ให้เติมกลับ (มีสองแหล่งแล้วอ่านผิดแหล่ง)
+-- 5B-2: ค่าห้องเดียวของ 5A/5B → ค่าต่อห้อง · 5D: บอสตีกลับแบบตีทุก 2 วิไม่มีสัญญาณ → ฟาดพื้นง้างให้เห็นก่อน
 local REMOVED_BOSS_CYCLE_KEYS = {
-	BOSS_HP = "Config.getBossHp(ห้อง)",
-	KILL_REWARD = "Config.getBossKillReward(ห้อง)",
-	EGG_ID = "Config.getBossEggId(ห้อง)",
+	BOSS_HP = "Config.getBossHp(ห้อง) (5B-2)",
+	KILL_REWARD = "Config.getBossKillReward(ห้อง) (5B-2)",
+	EGG_ID = "Config.getBossEggId(ห้อง) (5B-2)",
+	BOSS_ATTACK_DAMAGE = "Config.getBossSlamDamage() = PLAYER_MAX_HEALTH ÷ BOSS_HITS_TO_KILL_PLAYER (5D)",
+	BOSS_ATTACK_INTERVAL = "BOSS_SLAM_WINDUP_SECONDS + BOSS_SLAM_REST_SECONDS (5D)",
+	BOSS_ATTACK_RANGE = "Config.getBossSlamRadius() / getBossSlamHitRadius() (5D)",
 }
 
 --------------------------------------------------------------------------------
@@ -2006,6 +2029,10 @@ Balance.Weapon = {
 	-- ขั้นพิเศษ (ขั้นสุดท้าย) ตีบอสห้องสุดท้ายคนเดียวตายใน ~เท่านี้ (ขั้นก่อนหน้า ~TARGET_SOLO_KILL_SECONDS)
 	CAPSTONE_SOLO_KILL_SECONDS = 60,
 	DAMAGE_SIGNIFICANT_DIGITS = 1, -- 27.8 → 30 · 2.78 → 3 (อ่านง่าย · ขั้น 2–9 โต ×10 เท่ากันพอดี)
+	-- ✅ ผู้ใช้เลือก (5D ทางเลือก B): ดาเมจขั้นต่ำต่อครั้ง — ขั้น 1 จากสูตร = 0.3 → ปัดเป็น 1 → **ยกเป็น 2**
+	--   เหตุผล: พอต้องหลบบอสฟาด (5D) มือใหม่ถือขั้น 1 ตีห้อง 2 คนเดียวใช้ 645 วิ เกินกลางวัน 540 → ติดล็อกด่าน 2
+	--   ยกเป็น 2 เหลือ ~323 วิ · ขั้น 2–10 ไม่เปลี่ยน (สูตรให้ ≥ 3 อยู่แล้ว) · ดาเมจยังไล่ขึ้นทุกขั้น (2 → 3 → 30 …)
+	MIN_DAMAGE = 2,
 
 	-- ราคา = รายได้กี่นาทีของผู้เล่นอ้างอิงด่านนั้น
 	-- ⚠️ เพดานจากเทสต์สมดุลเดิม "ส่วนเกิน ≥ 1.5 เท่า": ด่าน 4 ตึงสุด → ไม่เกิน ~10 นาที · ตั้ง 5 (ส่วนเกินต่ำสุด 1.70)
@@ -3105,6 +3132,41 @@ function Config.getBossCycleSeconds(): number
 	return Config.Balance.BossCycle.DAY_SECONDS + Config.Balance.BossCycle.NIGHT_SECONDS
 end
 
+-- ══ 5D: บอสฟาดพื้น ══ ค่าทั้งหมดคำนวณจาก BossCycle (ไม่มีตัวเลขดิบของรัศมี/ดาเมจ)
+-- รัศมีวงแดงที่**วาด** (แนวราบจากกึ่งกลางบอส) = ระยะตีกระบอง + BOSS_SLAM_RADIUS_EXTRA
+function Config.getBossSlamRadius(): number
+	local cycle = Config.Balance.BossCycle
+	return cycle.PLAYER_ATTACK_RANGE + cycle.BOSS_SLAM_RADIUS_EXTRA
+end
+
+-- รัศมีที่ server ใช้**ตัดสิน**ว่าโดน = วงที่วาด − BOSS_SLAM_HIT_MARGIN (เล็กกว่า เผื่อเน็ตหน่วย)
+function Config.getBossSlamHitRadius(): number
+	return Config.getBossSlamRadius() - Config.Balance.BossCycle.BOSS_SLAM_HIT_MARGIN
+end
+
+-- ดาเมจต่อครั้ง = เลือดเต็ม ÷ จำนวนครั้งที่ตาย (100 ÷ 5 = 20)
+function Config.getBossSlamDamage(): number
+	local cycle = Config.Balance.BossCycle
+	return cycle.PLAYER_MAX_HEALTH / cycle.BOSS_HITS_TO_KILL_PLAYER
+end
+
+-- หนึ่งจังหวะฟาด = ง้าง + พัก (5 วิ)
+function Config.getBossSlamPeriodSeconds(): number
+	local cycle = Config.Balance.BossCycle
+	return cycle.BOSS_SLAM_WINDUP_SECONDS + cycle.BOSS_SLAM_REST_SECONDS
+end
+
+-- สัดส่วนเวลาที่ตีบอสได้จริงเมื่อต้องหลบ (0..1) — คนเดียวยืนตีตลอด = บอสฟาดทุกจังหวะ
+-- โมเดล (ประเมินเผื่อ): เห็นวงแล้ววิ่งออกทันที = เสียเวลาง้างทั้งหมด · ฟาดแล้ววิ่งกลับจากขอบวงที่วาดเข้าระยะตี
+--   ด้วยความเร็วฐาน (ไม่นับความเร็วที่ซื้อ) · 5D ค่าตั้งต้น: 1 − (1.0 + 4 ÷ 32) ÷ 5 = 0.775
+-- ⚠️ ไม่ขึ้นกับสวิตช์ BOSS_ATTACK_ENABLED — ยามวัดดีไซน์ที่ตั้งใจเปิดใช้ ไม่ใช่สวิตช์ชั่วคราว
+function Config.getBossDodgeUptime(): number
+	local cycle = Config.Balance.BossCycle
+	local walkBack = (Config.getBossSlamRadius() - cycle.PLAYER_ATTACK_RANGE) / Config.MapDimensions.Player.WalkSpeed
+	local lost = cycle.BOSS_SLAM_WINDUP_SECONDS + walkBack
+	return math.clamp(1 - lost / Config.getBossSlamPeriodSeconds(), 0, 1)
+end
+
 -- ══ กำแพงกั้นกลางคืน (5B) ══ **ปิดช่องทางเข้าเลนพอดี** = ช่องประตูในกำแพงหินขอบแมพฝั่งตะวันออก
 -- ⚠️ ผูกกับกำแพงขอบแมพทั้งชุด (X · ความหนา · ความสูง · ช่องประตูกว้าง Lane.Width) — ไม่มีค่าของตัวเองให้ตั้งผิด
 --   กว้างเต็มช่อง ไม่มีช่องว่าง ไม่ยื่น · ไม่ทับกำแพงหินข้าง ๆ (ชนปลายกันพอดีที่ Z = ±Lane.Width/2 = กระพริบไม่ได้)
@@ -3268,6 +3330,9 @@ function Config.formatBossEventMessage(kind: string, a: any?, b: number?, c: num
 	elseif kind == "pickupHold" then
 		-- 5B-2: server จับเวลากดค้างเองแล้วไม่ครบ
 		return `ต้องกด E ค้างให้ครบ {Config.Balance.BossCycle.EGG_PICKUP_HOLD_SECONDS} วินาที`
+	elseif kind == "slain" then
+		-- 5D: ส่งเฉพาะคนที่ตายเพราะบอสฟาด · a = ห้อง
+		return if type(a) == "number" then `ถูกบอสห้อง {a} ล้ม` else "ถูกบอสล้ม"
 	end
 	return ""
 end
@@ -3276,6 +3341,7 @@ end
 function Config.isBossEventWarning(kind: string): boolean
 	-- 5B-2: "pickupAccess" / "pickupHold" ขึ้นต้นด้วย "pickup" → สีเตือนอัตโนมัติ
 	return kind == "locked"
+		or kind == "slain" -- 5D
 		or kind == "bagFull"
 		or kind == "eggLost"
 		or string.sub(kind, 1, 6) == "pickup"
@@ -3290,6 +3356,7 @@ Config.BOSS_STATE_FOLDER = "BossState" -- Folder ใน ReplicatedStorage · Att
 Config.BOSS_ARENA_NAME = "BossArena" -- Model ใต้ Workspace.Map
 Config.BOSS_BARRIER_NAME = "BossBarrier" -- Part ใน BossArena (กำแพงกั้นกลางคืน)
 Config.BOSS_MODEL_NAME = "CycleBoss" -- Model ใน BossArena (ตัวบอส) · 5B-2: ชื่อจริง "CycleBoss{ห้อง}" (Config.getBossModelName)
+Config.BOSS_SLAM_RING_NAME = "BossSlamRing" -- 5D: Part วงแดงบอสฟาดใน BossArena · ชื่อจริง "BossSlamRing{ห้อง}" (ใส่เข้าโลกเฉพาะตอนง้าง/ฟาด)
 Config.WEAPON_TOOL_NAME = "Weapon" -- Tool ที่ server ใส่ Backpack ให้ทุกคน (ถือ/เก็บอัตโนมัติในห้องบอสที่มีสิทธิ์)
 -- 5C: Attribute บน Tool = ขั้นกระบองที่ประกอบไว้ (server เทียบกับ weaponLevel ทุกจังหวะ tick แล้วประกอบใหม่ถ้าไม่ตรง)
 Config.CLUB_TIER_ATTRIBUTE = "ClubTier"
@@ -3649,8 +3716,9 @@ function Config.isCapstoneClubTier(tier: number): boolean
 	return Config.clampClubTier(tier) > Config.Balance.Stage.COUNT
 end
 
--- ดาเมจต่อครั้งของกระบองขั้นนี้ = HP บอสห้องเป้าหมาย × คูลดาวน์ ÷ เวลาเป้าหมาย → ปัดขึ้น (≥ 1)
+-- ดาเมจต่อครั้งของกระบองขั้นนี้ = HP บอสห้องเป้าหมาย × คูลดาวน์ ÷ เวลาเป้าหมาย → ปัดขึ้น (≥ Weapon.MIN_DAMAGE)
 -- ⚠️ เป็นจำนวนเต็มเสมอ (≥ 1) — ส่วนแบ่งเงินบอสนับคนที่ทำดาเมจ ≥ BOSS_REWARD_MIN_DAMAGE
+-- 5D (ทางเลือก B): ขั้น 1 ได้ MIN_DAMAGE = 2 (สูตรให้ 0.3) — ขั้นอื่นสูตรให้เกินอยู่แล้ว
 function Config.getClubDamage(tier: number): number
 	local weapon = Config.Balance.Weapon
 	local clamped = Config.clampClubTier(tier)
@@ -3660,7 +3728,7 @@ function Config.getClubDamage(tier: number): number
 	local raw = Config.getBossHp(Config.getClubTargetRoom(clamped))
 		* Config.Balance.BossCycle.PLAYER_ATTACK_COOLDOWN
 		/ target
-	return math.max(1, Config.roundSignificant(raw, weapon.DAMAGE_SIGNIFICANT_DIGITS, true))
+	return math.max(weapon.MIN_DAMAGE, Config.roundSignificant(raw, weapon.DAMAGE_SIGNIFICANT_DIGITS, true))
 end
 
 -- ราคาขั้นนี้ (เงินในเกม) · ขั้นเริ่มต้น = 0 (ได้ฟรี) · ขั้นอื่น = รายได้ X นาทีของผู้เล่นอ้างอิงด่านเป้าหมาย
@@ -3678,9 +3746,17 @@ function Config.getClubPrice(tier: number): number
 end
 
 -- วินาทีที่คนเดียวตีบอสห้องนั้นตายด้วยกระบองขั้นนี้ (จำนวนครั้ง × คูลดาวน์ · นับครั้งแรกเป็นเต็มคูลดาวน์ = ประเมินเผื่อ)
+-- ⚠️ **ยังไม่หักเวลาหลบบอสฟาด** (5D) — เป็นตัวตั้งของตารางกระบอง (TARGET_SOLO_KILL_SECONDS) เท่านั้น
+--   "ตีทันกลางวันไหม" ต้องใช้ getClubSoloKillSecondsWithDodge
 function Config.getClubSoloKillSeconds(tier: number, room: number): number
 	local hits = math.ceil(Config.getBossHp(room) / Config.getClubDamage(tier))
 	return hits * Config.Balance.BossCycle.PLAYER_ATTACK_COOLDOWN
+end
+
+-- 5D: เวลาเดียวกัน**หลังหักเวลาหลบบอสฟาด** (คนเดียวยืนตีตลอด → บอสฟาดทุกรอบ) = เวลาดิบ ÷ สัดส่วนเวลาที่ตีได้จริง
+-- ⚠️ validate() "ตีตายทันกลางวัน" + เทสต์ยามติดล็อก/มือใหม่ใช้ตัวนี้ (ผู้ใช้สั่ง)
+function Config.getClubSoloKillSecondsWithDodge(tier: number, room: number): number
+	return Config.getClubSoloKillSeconds(tier, room) / Config.getBossDodgeUptime()
 end
 
 function Config.getClubVisual(tier: number): ClubVisual
@@ -4667,7 +4743,7 @@ function Config.validate()
 		for key, replacement in REMOVED_BOSS_CYCLE_KEYS do
 			assert(
 				(cycle :: any)[key] == nil,
-				`Config: BossCycle.{key} ลบแล้วใน 5B-2 (บอสทุกห้อง) — ใช้ {replacement} แทน ห้ามเติมกลับ`
+				`Config: BossCycle.{key} ลบแล้ว — ใช้ {replacement} แทน ห้ามเติมกลับ`
 			)
 		end
 		assert((arena :: any).Stage == nil, "Config: BossArena.Stage ลบแล้วใน 5B-2 — บอสมีทุกห้อง ไม่มี \"ห้องบอสกลาง\" แล้ว")
@@ -4702,10 +4778,44 @@ function Config.validate()
 			"Config: คูลดาวน์/ระยะตีบอสของผู้เล่นต้องมากกว่า 0 (คูลดาวน์ 0 = ยิงรัวได้ไม่จำกัด)"
 		)
 		assert(type(cycle.BOSS_ATTACK_ENABLED) == "boolean", "Config: BossCycle.BOSS_ATTACK_ENABLED ต้องเป็น boolean")
-		assert(
-			cycle.BOSS_ATTACK_INTERVAL > 0 and cycle.BOSS_ATTACK_DAMAGE >= 0 and cycle.BOSS_ATTACK_RANGE > 0,
-			"Config: ค่าบอสตีกลับต้องเป็นบวก (INTERVAL > 0 · DAMAGE ≥ 0 · RANGE > 0)"
-		)
+		-- ══ 5D: บอสฟาดพื้น + เลือดผู้เล่น ══
+		do
+			local drawn = Config.getBossSlamRadius()
+			local judged = Config.getBossSlamHitRadius()
+			assert(
+				cycle.BOSS_SLAM_RADIUS_EXTRA > 0 and cycle.BOSS_SLAM_HIT_MARGIN > 0,
+				"Config: BOSS_SLAM_RADIUS_EXTRA / BOSS_SLAM_HIT_MARGIN ต้องมากกว่า 0 (วงใหญ่กว่าระยะตี · วงตัดสินเล็กกว่าวงที่วาด)"
+			)
+			-- ยืนตีบอสที่ระยะสุดต้องยังโดนฟาด — ไม่งั้นมีจุดยืนตีฟรีไม่ต้องหลบ (ดีไซน์: "ยืนตีที่ระยะสุดก็ยังต้องถอย")
+			assert(
+				judged > cycle.PLAYER_ATTACK_RANGE and judged < drawn,
+				`Config: วงตัดสินบอสฟาด ({judged}) ต้องใหญ่กว่าระยะตีกระบอง ({cycle.PLAYER_ATTACK_RANGE}) และเล็กกว่าวงที่วาด ({drawn})`
+			)
+			assert(
+				cycle.BOSS_SLAM_WINDUP_SECONDS > 0 and cycle.BOSS_SLAM_REST_SECONDS > 0,
+				"Config: จังหวะง้าง/พักของบอสฟาดต้องมากกว่า 0 (ง้าง 0 = หลบไม่ได้ · พัก 0 = ฟาดรัว)"
+			)
+			-- ยืนชิดตัวบอสแล้วเห็นวงต้องวิ่งออกพ้นวงตัดสินทันก่อนฟาด (ด้วยความเร็วฐาน) — "ออกทันคือรอด" ต้องเป็นจริงทุกจุด
+			local escape = (judged - arena.BossSize.X / 2) / dim.Player.WalkSpeed
+			assert(
+				escape < cycle.BOSS_SLAM_WINDUP_SECONDS,
+				`Config: ยืนชิดบอสแล้ววิ่งออกพ้นวงฟาดต้องใช้ {escape} วิ ไม่ทันเวลาง้าง {cycle.BOSS_SLAM_WINDUP_SECONDS} วิ`
+			)
+			local hits = cycle.BOSS_HITS_TO_KILL_PLAYER
+			assert(
+				cycle.PLAYER_MAX_HEALTH > 0 and type(hits) == "number" and hits >= 1 and hits % 1 == 0,
+				"Config: PLAYER_MAX_HEALTH ต้อง > 0 · BOSS_HITS_TO_KILL_PLAYER ต้องเป็นจำนวนเต็ม ≥ 1"
+			)
+			-- โดนครบ N ครั้งตาย**พอดี** (ไม่ขาด ไม่เกิน) · ดาเมจต้องเป็นจำนวนเต็ม — หารไม่ลงตัว (100 ÷ 3) = ค้างเลือดเศษทศนิยม
+			local damage = Config.getBossSlamDamage()
+			assert(
+				damage % 1 == 0 and damage * hits == cycle.PLAYER_MAX_HEALTH,
+				`Config: ดาเมจบอสฟาด {damage} × {hits} ครั้งต้องเท่ากับเลือดเต็ม {cycle.PLAYER_MAX_HEALTH} พอดี`
+			)
+			assert(cycle.PLAYER_REGEN_DELAY_SECONDS > 0, "Config: PLAYER_REGEN_DELAY_SECONDS ต้องมากกว่า 0 (0 = ฟื้นเต็มระหว่างสู้)")
+			assert(cycle.PLAYER_RESPAWN_SECONDS > 0, "Config: PLAYER_RESPAWN_SECONDS ต้องมากกว่า 0")
+			assert(Config.getBossDodgeUptime() > 0, "Config: จังหวะฟาดถี่จนตีบอสไม่ได้เลย (สัดส่วนเวลาตีจริง = 0)")
+		end
 		assert(cycle.EGGS_PER_NIGHT >= 1, "Config: BossCycle.EGGS_PER_NIGHT ต้องมีอย่างน้อย 1")
 		assert(cycle.EGG_PICKUP_HOLD_SECONDS > 0, "Config: หยิบไข่บอสต้องกด E ค้าง (EGG_PICKUP_HOLD_SECONDS > 0)")
 		assert(
@@ -4860,7 +4970,8 @@ function Config.validate()
 		local roomInnerX = room.Size.X / 2 - wallHalfT
 		local roomInnerZ = room.Size.Y / 2 - wallHalfT
 		local laneInnerZ = dim.Lane.Width / 2 - wallHalfT
-		local reach = math.max(cycle.PLAYER_ATTACK_RANGE, cycle.BOSS_ATTACK_RANGE)
+		-- 5D: ระยะเอื้อมของบอส = วงฟาดที่**วาด** (ใหญ่กว่าวงตัดสิน = ประเมินเผื่อ) · ยังไม่น้อยกว่าระยะตีกระบอง
+		local reach = math.max(cycle.PLAYER_ATTACK_RANGE, Config.getBossSlamRadius())
 		local eggRadius = Config.getBallRadius(dim.Blockout.EggSize) -- ไข่ tier 1 (ขนาดที่ออกบ่อยสุด)
 		for stage = 1, stageCount do
 			local nest = Config.getBossNestCenter(stage)
@@ -4879,11 +4990,13 @@ function Config.validate()
 				boss.X - reach > stageRoomMinX and boss.X + reach < stageRoomMaxX,
 				`Config: ระยะตีบอสห้อง {stage} ลากถึงกำแพงหัว/ท้ายห้อง — ห้องสั้นเกินไป`
 			)
-			-- ทางวิ่ง: จากผนังฝั่งตรงข้าม (วัดที่ช่วงเลนปกติซึ่งแคบกว่าห้อง) ถึงขอบระยะตีของบอส
+			-- ทางวิ่ง: จากผนังฝั่งตรงข้าม (วัดที่ช่วงเลนปกติซึ่งแคบกว่าห้อง) ถึงขอบวงฟาดที่วาด
+			-- ⚠️ 5D (ผู้ใช้สั่ง): ทางวิ่งโล่ง RunPathMinWidth ชิดผนังฝั่งตรงข้าม**ต้องอยู่นอกวงฟาดทั้งแถบ** ทุกห้อง
+			--   วงใหญ่ขึ้นจนทับ = เซิร์ฟไม่บูต · ห้ามย้ายบอส/ไข่/กำแพงแก้เอง — รายงานผู้ใช้
 			local runPath = sign * boss.Z - reach + laneInnerZ
 			assert(
 				runPath >= arena.RunPathMinWidth,
-				`Config: ทางวิ่งผ่านบอสด่าน {stage} กว้างแค่ {runPath} (ต้อง ≥ {arena.RunPathMinWidth}) — ระยะตีบอสกินทั้งเลน`
+				`Config: ทางวิ่งผ่านบอสด่าน {stage} กว้างแค่ {runPath} (ต้อง ≥ {arena.RunPathMinWidth}) — วงบอสฟาดทับทางวิ่ง`
 			)
 			local eggs: { Vector3 } = {}
 			for index = 1, cycle.EGGS_PER_NIGHT do
@@ -5367,6 +5480,10 @@ function Config.validate()
 			"Config: ขั้นพิเศษต้องแพงกว่าขั้นปกติ (CAPSTONE_PRICE_INCOME_MINUTES > PRICE_INCOME_MINUTES)"
 		)
 		assert(Config.getClubPrice(weapon.START_TIER) == 0, "Config: กระบองขั้นเริ่มต้นต้องฟรี")
+		assert(
+			type(weapon.MIN_DAMAGE) == "number" and weapon.MIN_DAMAGE >= 1 and weapon.MIN_DAMAGE % 1 == 0,
+			"Config: Weapon.MIN_DAMAGE ต้องเป็นจำนวนเต็ม ≥ 1"
+		)
 		for tier = 1, weapon.MAX_LEVEL do
 			local damage = Config.getClubDamage(tier)
 			local visual = Config.ClubVisuals[tier]
@@ -5383,12 +5500,18 @@ function Config.validate()
 			end
 		end
 		-- ⚠️ หัวใจของ 5C: ขั้น N ตีบอสห้อง N คนเดียวตาย**ภายในกลางวัน** — ไม่งั้นพังกำแพง N ขณะบอสอยู่ = ติดล็อกถาวร
+		-- ตารางกระบองออกแบบจากเวลาดิบ (≤ TARGET) · ⚠️ 5D: "ทันกลางวัน" ใช้เวลา**หลังหักการหลบบอสฟาด** (ผู้ใช้สั่ง)
 		for room = 1, stage.COUNT do
 			local seconds = Config.getClubSoloKillSeconds(room, room)
 			assert(
-				seconds <= weapon.TARGET_SOLO_KILL_SECONDS and seconds <= cycle.DAY_SECONDS,
-				`Config: กระบองขั้น {room} ตีบอสห้อง {room} คนเดียว {seconds} วิ เกินเป้า {weapon.TARGET_SOLO_KILL_SECONDS} วิ `
-					.. `/ กลางวัน {cycle.DAY_SECONDS} วิ — ติดล็อกอัญเชิญ`
+				seconds <= weapon.TARGET_SOLO_KILL_SECONDS,
+				`Config: กระบองขั้น {room} ตีบอสห้อง {room} คนเดียว {seconds} วิ เกินเป้า {weapon.TARGET_SOLO_KILL_SECONDS} วิ`
+			)
+			local withDodge = Config.getClubSoloKillSecondsWithDodge(room, room)
+			assert(
+				withDodge <= cycle.DAY_SECONDS,
+				`Config: กระบองขั้น {room} ตีบอสห้อง {room} คนเดียว (หักเวลาหลบบอสฟาดแล้ว) {withDodge} วิ `
+					.. `เกินกลางวัน {cycle.DAY_SECONDS} วิ — ติดล็อกอัญเชิญ`
 			)
 		end
 		-- ขั้นพิเศษตีห้องสุดท้ายเร็วกว่าขั้นก่อนหน้า**ชัดเจน** (อย่างน้อยครึ่งหนึ่งของเวลาเดิม)

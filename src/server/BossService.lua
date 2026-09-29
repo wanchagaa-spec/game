@@ -8,7 +8,7 @@
 --   กลางวัน: กำแพงกั้นหาย แต่ละคนวิ่งไปห้องที่ตัวเองมีสิทธิ์ · บอสห้องไหนตายแล้วหายไปจนคืนถัดไป
 --   ตีบอส = อาวุธ (Tool) ที่ server ใส่ Backpack ให้ · ถือ/เก็บอัตโนมัติตามห้องบอสที่มีสิทธิ์ (Backpack เดิมของ Roblox ปิดอยู่)
 --   ⚠️ ระบบ personal combat ของ Phase 4 **ยังไม่มีในโค้ด** — รอบนี้ทำขั้นต่ำเท่าที่ต้องใช้ตีบอส (ผู้ใช้เลือก)
---     ดาเมจ = Config.getWeaponDamage(weaponLevel) ตัวเดิม · ยังไม่มี PvP · บอสตีกลับปิดไว้ใน config
+--     ดาเมจ = Config.getWeaponDamage(weaponLevel) ตัวเดิม · ยังไม่มี PvP · (5D: บอสตีกลับด้วยท่าฟาดพื้นแล้ว — ข้างล่าง)
 --   ⚠️ 5C: อาวุธ = **กระบอง 10 ขั้น** — ดาเมจ Config.getClubDamage(weaponLevel) (getWeaponDamage = ชื่อเดิมของตัวเดียวกัน)
 --     หน้าตาในมือประกอบจาก Part ตามขั้น (Config.ClubVisuals · applyClub) · ซื้อขั้นใหม่แล้วประกอบใหม่เองภายใน 1 tick
 --     ท่าเหวี่ยง = StringValue "toolanim" = "Slash" (สคริปต์ Animate มาตรฐานของตัวละครเล่นท่าฟันให้เอง)
@@ -36,6 +36,18 @@
 --   ออกแล้วเข้าเซิร์ฟเดิมยังล็อกอยู่ · บอสไม่ตายข้ามคืน → ฟื้น HP เต็ม แต่ล็อกยังอยู่ · ตัวตัดสินอยู่ที่
 --   CombatService.shouldBossLock (ด่านที่มีกำแพงจริงเท่านั้น) · CombatService.start ต่อสายผ่าน getGate()
 --
+-- ══ 5D: บอสตีกลับ + ผู้เล่นตาย/เกิดใหม่ (ผู้ใช้ยืนยันดีไซน์ · docs/boss-plan.md §6) ══
+--   ท่าเดียว "ฟาดพื้นรอบตัว": มีผู้เล่นอยู่ในวงที่วาด → วงแดงขึ้น (ง้าง BOSS_SLAM_WINDUP_SECONDS) → ฟาดลง: ทุกคนที่อยู่ใน
+--     **วงที่ตัดสิน** (เล็กกว่าวงที่วาด · ตำแหน่งที่ server เห็นตอนฟาด) โดน PLAYER_MAX_HEALTH ÷ BOSS_HITS_TO_KILL_PLAYER
+--     → พัก BOSS_SLAM_REST_SECONDS → ถ้ายังมีคนในวง ง้างใหม่ · ไม่มีใครในวง = ไม่ฟาด · กลางคืน/บอสตาย = ยกเลิกท่าที่ง้างค้าง
+--     ตีทุกคนในวง (รวมคนวิ่งผ่าน · คนไม่มีสิทธิ์ห้องที่เดินทะลุกำแพง client มาก็โดน) · ไม่มี PvP · สถานะต่อห้อง (Room.slam*)
+--   เลือด: Humanoid.Health ปกติ เต็ม PLAYER_MAX_HEALTH ทุกคน · สคริปต์ฟื้นเลือดของ Roblox ถูกถอด ·
+--     ไม่โดนตีครบ PLAYER_REGEN_DELAY_SECONDS → เต็มทันที · อยู่เซฟโซน/เกิดใหม่ → เต็มทันที (planHealth)
+--   ตาย (สาเหตุใดก็ได้ รวมรีเซ็ต): ในสนามรบ → เกิดใหม่หน้าทางเข้าเลน (จุดวาปกลางคืน · pickGateSpot กระจายไม่ซ้อน) ·
+--     ในเซฟโซน → เกิดที่คอกตามปกติ · รอ PLAYER_RESPAWN_SECONDS (Players.RespawnTime) · ไข่บอสที่ถือกลับจุดเดิม ·
+--     กระบองกลับมาขั้นเดิม (ensureWeapon ทุก tick) · **ไม่แตะ PlayerData เลย** (เงิน/แม่/ไข่ในกระเป๋า/ทหาร/อัญเชิญเหมือนเดิม)
+--     · ดาเมจที่ทำใส่บอสไว้ยังนับ (ไม่ล้าง damageBy) — กลับเข้าห้องทันก่อนบอสตายก็ได้ส่วนแบ่งตามปกติ
+--
 -- ⚠️ ของทุกอย่างในไฟล์นี้ **ไม่เซฟ DataStore** — เวลากลางของเซิร์ฟ ไม่ผูกกับข้อมูลผู้เล่น
 -- ⚠️ require สองทางเหมือน CombatService — ฟังก์ชันสถานะ (newState/step/applyDamage/...) เป็น Luau ล้วน
 --   tests/boss.spec.luau เรียกตรงได้โดยส่ง `now` เอง · ของที่แตะ Roblox อยู่ใน start() เท่านั้น
@@ -58,6 +70,9 @@ export type BossEgg = {
 	carrier: number?, -- userId ของคนที่ถืออยู่ (status = "carried")
 }
 
+-- 5D: จังหวะฟาดของบอสห้องหนึ่ง · "idle" = รอมีคนเข้าวง · "windup" = วงแดงขึ้นแล้ว รอฟาด (slamAt) · "rest" = ฟาดแล้วพัก (restUntil)
+export type SlamPhase = "idle" | "windup" | "rest"
+
 -- 5B-2: สถานะของห้องบอส 1 ห้อง (บอส 1 ตัว + ไข่ชุดของมัน)
 export type Room = {
 	room: number,
@@ -70,6 +85,10 @@ export type Room = {
 	-- บอสตายแล้วยังเก็บไว้จนคืนถัดไป (อ่านตอนแบ่งเงิน)
 	damageBy: { [number]: number },
 	eggs: { BossEgg }, -- ไข่ชุดของบอสตัวปัจจุบัน (ว่างจนกว่าจะถึงคืนแรก)
+	-- 5D: ท่าฟาดพื้น (เวลา server)
+	slamPhase: SlamPhase,
+	slamAt: number?, -- windup: ฟาดลงตอนนี้
+	restUntil: number?, -- rest: พักถึงตอนนี้
 }
 
 -- ไข่ที่ถืออยู่ชี้ไปที่ (ห้อง, ฟอง) · 5B-2: จังหวะเริ่มกดค้างที่ server จดไว้
@@ -92,6 +111,10 @@ export type State = {
 	holds: { [number]: Hold }, -- 5B-2: userId → จังหวะเริ่มกดค้างล่าสุด (เวลา server)
 	lostCarriers: { number }, -- คนที่ถือไข่อยู่ตอนไข่ชุดใหม่เกิด (ไข่ที่ถือหาย) — runtime แจ้งแล้วล้าง
 	rng: Rng,
+	-- ══ 5D ══ ไม่เซฟ DataStore
+	attackEnabled: boolean, -- สวิตช์บอสฟาดทั้งเซิร์ฟ (เริ่มจาก BossCycle.BOSS_ATTACK_ENABLED · debugBossAttack สลับได้)
+	lastHitAt: { [number]: number }, -- userId → เวลาที่โดนบอสฟาดล่าสุด (นับเวลาฟื้นเลือด)
+	gateRespawn: { [number]: boolean }, -- userId → ตายในสนามรบ รอเกิดใหม่หน้าทางเข้าเลน
 }
 
 local function cycleConfig()
@@ -134,6 +157,9 @@ local function newRoom(room: number): Room
 		bossDiedAt = nil,
 		damageBy = {},
 		eggs = {},
+		slamPhase = "idle",
+		slamAt = nil,
+		restUntil = nil,
 	}
 end
 
@@ -153,6 +179,9 @@ function BossService.newState(now: number, rng: Rng?): State
 		holds = {},
 		lostCarriers = {},
 		rng = rng or fallbackRng(),
+		attackEnabled = cycleConfig().BOSS_ATTACK_ENABLED,
+		lastHitAt = {},
+		gateRespawn = {},
 	}
 end
 
@@ -197,6 +226,7 @@ local function spawnAllBosses(state: State, at: number)
 		roomState.bossSpawnedAt = at
 		roomState.bossDiedAt = nil
 		roomState.damageBy = {}
+		-- 5D: ⚠️ ไม่รีเซ็ตท่าฟาดตรงนี้ — ปล่อยให้ stepSlams เห็นว่ากลางคืนแล้วคืน "cancel" (runtime ถึงจะเก็บวงแดงที่ง้างค้าง)
 		spawnEggs(state, roomState)
 	end
 end
@@ -373,22 +403,152 @@ function BossService.getContributors(state: State, room: number): { Contribution
 	return list
 end
 
--- บอสห้องนี้ตีกลับ (ปิดไว้ใน config) — คืน userId ของทุกคนในระยะ · positions = { [userId] = ตำแหน่งตัวละคร }
-function BossService.pickCounterTargets(state: State, room: number, positions: { [number]: Vector3 }): { number }
-	local cfg = cycleConfig()
-	local targets: { number } = {}
-	local roomState = BossService.getRoom(state, room)
-	if not cfg.BOSS_ATTACK_ENABLED or state.phase ~= "day" or roomState == nil or not roomState.bossAlive then
-		return targets
-	end
+--------------------------------------------------------------------------------
+-- 5D: บอสฟาดพื้น + เลือด/ตาย/เกิดใหม่ — ฟังก์ชันสถานะล้วน (ไม่แตะ Roblox · เทสต์เรียกตรงได้)
+--------------------------------------------------------------------------------
+
+-- ผู้เล่นที่อยู่ในรัศมี radius (แนวราบ) จากบอสห้องนี้ · positions = { [userId] = ตำแหน่งตัวละครที่ server เห็น (คนที่ยังไม่ตาย) }
+local function playersWithin(room: number, positions: { [number]: Vector3 }, radius: number): { number }
 	local bossPosition = Config.getBossCornerCenter(room)
+	local inside: { number } = {}
 	for userId, position in positions do
-		if BossService.horizontalDistance(position, bossPosition) <= cfg.BOSS_ATTACK_RANGE then
-			table.insert(targets, userId)
+		if BossService.horizontalDistance(position, bossPosition) <= radius then
+			table.insert(inside, userId)
 		end
 	end
-	table.sort(targets)
-	return targets
+	table.sort(inside)
+	return inside
+end
+
+-- คนที่โดนถ้าบอสห้องนี้ฟาดลง "ตอนนี้" = อยู่ใน**วงที่ตัดสิน** (Config.getBossSlamHitRadius · เล็กกว่าวงที่วาด)
+function BossService.getSlamTargets(room: number, positions: { [number]: Vector3 }): { number }
+	return playersWithin(room, positions, Config.getBossSlamHitRadius())
+end
+
+export type SlamEvent = {
+	kind: string, -- "windup" (วงแดงขึ้น) · "slam" (ฟาดลง — targets = คนที่โดน) · "cancel" (เลิกง้างกลางคัน)
+	room: number,
+	at: number, -- windup: เวลาที่จะฟาดลง · slam/cancel: เวลาที่เกิด
+	targets: { number },
+}
+
+-- เดินจังหวะฟาดของทุกห้องให้ทันปัจจุบัน · คืนเหตุการณ์เรียงตามห้อง (runtime วาดวง/ทำดาเมจตามนี้)
+-- ⚠️ positions = ตำแหน่งที่ server เห็นของคนที่**ยังไม่ตาย**เท่านั้น
+-- กติกา: ฟาดได้เฉพาะ กลางวัน + บอสห้องนั้นยังอยู่ + สวิตช์เปิด — ไม่งั้นท่าที่ง้างค้างถูกยกเลิก ("cancel")
+--   idle → windup: มีคนอยู่ใน**วงที่วาด** · windup → ฟาดตอน now ≥ slamAt (คนในวงที่ตัดสินโดน · ว่างก็ฟาด — ง้างแล้วต้องลง)
+--   → rest (ถึง slamAt + REST) → idle → ถ้ายังมีคนในวง ง้างใหม่ทันทีในจังหวะเดียวกัน
+function BossService.stepSlams(state: State, now: number, positions: { [number]: Vector3 }): { SlamEvent }
+	local cfg = cycleConfig()
+	local events: { SlamEvent } = {}
+	for _, roomState in state.rooms do
+		local room = roomState.room
+		local active = state.attackEnabled and state.phase == "day" and roomState.bossAlive
+		if not active then
+			if roomState.slamPhase == "windup" then
+				table.insert(events, { kind = "cancel", room = room, at = now, targets = {} })
+			end
+			roomState.slamPhase = "idle"
+			roomState.slamAt = nil
+			roomState.restUntil = nil
+		else
+			if roomState.slamPhase == "windup" and roomState.slamAt and now >= roomState.slamAt then
+				local slamAt = roomState.slamAt :: number
+				table.insert(events, { kind = "slam", room = room, at = slamAt, targets = BossService.getSlamTargets(room, positions) })
+				roomState.slamPhase = "rest"
+				roomState.slamAt = nil
+				roomState.restUntil = slamAt + cfg.BOSS_SLAM_REST_SECONDS
+			end
+			if roomState.slamPhase == "rest" and roomState.restUntil and now >= roomState.restUntil then
+				roomState.slamPhase = "idle"
+				roomState.restUntil = nil
+			end
+			if roomState.slamPhase == "idle" and #playersWithin(room, positions, Config.getBossSlamRadius()) > 0 then
+				roomState.slamPhase = "windup"
+				roomState.slamAt = now + cfg.BOSS_SLAM_WINDUP_SECONDS
+				table.insert(events, { kind = "windup", room = room, at = roomState.slamAt :: number, targets = {} })
+			end
+		end
+	end
+	return events
+end
+
+-- จดว่าโดนบอสฟาด (เริ่มนับเวลาฟื้นเลือดใหม่)
+function BossService.recordHit(state: State, userId: number, now: number)
+	state.lastHitAt[userId] = now
+end
+
+-- เลือดที่ควรเป็น "ตอนนี้" ตามกติกาฟื้นเลือด 5D (คืนค่าเดิม = ไม่ต้องแตะ)
+-- ตายแล้ว (≤ 0) = ไม่ฟื้น (รอเกิดใหม่) · เต็มอยู่แล้ว = เดิม · อยู่เซฟโซน = เต็มทันที ·
+-- ไม่โดนตีครบ PLAYER_REGEN_DELAY_SECONDS (หรือไม่เคยโดน) = เต็มทันที · นอกนั้น = ไม่ฟื้นระหว่างสู้
+function BossService.planHealth(
+	state: State,
+	userId: number,
+	health: number,
+	maxHealth: number,
+	inSafeZone: boolean,
+	now: number
+): number
+	if health <= 0 or health >= maxHealth then
+		return health
+	end
+	if inSafeZone then
+		return maxHealth
+	end
+	local last = state.lastHitAt[userId]
+	if last == nil or now - last >= cycleConfig().PLAYER_REGEN_DELAY_SECONDS then
+		return maxHealth
+	end
+	return health
+end
+
+-- ตายตรงนี้แล้วเกิดใหม่หน้าทางเข้าเลนไหม — ตายในสนามรบ (นอกเซฟโซน) = ใช่ · ในเซฟโซน / ไม่รู้ตำแหน่ง = เกิดตามปกติ (คอก)
+function BossService.shouldRespawnAtGate(position: Vector3?): boolean
+	return position ~= nil and not Config.isInSafeZone(position)
+end
+
+-- ผู้เล่นตาย (สาเหตุใดก็ได้ รวมรีเซ็ต) · position = ตำแหน่งที่ server เห็นตอนตาย (nil = ไม่รู้)
+-- คืน (เกิดใหม่หน้าทางเข้าเลนไหม, ไข่บอสที่ถืออยู่ซึ่งกลับจุดเดิมแล้ว)
+-- ⚠️ ไม่แตะ damageBy (ดาเมจใส่บอสยังนับ) · ไม่แตะ lockedUsers · ไม่รับ PlayerData เลย = เงิน/แม่/ไข่/ทหาร/อัญเชิญไม่เปลี่ยน
+function BossService.handleDeath(state: State, userId: number, position: Vector3?): (boolean, BossEgg?)
+	state.lastHitAt[userId] = nil
+	state.holds[userId] = nil -- กดค้างที่ไข่อยู่ตอนตาย = ต้องเริ่มกดใหม่
+	local egg = BossService.dropCarriedEgg(state, userId)
+	local gate = BossService.shouldRespawnAtGate(position)
+	if gate then
+		state.gateRespawn[userId] = true
+	else
+		state.gateRespawn[userId] = nil
+	end
+	return gate, egg
+end
+
+-- เกิดใหม่แล้ว: ต้องย้ายไปหน้าทางเข้าเลนไหม (อ่านแล้วล้าง — ตายรอบหน้าตัดสินใหม่)
+function BossService.takeGateRespawn(state: State, userId: number): boolean
+	local gate = state.gateRespawn[userId] == true
+	state.gateRespawn[userId] = nil
+	return gate
+end
+
+-- จุดเกิดหน้าทางเข้าเลน = จุดวาปกลางคืน (Config.getBossGatherSpot 1..World.MAX_PENS) ที่**ห่างคนอื่นมากที่สุด** (กระจายไม่ซ้อน)
+-- occupied = ตำแหน่งตัวละครคนอื่นตอนนี้ · ไม่มีใคร = จุด 1 · ห่างเท่ากัน = เลขจุดน้อยก่อน
+function BossService.pickGateSpot(occupied: { Vector3 }): number
+	local best, bestDistance = 1, -1
+	for index = 1, Config.World.MAX_PENS do
+		local spot = Config.getBossGatherSpot(index)
+		local nearest = math.huge
+		for _, position in occupied do
+			nearest = math.min(nearest, BossService.horizontalDistance(spot, position))
+		end
+		if nearest > bestDistance then
+			best, bestDistance = index, nearest
+		end
+	end
+	return best
+end
+
+-- ต้องสร้างกระบองให้ใหม่ไหม — ยังมีชีวิต + ไม่มีทั้งในมือและในกระเป๋า Roblox (ตายแล้วของในกระเป๋าหายหมด)
+function BossService.needsWeapon(alive: boolean, inCharacter: boolean, inBackpack: boolean): boolean
+	return alive and not inCharacter and not inBackpack
 end
 
 --------------------------------------------------------------------------------
@@ -664,6 +824,8 @@ local applyEvents: (events: { string }) -> () = function(_events) end
 local onBossKilled: (room: number) -> () = function(_room) end
 local refreshWorld: () -> () = function() end
 local onUserLocked: (userId: number, room: number) -> () = function(_userId, _room) end
+-- 5D: เดินจังหวะบอสฟาดทันที (คำสั่ง debug สลับสวิตช์แล้วเรียก — ยกเลิกวงที่ง้างค้างทันที)
+local runSlams: () -> () = function() end
 
 -- ⚠️ ก่อน start() ยังไม่มีบอส → ไม่มีใครถูกล็อก (เทสต์ของ CombatService/EggService ไม่ต้องรู้จักไฟล์นี้)
 function BossService.isLocked(userId: number): boolean
@@ -708,7 +870,7 @@ function BossService.getGate(): Gate
 end
 
 local BARRIER_NIGHT_TRANSPARENCY = 0 -- 5B: ขาวทึบ (เดิม 0.35 โปร่ง)
-local WORLD_TICK = 0.25 -- วินาที — จังหวะเช็คเปลี่ยน phase · ถือ/เก็บอาวุธ · บอสตีกลับ · ส่งไข่ที่เซฟโซน
+local WORLD_TICK = 0.25 -- วินาที — จังหวะเช็คเปลี่ยน phase · ถือ/เก็บอาวุธ · บอสฟาด · เลือด · ส่งไข่ที่เซฟโซน
 local CARRY_ABOVE_ROOT = 3 -- ไข่ที่ถือลอยเหนือ HumanoidRootPart เท่านี้ + รัศมีไข่ (อยู่เหนือหัวพอดี)
 local PICKUP_REQUEST_COOLDOWN = 0.25 -- วินาที — กันยิงคำขอหยิบรัว (server นับเอง)
 
@@ -731,6 +893,19 @@ local CLUB_GRIP_FROM_END = 0.6 -- มือจับห่างปลายล�
 local CLUB_HEAD_SINK = 0.2 -- หัวกระบองสวมทับปลายด้ามลงมาเท่านี้ (ไม่ให้เห็นรอยต่อลอย)
 local CLUB_GLOW_RANGE = 8 -- ระยะไฟของขั้นเรืองแสง (studs)
 local SWING_VALUE_LIFETIME = 1 -- วินาที ก่อนลบ StringValue "toolanim" ฝั่ง server (client อ่านแล้วถอดเองในเฟรมเดียว)
+
+-- ══ 5D: วงแดงบอสฟาด ══ จานแดงแบนบนพื้นรอบตัวบอส (รัศมี = วงที่**วาด** Config.getBossSlamRadius) · ของ server = ทุกคนเห็น
+-- ตอนง้าง: ค่อย ๆ ทึบขึ้นจนถึงจังหวะฟาด (บอกเวลาที่เหลือด้วยตา) · ฟาดลง: ทึบสุดวาบสั้น ๆ แล้วหาย
+local SLAM_RING_THICKNESS = 0.2 -- studs (จานแบน)
+local SLAM_RING_LIFT = 0.05 -- ยกจากผิวพื้นเลนกันกระพริบ (z-fighting)
+local SLAM_RING_RGB = { 230, 40, 40 } -- สร้าง Color3 ใน start() (นอก Roblox ไม่มี Color3 — เทสต์ require ไฟล์นี้)
+local SLAM_RING_START_TRANSPARENCY = 0.75 -- ต้นจังหวะง้าง
+local SLAM_RING_END_TRANSPARENCY = 0.35 -- ก่อนฟาดลงพอดี
+local SLAM_FLASH_SECONDS = 0.2 -- วงทึบสุดค้างหลังฟาดเท่านี้แล้วหาย
+local SLAM_TIMER_SLACK = 0.02 -- วินาที — ตั้งเวลาฟาดเลย slamAt เล็กน้อย (นาฬิกา server คลาดระดับมิลลิวินาที)
+-- 5D: เกิดใหม่หน้าทางเข้าเลน — Roblox บางจังหวะวางตัวละครที่จุดเกิดหลัง CharacterAdded → เช็คซ้ำ 1 ครั้ง
+local GATE_RECHECK_SECONDS = 0.1
+local GATE_RECHECK_TOLERANCE = 6 -- studs (วิ่ง 0.1 วิที่ความเร็วสูงสุดยังไม่ถึง)
 
 local function materialOf(name: string): Enum.Material
 	local ok, material = pcall(function()
@@ -827,6 +1002,8 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 	-- Random ของ Roblox มี NextInteger ตรงกับชนิด Rng (cast กัน type checker มองว่าเป็น userdata คนละชนิด)
 	local state = BossService.newState(serverNow(), Random.new() :: any)
 	current = state
+	-- 5D: ตายแล้วรอเกิดใหม่เท่านี้ (ค่าใน Config · ของ Roblox ตั้งทั้งเซิร์ฟ)
+	Players.RespawnTime = cycleConfig().PLAYER_RESPAWN_SECONDS
 
 	local notify = Remotes.waitFor(Config.RemoteNames.BOSS_EVENT_NOTIFY)
 	local pickupRequest = Remotes.waitFor(Config.RemoteNames.PICK_UP_BOSS_EGG_REQUEST)
@@ -851,6 +1028,32 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 		for index = 1, cycleConfig().EGGS_PER_NIGHT do
 			eggParts[room][index] = eggFolder:WaitForChild(Config.getBossEggPartName(room, index)) :: BasePart
 		end
+	end
+
+	-- 5D: วงแดงบอสฟาด 1 วงต่อห้อง (สร้างครั้งเดียว · ใส่เข้าโลกเฉพาะตอนง้าง/ฟาด)
+	local TweenService = game:GetService("TweenService")
+	local slamRings: { BasePart } = {}
+	local slamTokens: { number } = {} -- เพิ่มทุกครั้งที่วงเปลี่ยนสถานะ — กันตัวลบวงของรอบเก่าไปลบวงของรอบใหม่
+	for room = 1, #state.rooms do
+		local boss = Config.getBossCornerCenter(room)
+		local diameter = Config.getBossSlamRadius() * 2
+		local ring = Instance.new("Part")
+		ring.Name = `{Config.BOSS_SLAM_RING_NAME}{room}`
+		ring.Shape = Enum.PartType.Cylinder
+		ring.Size = Vector3.new(SLAM_RING_THICKNESS, diameter, diameter)
+		-- ทรงกระบอกของ Roblox ยาวตามแกน X → หมุน 90° รอบแกน Z ให้แบนนอนบนพื้น
+		ring.CFrame = CFrame.new(boss.X, SLAM_RING_THICKNESS / 2 + SLAM_RING_LIFT, boss.Z) * CFrame.Angles(0, 0, math.pi / 2)
+		ring.Anchored = true
+		ring.CanCollide = false
+		ring.CanQuery = false
+		ring.CanTouch = false
+		ring.CastShadow = false
+		ring.Material = Enum.Material.Neon
+		ring.Color = Color3.fromRGB(SLAM_RING_RGB[1], SLAM_RING_RGB[2], SLAM_RING_RGB[3])
+		ring.Transparency = 1
+		ring:SetAttribute("Room", room)
+		slamRings[room] = ring
+		slamTokens[room] = 0
 	end
 
 	-- สถานะที่ client อ่าน (ทุกคนเห็นค่าเดียวกัน) — Attribute ของ Folder นี้ replicate ให้เอง
@@ -1138,10 +1341,22 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 		end
 	end
 
-	-- อาวุธใส่ Backpack ใหม่ทุกครั้งที่เกิด (Backpack ถูกล้างตอนตาย) · Tool.Activated ยิงถึง server เอง
-	local function giveWeapon(player: Player)
-		local backpack = player:WaitForChild("Backpack", 10)
-		if not backpack or backpack:FindFirstChild(Config.WEAPON_TOOL_NAME) then
+	-- ══ 5D: กระบองต้องอยู่กับตัวเสมอ ══ ตายแล้วของในกระเป๋า Roblox (Backpack) + ในมือหายหมด → สร้างใหม่ขั้นเดิม
+	-- เรียกตอนเกิด + ทุก tick (updateWeapons) — จังหวะที่ Roblox ล้าง Backpack ตอนเกิดใหม่ไม่แน่นอน เช็คซ้ำจึงชัวร์กว่า
+	-- Tool.Activated ยิงถึง server เอง (ไม่มี RemoteEvent) · ขั้นตาม weaponLevel ที่เซฟไว้ (refreshClub ประกอบใหม่ถ้าไม่ตรง)
+	local function ensureWeapon(player: Player)
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local backpack = player:FindFirstChildOfClass("Backpack")
+		if not character or not humanoid or not backpack then
+			return
+		end
+		local needs = BossService.needsWeapon(
+			humanoid.Health > 0,
+			character:FindFirstChild(Config.WEAPON_TOOL_NAME) ~= nil,
+			backpack:FindFirstChild(Config.WEAPON_TOOL_NAME) ~= nil
+		)
+		if not needs then
 			return
 		end
 		local data = DataService.getCached(player.UserId)
@@ -1152,12 +1367,79 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 		tool.Parent = backpack
 	end
 
+	-- 5D: สคริปต์ฟื้นเลือดเริ่มต้นของ Roblox (Script ชื่อ "Health" ในตัวละคร · ฟื้น 1%/วิ) ขัดกติกา "ไม่ฟื้นระหว่างสู้" → ถอดทิ้ง
+	-- (ไม่แตะ default.project.json · Roblox ใส่สคริปต์นี้ตอนเกิด บางทีหลัง CharacterAdded → ดัก ChildAdded ด้วย)
+	local function isDefaultRegen(child: Instance): boolean
+		return child.Name == "Health" and child:IsA("Script")
+	end
+
+	-- 5D: ย้ายตัวละครที่เพิ่งเกิดไปหน้าทางเข้าเลน (จุดวาปกลางคืนที่ห่างคนอื่นที่สุด) หันเข้าเลน (+X)
+	local function moveToGate(player: Player, character: Model)
+		local root = character:WaitForChild("HumanoidRootPart", 5) :: BasePart?
+		if not root then
+			return
+		end
+		local occupied: { Vector3 } = {}
+		for _, other in Players:GetPlayers() do
+			local otherRoot = if other ~= player then aliveRoot(other) else nil
+			if otherRoot then
+				table.insert(occupied, otherRoot.Position)
+			end
+		end
+		local spot = Config.getBossGatherSpot(BossService.pickGateSpot(occupied))
+		local position = Vector3.new(spot.X, spot.Y + Config.MapDimensions.Player.Height, spot.Z)
+		local target = CFrame.lookAt(position, position + Vector3.new(1, 0, 0))
+		character:PivotTo(target)
+		task.delay(GATE_RECHECK_SECONDS, function()
+			local liveRoot = root :: BasePart
+			if character.Parent and liveRoot.Parent and BossService.horizontalDistance(liveRoot.Position, spot) > GATE_RECHECK_TOLERANCE then
+				character:PivotTo(target)
+			end
+		end)
+	end
+
+	-- 5D: ทุกครั้งที่เกิด — เลือดเต็มค่าเดียวกันทุกคน · ถอดสคริปต์ฟื้นเลือด · ดักตาย · ตายในสนามรบรอบก่อน = ย้ายไปหน้าทางเข้าเลน · กระบอง
+	local function onCharacterAdded(player: Player, character: Model)
+		local humanoid = character:WaitForChild("Humanoid", 10) :: Humanoid?
+		if not humanoid or character.Parent == nil then
+			return
+		end
+		local maxHealth = cycleConfig().PLAYER_MAX_HEALTH
+		humanoid.MaxHealth = maxHealth
+		humanoid.Health = maxHealth
+		for _, child in character:GetChildren() do
+			if isDefaultRegen(child) then
+				child:Destroy()
+			end
+		end
+		character.ChildAdded:Connect(function(child: Instance)
+			if isDefaultRegen(child) then
+				task.defer(child.Destroy, child)
+			end
+		end)
+		local userId = player.UserId
+		humanoid.Died:Connect(function()
+			-- ตายด้วยสาเหตุใดก็ได้ (บอสฟาด · รีเซ็ต · debugSetHealth 0) — ตัดสินจุดเกิดจากตำแหน่งตอนตาย
+			local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+			local gate, egg = BossService.handleDeath(state, userId, if root then root.Position else nil)
+			if egg then
+				publish()
+				print(`[BossService] ไข่ห้อง {egg.room} #{egg.index} กลับจุดเดิม (ตาย · userId {userId})`)
+			end
+			print(`[BossService] {player.Name} ตาย{if gate then "ในสนามรบ → เกิดใหม่หน้าทางเข้าเลน" else "ในเซฟโซน → เกิดที่คอก"}`)
+		end)
+		if BossService.takeGateRespawn(state, userId) then
+			moveToGate(player, character)
+		end
+		ensureWeapon(player)
+	end
+
 	local function onPlayerAdded(player: Player)
-		player.CharacterAdded:Connect(function()
-			task.defer(giveWeapon, player)
+		player.CharacterAdded:Connect(function(character: Model)
+			task.spawn(onCharacterAdded, player, character)
 		end)
 		if player.Character then
-			task.spawn(giveWeapon, player)
+			task.spawn(onCharacterAdded, player, player.Character)
 		end
 	end
 	Players.PlayerAdded:Connect(onPlayerAdded)
@@ -1279,6 +1561,8 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 		state.holds[player.UserId] = nil
 		lastPickupAt[player.UserId] = nil
 		lastSwingAt[player.UserId] = nil
+		state.lastHitAt[player.UserId] = nil -- 5D
+		state.gateRespawn[player.UserId] = nil
 		-- 5B: ออกเกมระหว่างถือไข่ → ไข่กลับจุดเดิม หยิบใหม่ได้
 		dropEgg(player.UserId, "ออกเกม")
 	end)
@@ -1302,6 +1586,7 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 	-- ถือ/เก็บอาวุธอัตโนมัติ: กลางวัน + ยืนในห้องที่มีสิทธิ์ + บอสห้องนั้นยังอยู่ = ถือ · นอกนั้นเก็บ (5B-2)
 	local function updateWeapons()
 		for _, player in Players:GetPlayers() do
+			ensureWeapon(player) -- 5D: ตายแล้วเกิดใหม่ = กระบองกลับมาขั้นเดิม
 			refreshClub(player)
 			local character = player.Character
 			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -1327,16 +1612,35 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 		end
 	end
 
-	-- บอสตีกลับ (BOSS_ATTACK_ENABLED = false ตอนนี้ — pickCounterTargets คืนว่างเสมอ) · ทุกห้องที่บอสยังอยู่
-	local nextCounterAt = 0
-	local function counterAttack(now: number)
-		if now < nextCounterAt then
+	-- ══ 5D: บอสฟาด ══ ตำแหน่งที่ server เห็นของคนที่ยังไม่ตาย → stepSlams → วาดวง / ทำดาเมจ
+	local function showRing(room: number, windupEndsAt: number, now: number)
+		slamTokens[room] += 1
+		local ring = slamRings[room]
+		ring.Transparency = SLAM_RING_START_TRANSPARENCY
+		ring.Parent = arena
+		local duration = math.max(0, windupEndsAt - now)
+		TweenService:Create(ring, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+			Transparency = SLAM_RING_END_TRANSPARENCY,
+		}):Play()
+	end
+
+	local function hideRing(room: number, flash: boolean)
+		slamTokens[room] += 1
+		local token = slamTokens[room]
+		local ring = slamRings[room]
+		if not flash then
+			ring.Parent = nil
 			return
 		end
-		nextCounterAt = now + cycleConfig().BOSS_ATTACK_INTERVAL
-		if not cycleConfig().BOSS_ATTACK_ENABLED then
-			return
-		end
+		ring.Transparency = 0
+		task.delay(SLAM_FLASH_SECONDS, function()
+			if slamTokens[room] == token then
+				ring.Parent = nil
+			end
+		end)
+	end
+
+	local function tickSlams(now: number)
 		local positions: { [number]: Vector3 } = {}
 		local humanoids: { [number]: Humanoid } = {}
 		for _, player in Players:GetPlayers() do
@@ -1348,9 +1652,56 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 				humanoids[player.UserId] = humanoid
 			end
 		end
-		for room = 1, #state.rooms do
-			for _, userId in BossService.pickCounterTargets(state, room, positions) do
-				humanoids[userId]:TakeDamage(cycleConfig().BOSS_ATTACK_DAMAGE)
+		local damage = Config.getBossSlamDamage()
+		for _, event in BossService.stepSlams(state, now, positions) do
+			if event.kind == "windup" then
+				showRing(event.room, event.at, now)
+				-- ตั้งเวลาฟาดให้ตรงจังหวะ (ลูปหลักเดินทุก WORLD_TICK — รอลูปอย่างเดียวฟาดช้าได้ถึง 0.25 วิ)
+				task.delay(math.max(0, event.at - now) + SLAM_TIMER_SLACK, function()
+					tickSlams(serverNow())
+				end)
+			elseif event.kind == "cancel" then
+				hideRing(event.room, false)
+			elseif event.kind == "slam" then
+				hideRing(event.room, true)
+				for _, userId in event.targets do
+					local humanoid = humanoids[userId]
+					local player = Players:GetPlayerByUserId(userId)
+					if humanoid and player and humanoid.Health > 0 then
+						BossService.recordHit(state, userId, now)
+						-- ลด Health ตรง ๆ (ไม่ใช้ TakeDamage ที่ ForceField กันได้) → โดนครบ BOSS_HITS_TO_KILL_PLAYER ครั้งตายพอดีเสมอ
+						humanoid.Health = math.max(0, humanoid.Health - damage)
+						if humanoid.Health <= 0 then
+							notify:FireClient(player, "slain", event.room)
+							print(`[BossService] {player.Name} ถูกบอสห้อง {event.room} ล้ม`)
+						end
+					end
+				end
+			end
+		end
+	end
+	runSlams = function()
+		tickSlams(serverNow())
+	end
+
+	-- 5D: เลือด — ไม่ฟื้นระหว่างสู้ · ไม่โดนตีครบ PLAYER_REGEN_DELAY_SECONDS = เต็ม · อยู่เซฟโซน = เต็มทันที (planHealth)
+	local function updateHealth(now: number)
+		for _, player in Players:GetPlayers() do
+			local character = player.Character
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+			if humanoid and root and humanoid.Health > 0 then
+				local target = BossService.planHealth(
+					state,
+					player.UserId,
+					humanoid.Health,
+					humanoid.MaxHealth,
+					Config.isInSafeZone(root.Position),
+					now
+				)
+				if target ~= humanoid.Health then
+					humanoid.Health = target
+				end
 			end
 		end
 	end
@@ -1364,7 +1715,8 @@ function BossService.start(grantBossEgg: GrantBossEgg, syncPlayer: (player: Play
 			local now = serverNow()
 			applyEvents(BossService.step(state, now))
 			updateWeapons()
-			counterAttack(now)
+			tickSlams(now)
+			updateHealth(now)
 			updateCarriers()
 		end
 	end)
@@ -1495,6 +1847,53 @@ end
 function BossService.debugBossStatus(): string
 	local state = requireState()
 	return BossService.describe(state, serverNow())
+end
+
+-- 5D: เปิด/ปิดบอสฟาดทั้งเซิร์ฟชั่วคราว (ไม่แตะ BossCycle.BOSS_ATTACK_ENABLED · เซิร์ฟเปิดใหม่กลับเป็นค่าใน Config)
+-- rawOn: true/false · "on"/"off" · 1/0 · ปิด = วงที่ง้างค้างหายทันที ไม่มีใครโดน
+function BossService.debugBossAttack(rawOn: any): string
+	local state = requireState()
+	local on: boolean? = nil
+	if type(rawOn) == "boolean" then
+		on = rawOn
+	elseif rawOn == "on" or rawOn == "true" or rawOn == 1 then
+		on = true
+	elseif rawOn == "off" or rawOn == "false" or rawOn == 0 then
+		on = false
+	end
+	if on == nil then
+		return `debugBossAttack: ใส่ true/false หรือ "on"/"off" (ได้ {tostring(rawOn)}) — ไม่แตะอะไร`
+	end
+	state.attackEnabled = on :: boolean
+	runSlams()
+	return `debugBossAttack: บอสฟาด{if on then "เปิด" else "ปิด"}ทั้งเซิร์ฟแล้ว`
+		.. ` (ค่าใน Config = {tostring(cycleConfig().BOSS_ATTACK_ENABLED)} · เซิร์ฟเปิดใหม่กลับเป็นค่านี้)`
+end
+
+-- 5D: ตั้งเลือดผู้เล่น (0..เลือดเต็ม) — นับเป็น "เพิ่งโดนตี" จึงยังไม่ฟื้นจนไม่โดนตีครบ PLAYER_REGEN_DELAY_SECONDS
+-- ⚠️ ยืนในเซฟโซน = เต็มทันทีใน tick ถัดไป (กติกา) — ทดสอบฟื้นเลือดให้ยืนในสนามรบ · 0 = ตาย (ทดสอบจุดเกิดใหม่)
+function BossService.debugSetHealth(player: Player, rawHealth: any): string
+	local state = requireState()
+	local amount = tonumber(rawHealth)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if amount == nil or amount ~= amount then
+		return `debugSetHealth: ใส่ตัวเลข 0–{cycleConfig().PLAYER_MAX_HEALTH} (ได้ {tostring(rawHealth)}) — ไม่แตะอะไร`
+	end
+	if humanoid == nil or humanoid.Health <= 0 then
+		return `debugSetHealth: {player.Name} ไม่มีตัวละครที่ยังมีชีวิต`
+	end
+	local target = math.clamp(amount, 0, humanoid.MaxHealth)
+	if target < humanoid.MaxHealth then
+		BossService.recordHit(state, player.UserId, serverNow())
+	end
+	humanoid.Health = target
+	return `debugSetHealth: {player.Name} เลือด {target}/{humanoid.MaxHealth}`
+		.. (if target <= 0
+			then " — ตาย (ในสนามรบ = เกิดหน้าทางเข้าเลน · ในเซฟโซน = เกิดที่คอก)"
+			elseif target < humanoid.MaxHealth
+			then ` — เต็มเองเมื่อไม่โดนตีครบ {cycleConfig().PLAYER_REGEN_DELAY_SECONDS} วิ (ในเซฟโซนเต็มทันที)`
+			else "")
 end
 
 return BossService

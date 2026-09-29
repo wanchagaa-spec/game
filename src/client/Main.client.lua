@@ -43,6 +43,7 @@ local CombatEffects = require(script.Parent:WaitForChild("CombatEffects"))
 -- UI-1
 local UiKit = require(script.Parent:WaitForChild("UiKit"))
 local Hotbar = require(script.Parent:WaitForChild("Hotbar"))
+local HealthBar = require(script.Parent:WaitForChild("HealthBar"))
 local BagWindow = require(script.Parent:WaitForChild("BagWindow"))
 local SidePanels = require(script.Parent:WaitForChild("SidePanels"))
 -- UI-2
@@ -152,6 +153,10 @@ local JUMP_BUTTON_GAP = 8
 -- ⚠️ ปิดกระเป๋ามาตรฐานของ Roblox — ช่องถือของของเกมมาแทน (Hotbar)
 pcall(function()
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+end)
+-- ⚠️ 5D: ปิดแถบเลือด + จอแดงของ Roblox — แถบเลือดของเกม (HealthBar เหนือ hotbar) + จอแดงวาบมาแทน (กันซ้อนสองชุด)
+pcall(function()
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)
 end)
 
 local lastPayload: any = nil
@@ -694,6 +699,9 @@ Hotbar.create(hud, function(): number
 	local width = if camera then camera.ViewportSize.X else 0
 	return (LEVEL_LABEL_X + LEVEL_LABEL_WIDTH + HOTBAR_SIDE_GAP) * width
 end)
+-- 5D: แถบเลือดเหนือ hotbar (เฉพาะในสนามรบหรือเลือดไม่เต็ม) + จอแดงวาบตอนโดนตี · อ่าน Humanoid ของตัวเองล้วน ๆ
+HealthBar.create(hud, Hotbar.getFrame())
+HealthBar.start()
 
 BagWindow.create(hud, {
 	moveMother = function(uid: string, target: string)

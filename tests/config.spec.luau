@@ -84,7 +84,8 @@ return function(t, Config)
 	local COOLDOWN = Config.Balance.BossCycle.PLAYER_ATTACK_COOLDOWN
 	check("บอสด่าน 1 = 100 HP", Config.getBossHp(1), 100)
 	check("กระบองมี 10 ขั้น (9 ห้อง + ขั้นพิเศษ)", W.MAX_LEVEL, 10)
-	local expectedDamage = { 1, 3, 30, 300, 3000, 30000, 300000, 3000000, 30000000, 90000000 }
+	-- ✅ 5D ทางเลือก B (ผู้ใช้เลือก): ขั้น 1 = Weapon.MIN_DAMAGE = 2 (สูตรให้ 0.3) · ขั้น 2–10 ไม่เปลี่ยน
+	local expectedDamage = { 2, 3, 30, 300, 3000, 30000, 300000, 3000000, 30000000, 90000000 }
 	for tier = 1, W.MAX_LEVEL do
 		check(`ขั้น {tier} ดาเมจ {expectedDamage[tier]}/ครั้ง ตามตาราง`, Config.getClubDamage(tier), expectedDamage[tier])
 		check(`  getWeaponDamage (ชื่อเดิมที่ BossService ใช้) = getClubDamage`, Config.getWeaponDamage(tier), Config.getClubDamage(tier))
@@ -96,24 +97,38 @@ return function(t, Config)
 	check("ดาเมจทุกขั้นมากกว่าขั้นก่อนหน้า", rises, true)
 	check("ดาเมจไม่ได้เดา: ขั้น 5 = HP ห้อง 5 × คูลดาวน์ ÷ 180 ปัดขึ้น",
 	      Config.getClubDamage(5), Config.roundSignificant(Config.getBossHp(5) * COOLDOWN / W.TARGET_SOLO_KILL_SECONDS, 1, true))
+	check("5D ทางเลือก B: MIN_DAMAGE = 2", W.MIN_DAMAGE, 2)
+	check("  ขั้น 1 จากสูตรต่ำกว่า MIN_DAMAGE (0.3 → ยกเป็น 2)",
+	      Config.roundSignificant(Config.getBossHp(1) * COOLDOWN / W.TARGET_SOLO_KILL_SECONDS, 1, true) < W.MIN_DAMAGE, true)
+	check("  ขั้น 2 จากสูตรไม่โดน MIN_DAMAGE (ตารางขั้น 2–10 เหมือน 5C เป๊ะ)",
+	      Config.roundSignificant(Config.getBossHp(2) * COOLDOWN / W.TARGET_SOLO_KILL_SECONDS, 1, true) > W.MIN_DAMAGE, true)
 
-	print("── 5C: ขั้น N ตีบอสห้อง N คนเดียวตายภายในกลางวัน (กันติดล็อกอัญเชิญ) ──")
+	print("── 5C/5D: ขั้น N ตีบอสห้อง N คนเดียวตายภายในกลางวัน **หลังหักเวลาหลบบอสฟาด** (กันติดล็อกอัญเชิญ) ──")
 	local day = Config.Balance.BossCycle.DAY_SECONDS
 	for room = 1, Config.Balance.Stage.COUNT do
 		local seconds = Config.getClubSoloKillSeconds(room, room)
-		check(`ห้อง {room}: ขั้น {room} คนเดียว {seconds} วิ ≤ กลางวัน {day} วิ`, seconds <= day, true)
-		check(`  และไม่เกินเป้า 3 นาที`, seconds <= W.TARGET_SOLO_KILL_SECONDS, true)
+		local withDodge = Config.getClubSoloKillSecondsWithDodge(room, room)
+		check(`ห้อง {room}: ขั้น {room} คนเดียว (หักหลบแล้ว) {string.format("%.1f", withDodge)} วิ ≤ กลางวัน {day} วิ`,
+			withDodge <= day, true)
+		check(`  เวลาดิบ (ก่อนหลบ) ไม่เกินเป้า 3 นาที`, seconds <= W.TARGET_SOLO_KILL_SECONDS, true)
 		if room >= 2 then
 			check(`  ห้อง 2–9 "ราว 3 นาที" (≥ 2.5 นาที)`, seconds >= 150, true)
 		end
 	end
-	check("ห้อง 1: ขั้น 1 เร็วกว่าได้ (100 ครั้ง = 50 วิ)", Config.getClubSoloKillSeconds(1, 1), 50)
+	check("ห้อง 1: ขั้น 1 เร็วกว่าได้ (5D-B: 50 ครั้ง = 25 วิ)", Config.getClubSoloKillSeconds(1, 1), 25)
 	check("ห้อง 2–9: 334 ครั้ง = 167 วิ", Config.getClubSoloKillSeconds(4, 4), 167)
 	local tier9 = Config.getClubSoloKillSeconds(9, 9)
 	local tier10 = Config.getClubSoloKillSeconds(10, 9)
 	check(`ขั้น 10 ตีห้อง 9 เร็วกว่าขั้น 9 ชัดเจน ({tier10} วิ vs {tier9} วิ)`, tier10 * 2 <= tier9, true)
 	check("ขั้น 10 ตีห้อง 9 = 112 ครั้ง = 56 วิ", tier10, 56)
 	check("ขั้น N ตีห้อง N+1 ไม่ทันกลางวัน (ต้องซื้อขั้นถัดไป)", Config.getClubSoloKillSeconds(3, 4) > day, true)
+
+	print("── 5D: เวลาหลบบอสฟาด (ง้าง 1 วิ + วิ่งกลับ 4 studs ที่ 32 · ทุก 5 วิ) ──")
+	near("สัดส่วนเวลาตีจริง = 1 − (1 + 4/32) ÷ 5 = 0.775", Config.getBossDodgeUptime(), 0.775, 1e-9)
+	near("ห้อง 1 (ขั้น 1): 25 → 32.3 วิ", Config.getClubSoloKillSecondsWithDodge(1, 1), 25 / 0.775, 1e-9)
+	near("ห้อง 2–9 (ขั้น N): 167 → 215.5 วิ", Config.getClubSoloKillSecondsWithDodge(6, 6), 167 / 0.775, 1e-9)
+	near("ขั้น 10 ตีห้อง 9: 56 → 72.3 วิ", Config.getClubSoloKillSecondsWithDodge(10, 9), 56 / 0.775, 1e-9)
+	check("หักหลบแล้วช้ากว่าเวลาดิบเสมอ", Config.getClubSoloKillSecondsWithDodge(4, 4) > Config.getClubSoloKillSeconds(4, 4), true)
 
 	print("── 5C: ราคา = รายได้ 5 นาทีของผู้เล่นอ้างอิงด่าน N · ขั้น 10 = รายได้ 3 ชม. ของด่าน 9 ──")
 	local expectedPrice = { 0, 17000, 170000, 1800000, 18000000, 180000000, 1800000000, 18000000000, 180000000000, 6500000000000 }
@@ -496,8 +511,9 @@ return function(t, Config)
 		local worstMinutes = 0
 		for stage = 2, Config.Balance.Stage.COUNT do
 			-- สมมติฐาน "มีขั้น N−1" ต้องจริง: ขั้น N−1 ตีห้อง N−1 คนเดียวตายทันในรอบเดียว (ได้เงินบอสห้องนั้นทุกคืน)
-			check(`ด่าน {stage}: กระบองขั้น {stage - 1} ตีห้อง {stage - 1} ทันกลางวัน (ฐานของรายได้ตอนติดล็อก)`,
-				Config.getClubSoloKillSeconds(stage - 1, stage - 1) <= cycle.DAY_SECONDS, true)
+			-- 5D: ใช้เวลาที่หักการหลบบอสฟาดแล้ว (ผู้ใช้สั่ง)
+			check(`ด่าน {stage}: กระบองขั้น {stage - 1} ตีห้อง {stage - 1} ทันกลางวัน หักหลบแล้ว (ฐานของรายได้ตอนติดล็อก)`,
+				Config.getClubSoloKillSecondsWithDodge(stage - 1, stage - 1) <= cycle.DAY_SECONDS, true)
 			local minutes = Config.getLockedClubBuyMinutes(stage)
 			if minutes > worstMinutes then worstMinutes = minutes end
 			check(`ด่าน {stage}: หาเงินซื้อกระบองขั้น {stage} ตอนติดล็อก {string.format("%.1f", minutes)} นาที ≤ {W.LOCKED_BUY_MAX_MINUTES}`,
@@ -517,9 +533,11 @@ return function(t, Config)
 		end)(), true)
 
 		-- มือใหม่: มีแค่กระบองขั้น 1 (ฟรี) แล้วพังกำแพงด่าน 2 ขณะบอสห้อง 2 อยู่ → ต้องตีเองคนเดียวตายทันกลางวัน
-		local rookie = Config.getClubSoloKillSeconds(1, 2)
-		check(`กระบองขั้น 1 ตีบอสห้อง 2 คนเดียว {rookie} วิ ≤ กลางวัน {cycle.DAY_SECONDS} วิ (มือใหม่ไม่ติดล็อกด่าน 2)`,
+		-- 5D: หักเวลาหลบบอสฟาดแล้ว (ผู้ใช้สั่ง) · ก่อนทางเลือก B (ดาเมจขั้น 1 = 1) ได้ 645 วิ ตก → ยกเป็น 2 เหลือ ~323 วิ
+		local rookie = Config.getClubSoloKillSecondsWithDodge(1, 2)
+		check(`กระบองขั้น 1 ตีบอสห้อง 2 คนเดียว (หักหลบแล้ว) {string.format("%.1f", rookie)} วิ ≤ กลางวัน {cycle.DAY_SECONDS} วิ (มือใหม่ไม่ติดล็อกด่าน 2)`,
 			rookie <= cycle.DAY_SECONDS, true)
+		check("  เวลาดิบ (ก่อนหลบ) = 500 ครั้ง × 0.5 = 250 วิ", Config.getClubSoloKillSeconds(1, 2), 250)
 	end
 
 	print("── computeBattlePower ──")

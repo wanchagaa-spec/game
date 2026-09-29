@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Smoke test ของ UI ฝั่ง client (UI-1 · UI-2 · UI-3 · UI-4 · UI-5 · Phase 5A · 5C): Hotbar · BagWindow · SidePanels · UiKit · SellWindow
-· MapSigns · SummonWindow · IndexWindow · RobuxShopWindow · BossHud · WeaponShopWindow
+"""Smoke test ของ UI ฝั่ง client (UI-1 · UI-2 · UI-3 · UI-4 · UI-5 · Phase 5A · 5C · 5D): Hotbar · BagWindow · SidePanels · UiKit · SellWindow
+· MapSigns · SummonWindow · IndexWindow · RobuxShopWindow · BossHud · WeaponShopWindow · HealthBar
 
     python3 tools/check-ui-smoke.py
 
@@ -18,7 +18,7 @@ LUAU = os.environ.get('LUAU') or shutil.which('luau')
 if not LUAU:
     sys.exit('หา luau CLI ไม่เจอ — ติดตั้งแล้วใส่ใน PATH หรือสั่ง LUAU=/path/to/luau python3 ...')
 
-MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns', 'SummonWindow', 'IndexWindow', 'RobuxShopWindow', 'BossHud', 'WeaponShopWindow']
+MODULES = ['UiKit', 'Hotbar', 'BagWindow', 'SidePanels', 'SellWindow', 'MapSigns', 'SummonWindow', 'IndexWindow', 'RobuxShopWindow', 'BossHud', 'WeaponShopWindow', 'HealthBar']
 
 MOCK = r'''--!nocheck
 local Config = require("./src/shared/Config")
@@ -1882,6 +1882,49 @@ do
 	check("คืนถัดไป (บอสเกิดใหม่) → จุดกดปิดทุกฟอง", anyOpen, false)
 end
 
+print("\n━━ HealthBar: แถบเลือดเหนือ hotbar · ขึ้นเฉพาะในสนามรบหรือเลือดไม่เต็ม · จอแดงวาบตอนโดนตี (Phase 5D) ━━")
+do
+	local HealthBar = loaded.HealthBar
+	check("ในลาน เลือดเต็ม → ซ่อน", HealthBar.shouldShow(false, 100, 100), false)
+	check("ในสนามรบ เลือดเต็ม → ขึ้น", HealthBar.shouldShow(true, 100, 100), true)
+	check("ในลาน เลือดไม่เต็ม → ขึ้น", HealthBar.shouldShow(false, 60, 100), true)
+	check("ในสนามรบ เลือดไม่เต็ม → ขึ้น", HealthBar.shouldShow(true, 60, 100), true)
+	check("ตายแล้ว (0) → ขึ้น", HealthBar.shouldShow(false, 0, 100), true)
+	check("ยังไม่มีตัวละคร (เลือดเต็ม 0) → ซ่อน", HealthBar.shouldShow(true, 0, 0), false)
+
+	local hudGui = Instance.new("ScreenGui")
+	local hotbarFrame = Hotbar.getFrame()
+	check("Hotbar.getFrame คืนกรอบแถบ", hotbarFrame ~= nil and hotbarFrame.Name == "Hotbar", true)
+	check("สร้างแถบเลือดไม่ error", (pcall(HealthBar.create, hudGui, hotbarFrame)))
+	local bar = findDescendant(hotbarFrame, "HealthBar")
+	check("แถบเลือดเป็นลูกของกรอบ hotbar (ขยับตามแถบ · ไม่ทับช่อง)", bar ~= nil and bar.Parent == hotbarFrame, true)
+	check("  วางเหนือแถบ (ขอบล่างของแถบเลือดอยู่เหนือขอบบน hotbar)", bar.AnchorPoint.Y == 1 and bar.Position.Y.Scale == 0
+		and bar.Position.Y.Offset < 0, true)
+	check("  กว้างไม่เกินแถบ hotbar (ไม่ล้นไปทับเลเวลมุมล่างซ้าย)", bar.Size.X.Offset <= hotbarFrame.Size.X.Offset + 0.001, true)
+	check("  เริ่มต้นซ่อน", bar.Visible, false)
+	local flash = findDescendant(hudGui, "HitFlash")
+	check("จอแดงวาบอยู่ใน ScreenGui เต็มจอ", flash ~= nil and flash.Size.X.Scale == 1 and flash.Size.Y.Scale == 1, true)
+
+	check("เลือดเต็มในลาน → ไม่วาบ", HealthBar.update(100, 100, false), false)
+	check("  แถบซ่อน", bar.Visible, false)
+	HealthBar.update(100, 100, true)
+	check("เดินเข้าสนามรบ → แถบขึ้น", bar.Visible, true)
+	check("โดนตี 100 → 80 → จอแดงวาบ", HealthBar.update(80, 100, true), true)
+	check("  จอแดงโผล่", flash.Visible, true)
+	check("  ข้อความเลือด", findDescendant(bar, "Text").Text, "❤ 80 / 100")
+	check("  ส่วนเติม 80%", findDescendant(bar, "Fill").Size.X.Scale, 0.8)
+	check("เลือดเท่าเดิม → ไม่วาบซ้ำ", HealthBar.update(80, 100, true), false)
+	check("ฟื้นเลือด (80 → 100) → ไม่วาบ", HealthBar.update(100, 100, true), false)
+	HealthBar.update(100, 100, false)
+	check("กลับเข้าลานเลือดเต็ม → แถบซ่อน", bar.Visible, false)
+	HealthBar.update(40, 100, false)
+	check("เลือดไม่เต็มแม้อยู่ในลาน → แถบยังขึ้น", bar.Visible, true)
+	check("เลือดน้อย (20%) → สีแดง", HealthBar.fillColor(0.2) == HealthBar.fillColor(0.1) and HealthBar.fillColor(0.2) ~= HealthBar.fillColor(0.9), true)
+	HealthBar.resetTracking()
+	check("เกิดใหม่ (เลือดเต็ม) → ไม่นับเป็นโดนตี", HealthBar.update(100, 100, false), false)
+	check("relayout ซ้ำไม่ error", (pcall(HealthBar.relayout)))
+end
+
 print(string.format("\n=== ผ่าน %d / ตก %d ===", passCount, failCount))
 if failCount > 0 then
 	error(`มีเทสต์ตก {failCount} เคส`, 0)
@@ -1921,3 +1964,18 @@ print(proc.stdout)
 if proc.returncode != 0:
     print(proc.stderr, file=sys.stderr)
     sys.exit(1)
+
+# ══ 5D: ต่อสายใน Main.client.lua (ตรวจซอร์ส — harness ไม่ได้รัน Main) ══
+main_src = open(os.path.join(ROOT, 'src', 'client', 'Main.client.lua'), encoding='utf-8').read()
+static_checks = [
+    ('Main สร้างแถบเลือดเหนือ hotbar (HealthBar.create(hud, Hotbar.getFrame()))', 'HealthBar.create(hud, Hotbar.getFrame())' in main_src),
+    ('Main ต่อแถบเลือดกับตัวละคร (HealthBar.start())', 'HealthBar.start()' in main_src),
+    ('Main ปิดแถบเลือด/จอแดงของ Roblox (CoreGuiType.Health) กันซ้อนสองชุด', 'SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)' in main_src),
+]
+static_fail = 0
+for label, ok in static_checks:
+    print(f'  {"✓" if ok else "✗"} {label}')
+    if not ok:
+        static_fail += 1
+if static_fail:
+    sys.exit(f'ต่อสาย HealthBar ใน Main.client.lua ไม่ครบ {static_fail} ข้อ')

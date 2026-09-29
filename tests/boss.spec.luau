@@ -315,29 +315,6 @@ return function(t, Config)
 	end
 
 	----------------------------------------------------------------------------
-	print("── 5A บอสตีกลับ: ปิดไว้ใน config → ไม่เลือกใครเลย ──")
-	----------------------------------------------------------------------------
-	do
-		local s = BossService.newState(0)
-		BossService.step(s, 540)
-		BossService.step(s, 600)
-		local boss1 = Config.getBossCornerCenter(1)
-		local near = { [1] = pos(boss1.X + 3, boss1.Z) }
-		check("BOSS_ATTACK_ENABLED = false", cycle.BOSS_ATTACK_ENABLED, false)
-		check("  ไม่มีเป้าหมาย", #BossService.pickCounterTargets(s, 1, near), 0)
-		-- เปิดชั่วคราวเพื่อตรวจการเลือกเป้า แล้วคืนค่าเดิม
-		cycle.BOSS_ATTACK_ENABLED = true
-		local positions = {
-			[1] = pos(boss1.X + 3, boss1.Z),
-			[2] = pos(boss1.X + cycle.BOSS_ATTACK_RANGE + 5, boss1.Z),
-		}
-		local targets = BossService.pickCounterTargets(s, 1, positions)
-		check("เปิดแล้ว: เลือกเฉพาะคนในระยะ", #targets == 1 and targets[1] == 1, true)
-		check("  บอสห้อง 2 ไม่ตีคนที่ยืนข้างบอสห้อง 1", #BossService.pickCounterTargets(s, 2, positions), 0)
-		cycle.BOSS_ATTACK_ENABLED = false
-	end
-
-	----------------------------------------------------------------------------
 	print("── 5A ล็อกอัญเชิญ: เฉพาะตอนบอสห้องนั้นมีชีวิต · ไม่ปลดข้ามคืน · บอสห้องนั้นตาย = ปลด ──")
 	----------------------------------------------------------------------------
 	do
@@ -806,10 +783,10 @@ return function(t, Config)
 		local boss = Config.getBossCornerCenter(1)
 		check("บอสด่าน 1 อยู่มุมขวา (Z > 0)", boss.Z > 0, true)
 		check("  ลึกเข้าไปในห้อง (เลยกึ่งกลางห้องไปทาง +X)", boss.X > Config.getBossNestCenter(1).X, true)
-		local reach = math.max(cycle.PLAYER_ATTACK_RANGE, cycle.BOSS_ATTACK_RANGE)
+		local reach = math.max(cycle.PLAYER_ATTACK_RANGE, Config.getBossSlamRadius()) -- 5D: วงฟาดที่วาด
 		local laneInner = map.Lane.Width / 2 - map.Lane.WallThickness / 2
 		check(
-			"ทางวิ่งฝั่งซ้าย (นอกระยะตีบอส) กว้าง ≥ RunPathMinWidth",
+			"ทางวิ่งฝั่งซ้าย (นอกวงบอสฟาด) กว้าง ≥ RunPathMinWidth",
 			boss.Z - reach + laneInner >= arena.RunPathMinWidth,
 			true
 		)
@@ -965,7 +942,7 @@ return function(t, Config)
 	----------------------------------------------------------------------------
 	do
 		check("validate() ผ่าน (ตรวจครบ 9 ห้อง)", pcall(Config.validate), true)
-		local reach = math.max(cycle.PLAYER_ATTACK_RANGE, cycle.BOSS_ATTACK_RANGE)
+		local reach = math.max(cycle.PLAYER_ATTACK_RANGE, Config.getBossSlamRadius()) -- 5D: วงฟาดที่วาด
 		local laneInner = Config.MapDimensions.Lane.Width / 2 - Config.MapDimensions.Lane.WallThickness / 2
 		local bossOk, eggOk, runOk, sideOk = true, true, true, true
 		for room = 1, STAGES do
@@ -988,7 +965,7 @@ return function(t, Config)
 		check("  บอสทุกห้องอยู่ในห้องของตัวเอง (ที่ server ใช้ตัดสิน)", bossOk, true)
 		check("  ไข่ทุกฟองอยู่ในห้องของตัวเอง", eggOk, true)
 		check("  บอสอยู่ฝั่งมุมตามตาราง", sideOk, true)
-		check("  ทางวิ่งนอกระยะตีบอสกว้างพอทุกห้อง", runOk, true)
+		check("  ทางวิ่งนอกวงบอสฟาดกว้างพอทุกห้อง (5D)", runOk, true)
 		local minX9, maxX9 = Config.getStageRoomRangeX(9)
 		check("ห้อง 9 = หลังกำแพง 9 ถึงปลายเลน", minX9 == Config.getWallX(9) + Config.MapDimensions.StageWall.Thickness / 2
 			and maxX9 == Config.getLaneEndX(), true)
@@ -1167,5 +1144,305 @@ return function(t, Config)
 		print(`  ต่อฟอง ≈ {string.format("%.4f", rate * 100)}% (ทฤษฎี 0.1000%) · สุ่ม {pooledTotal} ครั้ง`)
 		check("ต่อฟอง ≈ 0.1% (ช่วงยอมรับ 0.05–0.2%)", rate > 0.0005 and rate < 0.002, true)
 		check("  ห้องไหนก็ไม่เกิน 0.3% (ตารางน้ำหนักเดียวกันทุกด่าน)", maxRate < 0.003, true)
+	end
+
+	----------------------------------------------------------------------------
+	print("── 5D บอสฟาด: ค่าที่ตั้ง (วงวาด 18 · วงตัดสิน 16 · ง้าง 1 วิ · พัก 4 วิ · เลือด 100 · ครั้งละ 20) ──")
+	----------------------------------------------------------------------------
+	local function dayWithBosses()
+		local s = BossService.newState(0)
+		BossService.step(s, DAY)
+		BossService.step(s, DAY + NIGHT)
+		return s, DAY + NIGHT
+	end
+	do
+		check("บอสฟาดเปิดใน Config", cycle.BOSS_ATTACK_ENABLED, true)
+		check("  state เริ่มตามค่าใน Config", BossService.newState(0).attackEnabled, true)
+		check("วงที่วาด = ระยะตีกระบอง 14 + 4 = 18", Config.getBossSlamRadius(), 18)
+		check("วงที่ตัดสิน = 18 − 2 = 16 (เล็กกว่าวงที่วาด)", Config.getBossSlamHitRadius(), 16)
+		check("  ยืนตีที่ระยะสุด (14) ยังอยู่ในวงตัดสิน → ต้องถอย", cycle.PLAYER_ATTACK_RANGE < Config.getBossSlamHitRadius(), true)
+		check("ง้าง 1 วิ · พัก 4 วิ · รอบละ 5 วิ", cycle.BOSS_SLAM_WINDUP_SECONDS == 1 and cycle.BOSS_SLAM_REST_SECONDS == 4
+			and Config.getBossSlamPeriodSeconds() == 5, true)
+		check("เลือดเต็ม 100", cycle.PLAYER_MAX_HEALTH, 100)
+		check("ดาเมจต่อครั้ง = 100 ÷ 5 = 20", Config.getBossSlamDamage(), 20)
+		check("ฟื้นเลือดเมื่อไม่โดนตี 5 วิ · เกิดใหม่ 5 วิ", cycle.PLAYER_REGEN_DELAY_SECONDS == 5 and cycle.PLAYER_RESPAWN_SECONDS == 5, true)
+		check("ค่าบอสตีกลับเดิม (DAMAGE/INTERVAL/RANGE) ลบแล้ว", cycle.BOSS_ATTACK_DAMAGE == nil and cycle.BOSS_ATTACK_INTERVAL == nil
+			and cycle.BOSS_ATTACK_RANGE == nil, true)
+		cycle.BOSS_ATTACK_RANGE = 14
+		check("  เติม BOSS_ATTACK_RANGE กลับ → validate ไม่ผ่าน", pcall(Config.validate), false)
+		cycle.BOSS_ATTACK_RANGE = nil
+		local savedMargin = cycle.BOSS_SLAM_HIT_MARGIN
+		cycle.BOSS_SLAM_HIT_MARGIN = 5 -- วงตัดสิน 13 < ระยะตี 14 = มีจุดยืนตีฟรี
+		check("  วงตัดสินเล็กกว่าระยะตีกระบอง → validate ไม่ผ่าน", pcall(Config.validate), false)
+		cycle.BOSS_SLAM_HIT_MARGIN = savedMargin
+		local savedHits = cycle.BOSS_HITS_TO_KILL_PLAYER
+		cycle.BOSS_HITS_TO_KILL_PLAYER = 3 -- 100 ÷ 3 ไม่ลงตัว
+		check("  เลือดหารจำนวนครั้งไม่ลงตัว → validate ไม่ผ่าน", pcall(Config.validate), false)
+		cycle.BOSS_HITS_TO_KILL_PLAYER = savedHits
+		check("  คืนค่าแล้ว validate ผ่าน", pcall(Config.validate), true)
+	end
+
+	----------------------------------------------------------------------------
+	print("── 5D บอสฟาด: ไม่มีใครในวง = ไม่ฟาด · มีคนในวง = ง้าง 1 วิแล้วฟาด · นอกวงตัดสินไม่โดน ──")
+	----------------------------------------------------------------------------
+	do
+		local s, t0 = dayWithBosses()
+		local boss1 = Config.getBossCornerCenter(1)
+		local far = { [1] = pos(boss1.X - 40, boss1.Z) }
+		check("ไม่มีใครในวง → ไม่มีเหตุการณ์", #BossService.stepSlams(s, t0, far), 0)
+		check("  ผ่านไป 30 วิก็ยังไม่ฟาด", #BossService.stepSlams(s, t0 + 30, far), 0)
+		check("  ห้อง 1 ยัง idle", s.rooms[1].slamPhase, "idle")
+
+		-- คนที่ 1 ยืนตี (ระยะ 10) · คนที่ 2 อยู่ระหว่างวงตัดสินกับวงที่วาด (17) · คนที่ 3 นอกวง (19)
+		local positions = {
+			[1] = pos(boss1.X - 10, boss1.Z),
+			[2] = pos(boss1.X - 17, boss1.Z),
+			[3] = pos(boss1.X - 19, boss1.Z),
+		}
+		local ev = BossService.stepSlams(s, t0 + 31, positions)
+		check("มีคนเข้าวง → ง้าง (วงแดงขึ้น)", #ev == 1 and ev[1].kind == "windup" and ev[1].room == 1, true)
+		check("  ฟาดลงหลังง้าง 1 วิ", ev[1].at, t0 + 32)
+		check("  ระหว่างง้างยังไม่ฟาด", #BossService.stepSlams(s, t0 + 31.9, positions), 0)
+		ev = BossService.stepSlams(s, t0 + 32, positions)
+		check("ครบ 1 วิ → ฟาด", #ev == 1 and ev[1].kind == "slam", true)
+		check("  โดนเฉพาะคนในวงตัดสิน (คนที่ 1)", #ev[1].targets == 1 and ev[1].targets[1] == 1, true)
+		check("  คนที่ยืน 17 (ในวงที่วาด นอกวงตัดสิน) ไม่โดน — เผื่อเน็ตหน่วย", table.find(ev[1].targets, 2), nil)
+		check("  คนนอกวง (19) ไม่โดน", table.find(ev[1].targets, 3), nil)
+		check("  ฟาดแล้วพัก", s.rooms[1].slamPhase, "rest")
+		check("ระหว่างพัก 4 วิไม่ง้างใหม่", #BossService.stepSlams(s, t0 + 35.9, positions), 0)
+		ev = BossService.stepSlams(s, t0 + 36, positions)
+		check("พักครบแล้วยังมีคนในวง → ง้างใหม่ทันที (รอบละ 5 วิ)", #ev == 1 and ev[1].kind == "windup" and ev[1].at == t0 + 37, true)
+
+		-- หลบทัน: เห็นวงแล้ววิ่งออกพ้นวงตัดสินก่อนฟาด = รอด
+		local escaped = { [1] = pos(boss1.X - 16.5, boss1.Z) }
+		ev = BossService.stepSlams(s, t0 + 37, escaped)
+		check("วิ่งออกพ้นวงตัดสินทันก่อนฟาด → ฟาดลงแต่ไม่โดนใคร", #ev == 1 and ev[1].kind == "slam" and #ev[1].targets == 0, true)
+
+		-- ห้องอื่นไม่เกี่ยว: ยืนข้างบอสห้อง 1 ไม่ทำให้บอสห้อง 2 ง้าง
+		check("บอสห้อง 2 ไม่ง้างเพราะคนข้างบอสห้อง 1", s.rooms[2].slamPhase, "idle")
+		-- ตีทุกคนในวง รวมคนวิ่งผ่าน/คนที่ไม่มีสิทธิ์ห้อง (ไม่ดู wallProgress)
+		local boss3 = Config.getBossCornerCenter(3)
+		check("getSlamTargets ไม่ดูสิทธิ์ห้อง (คนวิ่งผ่านก็โดน)",
+			#BossService.getSlamTargets(3, { [9] = pos(boss3.X + 3, boss3.Z) }), 1)
+	end
+
+	----------------------------------------------------------------------------
+	print("── 5D บอสฟาด: ไม่ฟาดตอนกลางคืน · บอสตายกลางจังหวะง้าง = ยกเลิก · ปิดสวิตช์ = ไม่ฟาด ──")
+	----------------------------------------------------------------------------
+	do
+		local boss1 = Config.getBossCornerCenter(1)
+		local near = { [1] = pos(boss1.X - 10, boss1.Z) }
+		local s0 = BossService.newState(0)
+		check("เซิร์ฟเปิดใหม่ (ยังไม่มีบอส) → ไม่ฟาด", #BossService.stepSlams(s0, 10, near), 0)
+		BossService.step(s0, DAY)
+		check("กลางคืน (บอสเพิ่งเกิด) → ไม่ฟาด", #BossService.stepSlams(s0, DAY + 1, near), 0)
+
+		local s, t0 = dayWithBosses()
+		BossService.stepSlams(s, t0, near)
+		check("กลางวัน → ง้าง", s.rooms[1].slamPhase, "windup")
+		BossService.applyDamage(s, 1, 7, Config.getBossHp(1), t0 + 0.5)
+		local ev = BossService.stepSlams(s, t0 + 0.5, near)
+		check("บอสตายกลางจังหวะง้าง → ยกเลิก (วงหาย ไม่ฟาด)", #ev == 1 and ev[1].kind == "cancel", true)
+		check("  ผ่านจังหวะฟาดไปแล้วก็ไม่ฟาด", #BossService.stepSlams(s, t0 + 2, near), 0)
+
+		local s2, t2 = dayWithBosses()
+		BossService.stepSlams(s2, t2, near)
+		BossService.step(s2, t2 + DAY) -- เข้ากลางคืน
+		ev = BossService.stepSlams(s2, t2 + DAY, near)
+		check("ง้างค้างตอนเข้ากลางคืน → ยกเลิก", #ev == 1 and ev[1].kind == "cancel", true)
+
+		local s3, t3 = dayWithBosses()
+		s3.attackEnabled = false -- debugBossAttack(false)
+		check("ปิดสวิตช์ (debugBossAttack off) → ไม่ฟาด", #BossService.stepSlams(s3, t3, near), 0)
+		s3.attackEnabled = true
+		check("  เปิดกลับ → ง้าง", BossService.stepSlams(s3, t3, near)[1].kind, "windup")
+		s3.attackEnabled = false
+		check("  ปิดระหว่างง้าง → ยกเลิกทันที", BossService.stepSlams(s3, t3 + 0.2, near)[1].kind, "cancel")
+	end
+
+	----------------------------------------------------------------------------
+	print("── 5D เลือด: ยืนในวงเฉย ๆ โดน 5 ครั้งตายพอดี ──")
+	----------------------------------------------------------------------------
+	do
+		local s, t0 = dayWithBosses()
+		local boss4 = Config.getBossCornerCenter(4)
+		local standing = { [1] = pos(boss4.X - 10, boss4.Z) }
+		local health, hits, deathAt = cycle.PLAYER_MAX_HEALTH, 0, nil
+		for i = 0, 400 do
+			local now = t0 + i * 0.1
+			local positions = if health > 0 then standing else {}
+			for _, e in BossService.stepSlams(s, now, positions) do
+				if e.kind == "slam" and table.find(e.targets, 1) then
+					hits += 1
+					health = math.max(0, health - Config.getBossSlamDamage())
+					if health <= 0 and deathAt == nil then
+						deathAt = e.at
+					end
+				end
+			end
+		end
+		check("โดนครบ 5 ครั้งแล้วตาย (ไม่โดนต่อหลังตาย)", hits, 5)
+		check("  เลือด 0 พอดี", health, 0)
+		check("  ตายตอนฟาดครั้งที่ 5 = ง้าง 1 + 4 × (พัก 4 + ง้าง 1) = 21 วิ", deathAt - t0, 21)
+		check("  โดน 4 ครั้งยังไม่ตาย (เหลือ 20)", cycle.PLAYER_MAX_HEALTH - 4 * Config.getBossSlamDamage(), 20)
+	end
+
+	----------------------------------------------------------------------------
+	print("── 5D เลือด: ไม่ฟื้นระหว่างสู้ · ไม่โดนตีครบ 5 วิ = เต็ม · เซฟโซน = เต็มทันที · ตายแล้วไม่ฟื้น ──")
+	----------------------------------------------------------------------------
+	do
+		local s = BossService.newState(0)
+		local MAX = cycle.PLAYER_MAX_HEALTH
+		BossService.recordHit(s, 1, 100)
+		check("เพิ่งโดนตี (0 วิ) → ไม่ฟื้น", BossService.planHealth(s, 1, 60, MAX, false, 100), 60)
+		check("  4.9 วิ → ยังไม่ฟื้น", BossService.planHealth(s, 1, 60, MAX, false, 104.9), 60)
+		check("  ครบ 5 วิ → เต็มทันที", BossService.planHealth(s, 1, 60, MAX, false, 105), MAX)
+		BossService.recordHit(s, 1, 104)
+		check("  โดนซ้ำระหว่างรอ → นับ 5 วิใหม่ (105 ยังไม่ฟื้น)", BossService.planHealth(s, 1, 40, MAX, false, 105), 40)
+		check("เข้าเซฟโซน → เต็มทันทีแม้เพิ่งโดน", BossService.planHealth(s, 1, 40, MAX, true, 104.1), MAX)
+		check("ตายแล้ว (0) → ไม่ฟื้น (รอเกิดใหม่)", BossService.planHealth(s, 1, 0, MAX, true, 999), 0)
+		check("เต็มอยู่แล้ว → เดิม", BossService.planHealth(s, 1, MAX, MAX, false, 104.1), MAX)
+		check("ไม่เคยโดนบอส (เลือดลดจากทางอื่น) → เต็ม", BossService.planHealth(s, 2, 50, MAX, false, 0), MAX)
+	end
+
+	----------------------------------------------------------------------------
+	print("── 5D ตาย/เกิดใหม่: สนามรบ → หน้าทางเข้าเลน · เซฟโซน → คอก · ไข่กลับที่ · ดาเมจยังนับ · ข้อมูลผู้เล่นไม่เปลี่ยน ──")
+	----------------------------------------------------------------------------
+	do
+		local s, t0 = dayWithBosses()
+		local bossRoom = Config.getBossCornerCenter(1)
+		check("ตายในห้องบอส (สนามรบ) → เกิดหน้าทางเข้าเลน", (BossService.handleDeath(s, 1, pos(bossRoom.X - 10, bossRoom.Z))), true)
+		check("  เกิดใหม่แล้วอ่านได้ครั้งเดียว", BossService.takeGateRespawn(s, 1), true)
+		check("  ตายรอบหน้าตัดสินใหม่ (ไม่ค้าง)", BossService.takeGateRespawn(s, 1), false)
+		check("ตายที่แท่นอัญเชิญ (ในเลน) → หน้าทางเข้าเลน", (BossService.handleDeath(s, 2, Config.getSummonPedestalCenter())), true)
+		check("ตายในคอก (เซฟโซน) → เกิดตามปกติ", (BossService.handleDeath(s, 3, pos(0, 85))), false)
+		check("  ไม่ย้ายตอนเกิด", BossService.takeGateRespawn(s, 3), false)
+		check("ตายกลางลาน (เซฟโซน) → เกิดตามปกติ", (BossService.handleDeath(s, 4, Config.getBossGatherSpot(1))), false)
+		check("ไม่รู้ตำแหน่งตอนตาย → เกิดตามปกติ", (BossService.handleDeath(s, 5, nil)), false)
+
+		-- ไข่ที่ถือกลับจุดเดิม · ดาเมจที่ทำไว้ยังนับ · เลือด/กดค้างล้าง
+		BossService.applyDamage(s, 1, 8, 10, t0)
+		BossService.applyDamage(s, 1, 9, Config.getBossHp(1), t0) -- บอสห้อง 1 ตาย (คนที่ 9 ฆ่า)
+		pick(s, 8, 1, 1)
+		check("คนที่ 8 ถือไข่ห้อง 1 อยู่", BossService.getCarriedEgg(s, 8) ~= nil, true)
+		BossService.recordHit(s, 8, t0)
+		s.holds[8] = { room = 1, index = 2, beganAt = t0 }
+		local gate, egg = BossService.handleDeath(s, 8, pos(bossRoom.X, 0))
+		check("ตายระหว่างถือไข่ → ไข่กลับจุดเดิม (resting)", egg ~= nil and egg.status == "resting" and egg.carrier == nil, true)
+		check("  ไม่ถือแล้ว", BossService.getCarriedEgg(s, 8), nil)
+		check("  เกิดหน้าทางเข้าเลน", gate, true)
+		check("  จังหวะกดค้างที่ค้างอยู่ถูกล้าง", s.holds[8], nil)
+		check("  เวลาโดนตีล่าสุดถูกล้าง (เกิดใหม่เลือดเต็ม)", s.lastHitAt[8], nil)
+		check("ดาเมจที่ทำใส่บอสไว้ยังนับหลังตาย", s.rooms[1].damageBy[8], 10)
+
+		-- เงินบอส: กติกาเดิม — ตาย/อยู่นอกห้องตอนบอสตาย = ไม่ได้ · กลับเข้าห้องทันก็ได้ตามปกติ
+		local s2, t2 = dayWithBosses()
+		BossService.applyDamage(s2, 2, 1, 50, t2)
+		BossService.applyDamage(s2, 2, 2, 50, t2)
+		BossService.handleDeath(s2, 2, pos(Config.getBossCornerCenter(2).X, 0))
+		local _, recipients = BossService.planReward(s2, 2, function(userId)
+			return userId == 1 -- คนที่ 2 ยังตาย/อยู่หน้าทางเข้าเลน (ไม่อยู่ในห้อง)
+		end)
+		check("ตายแล้วไม่อยู่ในห้องตอนบอสตาย → ไม่ได้ส่วนแบ่ง", #recipients == 1 and recipients[1] == 1, true)
+		local _, back = BossService.planReward(s2, 2, function(_userId)
+			return true -- คนที่ 2 วิ่งกลับเข้าห้องทันก่อนบอสตาย
+		end)
+		check("กลับเข้าห้องทันก่อนบอสตาย → ได้ส่วนแบ่งตามปกติ (ดาเมจเดิมยังนับ)", #back, 2)
+
+		-- ไม่แตะข้อมูลผู้เล่นเลย: handleDeath ไม่รับ PlayerData — ยืนยันว่าข้อมูลที่เซฟไว้เหมือนเดิมทุกไบต์
+		local data = PlayerData.createNew()
+		data.currency.coins = 123456
+		local before = PlayerData.encode(data)
+		local s3 = dayWithBosses()
+		BossService.handleDeath(s3, 1, pos(Config.getBossCornerCenter(1).X, 0))
+		BossService.takeGateRespawn(s3, 1)
+		check("ตาย/เกิดใหม่ไม่แตะ PlayerData (เงิน · แม่ · ไข่ · ทหาร · อัญเชิญ)", PlayerData.encode(data), before)
+		check("  ล็อกอัญเชิญไม่เปลี่ยนเพราะตาย", (function()
+			local s4 = dayWithBosses()
+			BossService.lockUser(s4, 1, 3)
+			BossService.handleDeath(s4, 1, pos(Config.getBossCornerCenter(3).X, 0))
+			return BossService.getLockedRoom(s4, 1)
+		end)(), 3)
+	end
+
+	----------------------------------------------------------------------------
+	print("── 5D เกิดใหม่หน้าทางเข้าเลน: จุดวาปกลางคืน กระจายไม่ซ้อน · กระบองกลับมา ──")
+	----------------------------------------------------------------------------
+	do
+		check("ไม่มีใครอยู่ → จุด 1", BossService.pickGateSpot({}), 1)
+		local first = Config.getBossGatherSpot(1)
+		local second = BossService.pickGateSpot({ first })
+		check("มีคนยืนจุด 1 → ได้จุดอื่น", second ~= 1, true)
+		local taken = { first, Config.getBossGatherSpot(second) }
+		local third = BossService.pickGateSpot(taken)
+		check("  คนที่สาม → ไม่ซ้อนสองคนแรก", third ~= 1 and third ~= second, true)
+		local allSafe = true
+		for index = 1, Config.World.MAX_PENS do
+			if not Config.isInSafeZone(Config.getBossGatherSpot(index)) then
+				allSafe = false
+			end
+		end
+		check("จุดเกิดหน้าทางเข้าเลนทุกจุดอยู่ในเซฟโซน (เต็มเลือดทันที · ฝั่งลานกลาง)", allSafe, true)
+		check("ตายแล้วกระบองหาย (ไม่อยู่ทั้งมือและกระเป๋า) → สร้างใหม่", BossService.needsWeapon(true, false, false), true)
+		check("  มีในกระเป๋าแล้ว → ไม่สร้างซ้ำ", BossService.needsWeapon(true, false, true), false)
+		check("  ถืออยู่ในมือ → ไม่สร้างซ้ำ", BossService.needsWeapon(true, true, false), false)
+		check("  ยังตายอยู่ (รอเกิด) → ยังไม่สร้าง", BossService.needsWeapon(false, false, false), false)
+		check("กระบองที่สร้างใหม่ = ขั้นที่เซฟไว้ (clamp weaponLevel)", Config.clampClubTier(7), 7)
+	end
+
+	----------------------------------------------------------------------------
+	print("── 5D หลบบอสฟาดแล้วตีต่อ (จำลองทีละ 0.05 วิ): ขั้น N ตีห้อง N คนเดียวทันกลางวัน · ไม่โดนสักครั้ง ──")
+	----------------------------------------------------------------------------
+	do
+		-- ผู้เล่นทำตามโมเดลใน Config.getBossDodgeUptime: เห็นวงแดงแล้ววิ่งออกทันที (ตีไม่ได้ทั้งช่วงง้าง) ·
+		-- ฟาดลงแล้ววิ่งกลับจากขอบวงที่วาดเข้าระยะตี ((18 − 14) ÷ 32 วิ) แล้วตีตามคูลดาวน์
+		local walkBack = (Config.getBossSlamRadius() - cycle.PLAYER_ATTACK_RANGE) / Config.MapDimensions.Player.WalkSpeed
+		local function simulate(tier, room)
+			local s, t0 = dayWithBosses()
+			local boss = Config.getBossCornerCenter(room)
+			local inRange = pos(boss.X - 10, boss.Z)
+			local outside = pos(boss.X - (Config.getBossSlamRadius() + 1), boss.Z)
+			local dodging, backAt, nextAttack, everHit = false, t0, t0, false
+			local i = 0
+			while true do
+				local now = t0 + i * 0.05
+				if now > t0 + DAY then
+					return math.huge, everHit
+				end
+				for _, e in BossService.stepSlams(s, now, { [1] = if dodging then outside else inRange }) do
+					if e.kind == "windup" then
+						dodging = true
+					elseif e.kind == "slam" then
+						if table.find(e.targets, 1) then
+							everHit = true
+						end
+						dodging = false
+						backAt = e.at + walkBack
+					end
+				end
+				if not dodging and now >= backAt and now >= nextAttack then
+					local result, _, killed = BossService.tryAttack(s, 1, now, room, 10, tier, room)
+					nextAttack = now + cycle.PLAYER_ATTACK_COOLDOWN
+					if result == "ok" and killed then
+						return now - t0, everHit
+					end
+				end
+				i += 1
+			end
+		end
+		local worst = 0
+		for room = 1, STAGES do
+			local seconds, hit = simulate(room, room)
+			worst = math.max(worst, seconds)
+			check(`ห้อง {room}: ขั้น {room} หลบแล้วตีตาย {string.format("%.1f", seconds)} วิ ≤ กลางวัน · หลบทันทุกครั้ง`,
+				seconds <= DAY and not hit, true)
+			check(`  ไม่ช้ากว่าค่าประเมินใน Config (หักหลบแบบเผื่อ)`, seconds <= Config.getClubSoloKillSecondsWithDodge(room, room) + 0.5, true)
+		end
+		local rookie, rookieHit = simulate(1, 2)
+		check(`มือใหม่ขั้น 1 ตีห้อง 2 หลบแล้ว {string.format("%.1f", rookie)} วิ ≤ กลางวัน (ทางเลือก B)`, rookie <= DAY and not rookieHit, true)
+		local capstone = simulate(10, 9)
+		check(`ขั้น 10 ตีห้อง 9 หลบแล้ว {string.format("%.1f", capstone)} วิ`, capstone <= DAY, true)
+		print(string.format("   ห้อง 1 %.1f วิ · ห้อง 2–9 (ขั้น N) ช้าสุด %.1f วิ · มือใหม่ %.1f วิ · ขั้น 10 ห้อง 9 %.1f วิ",
+			(simulate(1, 1)), worst, rookie, capstone))
 	end
 end

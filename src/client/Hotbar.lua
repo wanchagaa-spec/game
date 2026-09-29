@@ -153,6 +153,11 @@ function Hotbar.relayout()
 	end
 end
 
+-- 5D: กรอบของแถบ (แถบเลือดเกาะเหนือกรอบนี้) — เรียกหลัง create
+function Hotbar.getFrame(): Frame
+	return container
+end
+
 function Hotbar.create(parent: ScreenGui, reservedSide: () -> number)
 	getReservedSide = reservedSide
 

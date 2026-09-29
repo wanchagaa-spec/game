@@ -123,13 +123,18 @@ for lvl = 0, Config.Balance.Production.UPGRADE_MAX_LEVEL do
 	row("PRODUP", lvl, Config.getProductionMultiplier(lvl), Config.getProductionUpgradeCost(lvl) or 0)
 end
 -- 5C: กระบอง — ขั้น · ดาเมจ/ครั้ง · ราคา · นาทีรายได้ของด่านเป้าหมาย · วิ ตีห้องเป้าหมายคนเดียว · วิ ตีห้องถัดไปคนเดียว
+-- 5D: + วิ ตีห้องเป้าหมายคนเดียว**หลังหักเวลาหลบบอสฟาด** (ตัวที่ validate() ใช้เทียบกลางวัน)
 for tier = 1, Config.Balance.Weapon.MAX_LEVEL do
 	local room = Config.getClubTargetRoom(tier)
 	local nextRoom = if tier < Config.Balance.Stage.COUNT then tier + 1 else nil
 	row("CLUB", tier, Config.getClubVisual(tier).name, Config.getClubDamage(tier), Config.getClubPrice(tier),
 		Config.getClubPrice(tier) / Config.getReferenceIncomePerHour(room) * 60,
-		Config.getClubSoloKillSeconds(tier, room), if nextRoom then Config.getClubSoloKillSeconds(tier, nextRoom) else 0)
+		Config.getClubSoloKillSeconds(tier, room), if nextRoom then Config.getClubSoloKillSeconds(tier, nextRoom) else 0,
+		Config.getClubSoloKillSecondsWithDodge(tier, room))
 end
+-- 5D: บอสฟาด — วงวาด · วงตัดสิน · ง้าง · พัก · ดาเมจ · สัดส่วนเวลาตีจริง
+row("SLAM", Config.getBossSlamRadius(), Config.getBossSlamHitRadius(), Config.Balance.BossCycle.BOSS_SLAM_WINDUP_SECONDS,
+	Config.Balance.BossCycle.BOSS_SLAM_REST_SECONDS, Config.getBossSlamDamage(), Config.getBossDodgeUptime())
 
 -- ── ตารางหลักต่อด่าน (ผู้เล่นชั้นกลาง) ──
 for stage = 1, 9 do

@@ -469,6 +469,9 @@ return function(t, Config)
 	check("ทุกด่านอยู่ในช่วง 30-70% ของรายได้", shareOk, true)
 	print(string.format("   ราคากินรายได้ %.0f%% ถึง %.0f%%", minShare * 100, maxShare * 100))
 
+	-- ⚠️ 5C (ผู้ใช้ยืนยัน): นับกระบองขั้น st เป็นรายจ่ายของด่าน st · แต่รายได้ด่าน st ในโมเดล (getReferenceStageIncome)
+	-- **รวมเงินบอสห้อง st ไว้แล้ว** ทั้งที่คนเพิ่งพังกำแพง st แล้วติดล็อกยังตีห้อง st ไม่ได้ → เทสต์นี้**มองแง่ดีกว่าตอนติดล็อก**
+	-- (ตอนติดล็อกรายได้ใกล้ด่าน st−1 · ~13–17% ของด่าน st) — สถานการณ์ติดล็อกจริงวัดแยกที่ "ยามติดล็อก" ข้างล่าง
 	local worstSurplus, bestSurplus = 999, 0
 	for st = 2, 9 do
 		local need = Config.getStageDamageUpgradeTotal(st)
@@ -485,6 +488,39 @@ return function(t, Config)
 	check("ส่วนเกินไม่เกิน 3 เท่าแล้ว (เดิม 299 เท่า)", bestSurplus <= 3, true)
 	check("แต่ยังเหลือพอซื้ออาวุธ (ไม่ต่ำกว่า 1.5 เท่า)", worstSurplus >= 1.5, true)
 	print(string.format("   ส่วนเกิน %.2fx ถึง %.2fx", worstSurplus, bestSurplus))
+
+	print("── 5C ยามติดล็อก: พังกำแพง N แล้วติดล็อกบอสห้อง N (เงิน 0 · มีกระบองขั้น N−1 · วงจรจริง อยู่คนเดียว) ──")
+	do
+		local W = Config.Balance.Weapon
+		local cycle = Config.Balance.BossCycle
+		local worstMinutes = 0
+		for stage = 2, Config.Balance.Stage.COUNT do
+			-- สมมติฐาน "มีขั้น N−1" ต้องจริง: ขั้น N−1 ตีห้อง N−1 คนเดียวตายทันในรอบเดียว (ได้เงินบอสห้องนั้นทุกคืน)
+			check(`ด่าน {stage}: กระบองขั้น {stage - 1} ตีห้อง {stage - 1} ทันกลางวัน (ฐานของรายได้ตอนติดล็อก)`,
+				Config.getClubSoloKillSeconds(stage - 1, stage - 1) <= cycle.DAY_SECONDS, true)
+			local minutes = Config.getLockedClubBuyMinutes(stage)
+			if minutes > worstMinutes then worstMinutes = minutes end
+			check(`ด่าน {stage}: หาเงินซื้อกระบองขั้น {stage} ตอนติดล็อก {string.format("%.1f", minutes)} นาที ≤ {W.LOCKED_BUY_MAX_MINUTES}`,
+				minutes <= W.LOCKED_BUY_MAX_MINUTES, true)
+		end
+		print(string.format("   ช้าสุด %.1f นาที (เพดาน %d)", worstMinutes, W.LOCKED_BUY_MAX_MINUTES))
+		-- รายได้ตอนติดล็อก = คอกด่าน N + บอสห้อง N−1 เต็มก้อนคืนละตัว (ไม่มีบอสห้อง N · ไม่มีเงินฆ่าทหาร)
+		near("รายได้ติดล็อกด่าน 2 = คอกด่าน 2 + บอสห้อง 1 เต็มก้อน × 6 ตัว/ชม.",
+			Config.getLockedIncomePerHour(2),
+			Config.getPenCapacity(2) * Config.getCoinsPerMinute(Config.Balance.BalanceCheck.REFERENCE_WEIGHT[2], 2) * 60
+				+ (3600 / Config.getBossCycleSeconds()) * Config.getBossKillReward(1), 1e-6)
+		check("รายได้ติดล็อกต่ำกว่ารายได้ด่าน N ในโมเดลทุกด่าน (โมเดลรวมบอสห้อง N ไว้)", (function()
+			for stage = 2, Config.Balance.Stage.COUNT do
+				if Config.getLockedIncomePerHour(stage) >= Config.getReferenceIncomePerHour(stage) then return false end
+			end
+			return true
+		end)(), true)
+
+		-- มือใหม่: มีแค่กระบองขั้น 1 (ฟรี) แล้วพังกำแพงด่าน 2 ขณะบอสห้อง 2 อยู่ → ต้องตีเองคนเดียวตายทันกลางวัน
+		local rookie = Config.getClubSoloKillSeconds(1, 2)
+		check(`กระบองขั้น 1 ตีบอสห้อง 2 คนเดียว {rookie} วิ ≤ กลางวัน {cycle.DAY_SECONDS} วิ (มือใหม่ไม่ติดล็อกด่าน 2)`,
+			rookie <= cycle.DAY_SECONDS, true)
+	end
 
 	print("── computeBattlePower ──")
 	local base = Config.computePower(10000, "wukong")

@@ -2013,6 +2013,10 @@ Balance.Weapon = {
 	-- ขั้นพิเศษ: รายได้ด่านสุดท้ายกี่นาที (แพงมาก — ของเก็บเงินหลังผ่านเกม ไม่อยู่ในโมเดลรายด่าน)
 	CAPSTONE_PRICE_INCOME_MINUTES = 180,
 	PRICE_SIGNIFICANT_DIGITS = 2, -- 17,334 → 17,000
+
+	-- ยามสถานการณ์ติดล็อกจริง (เทสต์ tests/config.spec.luau): เพิ่งพังกำแพงด่าน N แล้วติดล็อกบอสห้อง N
+	-- เริ่มเงิน 0 · มีกระบองขั้น N−1 · วงจรจริง อยู่คนเดียว → หาเงินซื้อขั้น N ต้องไม่เกินกี่นาที (Config.getLockedClubBuyMinutes)
+	LOCKED_BUY_MAX_MINUTES = 20,
 }
 
 -- 5C: สูตรอาวุธเดิม (×10 ต่อขั้น · ตี 10 ครั้งพอดี · ราคา ×10) ลบแล้ว — validate() กันไม่ให้เติมกลับ
@@ -3932,6 +3936,24 @@ function Config.getReferenceIncomePerHour(stage: number): number
 		/ check.PLAYERS_PER_SERVER
 
 	return penPerHour + bossPerHour
+end
+
+-- 5C: รายได้/ชม. ตอน**ติดล็อกจริง** — เพิ่งพังกำแพงด่าน N (wallProgress = N) ขณะบอสห้อง N ยังอยู่ · ทหารหยุด (ไม่มีเงินฆ่าทหาร)
+--   = เงินคอก (คอกเลเวล N · แม่อ้างอิง · ตัวคูณเงินของ wallProgress N)
+--   + บอสห้อง N−1 **วงจรจริง อยู่คนเดียว** (คืนละตัว getBossCycleSeconds · ได้เต็มก้อน) — สมมติว่ามีกระบองขั้น N−1 แล้ว
+--   ห้อง N ตีไม่ได้ (ตัวที่ล็อก) · ⚠️ ต่างจาก getReferenceIncomePerHour(N) ที่รวมเงินบอสห้อง N ไว้แล้ว (มองแง่ดีกว่า)
+function Config.getLockedIncomePerHour(stage: number): number
+	local check = Config.Balance.BalanceCheck
+	local penPerHour = Config.getPenCapacity(stage) * Config.getCoinsPerMinute(check.REFERENCE_WEIGHT[stage], stage) * 60
+	local bossPerHour = if stage > 1
+		then (3600 / Config.getBossCycleSeconds()) * Config.getBossKillReward(stage - 1)
+		else 0
+	return penPerHour + bossPerHour
+end
+
+-- 5C: นาทีที่ต้องหาเงิน (เริ่ม 0) ตอนติดล็อกด่าน N ถึงจะซื้อกระบองขั้น N ได้ — เทียบกับ Weapon.LOCKED_BUY_MAX_MINUTES
+function Config.getLockedClubBuyMinutes(stage: number): number
+	return Config.getClubPrice(stage) / (Config.getLockedIncomePerHour(stage) / 60)
 end
 
 function Config.getReferenceStageIncome(stage: number): number

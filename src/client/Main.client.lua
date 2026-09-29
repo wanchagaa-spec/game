@@ -7,11 +7,19 @@
 --   SidePanels — ปุ่มขวา (ไข่ / เท้า) + แผงไข่ที่กำลังฟัก / แม่ในคอก
 --   MapSigns   — UI-2: ป้ายอัปดาเมจ/ค่าวิ่ง/อัปคอกบนแมพ (กด E) + จุดเปิดร้านขายแม่
 --   SellWindow — UI-2: หน้าต่างร้านขายแม่ (ติ๊กหลายตัว + กล่องยืนยันครั้งเดียว)
---   ที่เหลืออยู่ในไฟล์นี้: ปุ่มกระเป๋าแถบบน · ปุ่มร้านค้า/ดัชนี ("เร็วๆ นี้") · เลเวลมุมล่างซ้าย ·
---   ข้อความแจ้งผล (toast) · HUD การรบ · แผง TEMP · กล่องยืนยันส่งรบ · แผงจัดคิวปล่อย · popup ผ่านด่าน
+--   SummonWindow — UI-3: หน้าต่างแท่นอัญเชิญ (แท็บแม่/ลูก · ติ๊กเรียงลำดับ · ส่งไปรบ/หยุดอัญเชิญ)
+--   IndexWindow — UI-4: หน้าต่างดัชนี (แท็บคลาส · เคยได้ = รูป / ยังไม่ได้ = เงา · จุดแดงบนปุ่มเมื่อได้ตัวใหม่)
+--   RobuxShopWindow — UI-5: ร้านค้า Robux (ไข่ตำนาน · ทะลุเพดานดาเมจ/ความเร็ว · เร่งฟักไข่ทั้งหมด)
+--   WeaponShopWindow — 5C: ร้านกระบอง 10 ขั้น (กด E ที่แผง "ซื้ออาวุธ" · ซื้อได้แค่ขั้นถัดไป)
+--   ที่เหลืออยู่ในไฟล์นี้: ปุ่มกระเป๋าแถบบน · ปุ่มร้านค้า · ปุ่มดัชนี · เลเวลมุมล่างซ้าย ·
+--   ข้อความแจ้งผล (toast) · HUD การรบ · popup ผ่านด่าน
 --
--- ⚠️ แผง TEMP = ของเดิมที่ของใหม่จะมาแทนในรอบหลัง (ห้ามลบก่อน ไม่งั้นผู้เล่นใช้ฟีเจอร์นั้นไม่ได้ระหว่างรอบ)
---   อัญเชิญ/กองลูก → แท่นอัญเชิญ (UI-3) · (อัปคอก/ดาเมจ/ความเร็ว ย้ายไปป้ายบนแมพแล้วใน UI-2)
+-- ⚠️ UI-3: แผง TEMP (อัญเชิญ + กองลูก) · กล่องยืนยันส่งแม่ทีละตัว · แผงจัดคิวปล่อยใกล้จุดปล่อย **ลบแล้ว**
+--   ทั้งหมดย้ายไปอยู่ในหน้าต่างแท่นอัญเชิญ (SummonWindow · เปิดด้วย E ค้างที่แท่นปากเลน)
+--
+-- ⚠️ UI-5: หน้าต่าง "เร็วๆ นี้" (placeholder ของปุ่มร้านค้า) **ลบแล้ว** แทนที่ด้วย RobuxShopWindow จริง
+-- การซื้อทุกอย่างในหน้าต่างนี้ยิง MarketplaceService:PromptProductPurchase ตรง ๆ (ไม่ใช่ FireServer) —
+-- server เข้ามาเกี่ยวตอน ProcessReceipt เท่านั้น (ดู EggService.processReceipt)
 --
 -- client ไม่ตัดสินอะไรเองเลย: กดปุ่ม = ส่งคำขอไป server แล้วรอฟังผลกลับมา
 -- ตัวเลขที่เห็นบนจอเป็นค่าที่ server ส่งมา (นับถอยหลังเวลาฟักเองระหว่างรอบ sync เท่านั้น)
@@ -35,11 +43,26 @@ local CombatEffects = require(script.Parent:WaitForChild("CombatEffects"))
 -- UI-1
 local UiKit = require(script.Parent:WaitForChild("UiKit"))
 local Hotbar = require(script.Parent:WaitForChild("Hotbar"))
+local HealthBar = require(script.Parent:WaitForChild("HealthBar"))
 local BagWindow = require(script.Parent:WaitForChild("BagWindow"))
 local SidePanels = require(script.Parent:WaitForChild("SidePanels"))
 -- UI-2
 local MapSigns = require(script.Parent:WaitForChild("MapSigns"))
 local SellWindow = require(script.Parent:WaitForChild("SellWindow"))
+-- UI-3
+local SummonWindow = require(script.Parent:WaitForChild("SummonWindow"))
+-- UI-4
+local IndexWindow = require(script.Parent:WaitForChild("IndexWindow"))
+-- UI-5
+local RobuxShopWindow = require(script.Parent:WaitForChild("RobuxShopWindow"))
+-- 5C: ร้านกระบอง 10 ขั้น (เปิดจากจุดกด E ที่แผง "ซื้ออาวุธ")
+local WeaponShopWindow = require(script.Parent:WaitForChild("WeaponShopWindow"))
+-- Phase 5A: ตัวเลขนับถอยหลังบนกำแพงกั้นบอส (อ่านสถานะจาก Attribute ที่ server ตั้ง ไม่ผ่าน FarmStateSync)
+local BossHud = require(script.Parent:WaitForChild("BossHud"))
+-- ท้องฟ้ากลางคืน: กลางคืนของวงจรบอส = พระจันทร์ + มืดลง (Lighting ของเครื่องตัวเอง · ภาพล้วน)
+local NightSky = require(script.Parent:WaitForChild("NightSky"))
+
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -47,27 +70,37 @@ local playerGui = player:WaitForChild("PlayerGui")
 local placeEggRequest = Remotes.waitFor(Config.RemoteNames.PLACE_EGG_IN_HATCHERY_REQUEST)
 local moveMotherRequest = Remotes.waitFor(Config.RemoteNames.MOVE_MOTHER_REQUEST)
 local upgradePenRequest = Remotes.waitFor(Config.RemoteNames.UPGRADE_PEN_REQUEST)
-local sellMotherRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHER_REQUEST)
+-- ⚠️ UI-2: ร้านขายแม่ขายเป็นชุดด้วย remote เดียว · SellMotherRequest (ทีละตัว) ยังอยู่ฝั่ง server แต่ client ไม่ใช้แล้ว
+local sellMothersBatchRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHERS_BATCH_REQUEST)
 local autoFillPenRequest = Remotes.waitFor(Config.RemoteNames.AUTO_FILL_PEN_REQUEST)
 local eggHatched = Remotes.waitFor(Config.RemoteNames.EGG_HATCHED)
 local farmStateSync = Remotes.waitFor(Config.RemoteNames.FARM_STATE_SYNC)
 -- ⚠️ server ส่งผลลัพธ์ (สำเร็จ/ล้มเหลว + เหตุผล) ของคำขอด้านบนกลับมาทางนี้
 -- ก่อนหน้านี้ผลลัพธ์ไปโผล่แค่ print ใน server console เท่านั้น ผู้เล่นไม่เห็นอะไรเลย
 local actionResult = Remotes.waitFor(Config.RemoteNames.ACTION_RESULT)
--- ⚠️ Phase 3B-1: สองตัวนี้สร้างไว้แล้วตั้งแต่ 3A (CombatService) — ต่อ UI จริงตอนนี้
+-- ⚠️ UI-3: ยิงจากหน้าต่างแท่นอัญเชิญเท่านั้น — ลำดับปล่อย = กองลูกที่ติ๊ก (กองที่ไม่ติ๊กไม่ถูกปล่อย)
 local setReleaseOrderRequest = Remotes.waitFor(Config.RemoteNames.SET_RELEASE_ORDER_REQUEST)
 local setSummonEnabledRequest = Remotes.waitFor(Config.RemoteNames.SET_SUMMON_ENABLED_REQUEST)
 -- ⚠️ UI-2: ซื้อดาเมจ/ความเร็ว/อัปคอก ยิงจากป้ายบนแมพ (MapSigns · กด E) — remote เดิม server ตรวจเหมือนเดิม
 local buyDamageUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_DAMAGE_UPGRADE_REQUEST)
 local buySpeedUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_SPEED_UPGRADE_REQUEST)
--- ⚠️ Phase 3C-2: ส่งแม่ในกระเป๋าลง battleRoster (3C-1) — ยิงได้**หลังกดยืนยันในกล่องเท่านั้น**
--- server ตรวจทุกอย่างซ้ำเอง (อยู่ในกระเป๋าจริงไหม · lock · roster เต็ม · มีด่านให้ตี) ผลกลับทาง actionResult
-local sendMotherToBattleRequest = Remotes.waitFor(Config.RemoteNames.SEND_MOTHER_TO_BATTLE_REQUEST)
+-- ⚠️ UI-3: ส่งแม่ในกระเป๋าลง battleRoster เป็นชุด — ยิงได้**หลังกดยืนยันในหน้าต่างอัญเชิญเท่านั้น**
+-- server ตรวจทุกตัวซ้ำเอง (อยู่ในกระเป๋าจริงไหม · lock · roster เต็ม · มีด่านให้ตี) ผลสรุปกลับทาง actionResult
+-- · SendMotherToBattleRequest (ทีละตัว) ยังอยู่ฝั่ง server แต่ client ไม่ใช้แล้ว
+local sendMothersToBattleBatchRequest = Remotes.waitFor(Config.RemoteNames.SEND_MOTHERS_TO_BATTLE_BATCH_REQUEST)
 -- ⚠️ Phase 4A: server แจ้งเองตอนกำแพงด่านพัง (ไม่ได้มาจากปุ่ม) — ยิงครั้งเดียว ไม่อยู่ใน sync
 -- Phase 4B: payload (stage, eggCount, deathCount) — รวมแจ้งแม่ในสนามรบที่ตายไว้ใน popup เดียวกัน
 local stageClearedNotify = Remotes.waitFor(Config.RemoteNames.STAGE_CLEARED_NOTIFY)
 -- ⚠️ Phase 4B: สลับล็อกแม่ (คอก/กระเป๋า) — ล็อกแล้วขาย/ส่งไปรบไม่ได้ · server ตรวจซ้ำเองทั้งสองทาง
 local toggleMotherLockRequest = Remotes.waitFor(Config.RemoteNames.TOGGLE_MOTHER_LOCK_REQUEST)
+-- ⚠️ Phase 5A: server แจ้งทุกคนเอง ("night" / "day" / "killed") — ข้อความจริงอยู่ที่ Config.formatBossEventMessage
+local bossEventNotify = Remotes.waitFor(Config.RemoteNames.BOSS_EVENT_NOTIFY)
+-- ⚠️ 5B: หยิบไข่บอส — ส่ง index ของฟองที่กด E ค้าง (BossHud ติดจุดกด) · ผลกลับมาทาง bossEventNotify
+local pickUpBossEggRequest = Remotes.waitFor(Config.RemoteNames.PICK_UP_BOSS_EGG_REQUEST)
+-- ⚠️ 5B-2: บอก server ว่าเริ่มกด/ปล่อย E ที่ไข่บอส — server จับเวลากดค้างเอง (ยิงหยิบตรง ๆ โดยไม่กดค้างครบ = ถูกปฏิเสธ)
+local bossEggHoldRequest = Remotes.waitFor(Config.RemoteNames.BOSS_EGG_HOLD_REQUEST)
+-- ⚠️ 5C: ซื้อกระบองขั้นถัดไป — **ไม่ส่งเลขขั้น** (server ซื้อขั้นถัดไปเอง ตรวจเงิน/เพดานเอง) · ผลกลับทาง actionResult
+local buyClubTierRequest = Remotes.waitFor(Config.RemoteNames.BUY_CLUB_TIER_REQUEST)
 
 --------------------------------------------------------------------------------
 -- สี / ค่าคงที่
@@ -75,16 +108,11 @@ local toggleMotherLockRequest = Remotes.waitFor(Config.RemoteNames.TOGGLE_MOTHER
 
 local BG = Color3.fromRGB(28, 30, 36)
 local FG = Color3.fromRGB(240, 240, 240)
-local DIM = Color3.fromRGB(160, 165, 175)
 local ACCENT = Color3.fromRGB(90, 160, 235)
 local SUCCESS_COLOR = Color3.fromRGB(140, 220, 140)
 local ERROR_COLOR = Color3.fromRGB(235, 130, 130)
-local DISABLED_ACTION_COLOR = Color3.fromRGB(70, 74, 82)
-local TAB_INACTIVE_COLOR = Color3.fromRGB(50, 54, 62)
 -- ⚠️ สีเสี่ยง (แดง) เฉพาะการกระทำที่ทำให้แม่ตายถาวรได้
 local BATTLE_RISK_COLOR = Color3.fromRGB(200, 60, 60)
--- ⚠️ สีส้ม = แผง/ปุ่ม TEMP (ของช่วงเปลี่ยนผ่าน — ดู docs/ui-overhaul-plan.md §2)
-local TEMP_COLOR = Color3.fromRGB(205, 140, 55)
 local MAX_BATTLE_MOTHERS = Config.Balance.Combat.MAX_BATTLE_MOTHERS
 
 -- ⚠️ สัดส่วนวัดจากภาพต้นแบบ (มือถือแนวนอน 2000×921) ของจอเต็ม — ดู docs/ui-overhaul-plan.md §3
@@ -92,14 +120,11 @@ local LEFT_BUTTON_X = 0.054
 local LEFT_BUTTON_SIZE = UDim2.fromScale(0.098, 0.085)
 local SHOP_BUTTON_Y = 0.377
 local INDEX_BUTTON_Y = 0.472
-local TEMP_BUTTON_Y = 0.30 -- เหนือปุ่มร้านค้า (ไม่อยู่ในต้นแบบ — ช่วงเปลี่ยนผ่านเท่านั้น)
 local LEVEL_LABEL_X = 0.052
 local LEVEL_LABEL_WIDTH = 0.16
 local LEVEL_LABEL_HEIGHT = 0.065
 local SPEED_LEVEL_Y = 0.85
 local DAMAGE_LEVEL_Y = 0.93
--- แถบล่างที่ Hotbar กิน (ขอบล่าง 1.5% + ช่อง 17%) — แผงจัดคิวปล่อยยกขึ้นไปอยู่เหนือแถบนี้
-local HOTBAR_BAND = 0.015 + 0.17
 local HOTBAR_SIDE_GAP = 0.007
 -- ปุ่มกระเป๋าแถบบน — เทียบกับปุ่มของ Roblox (ปุ่มแชท ฯลฯ): ปุ่ม 44 ห่างขอบบน 12 ในแถบสูง 58
 -- ⚠️ กึ่งกลางแนวตั้งของปุ่ม Roblox = 34/58 ของแถบ **ไม่ใช่กึ่งกลางแถบ (29/58)** — เดิมใช้กึ่งกลางแถบ
@@ -113,6 +138,10 @@ local TOAST_SECONDS = 4
 -- ยอดเงิน: 52 เท่าเดิมบนจอสูง · จอเตี้ย (มือถือ) ย่อตามความสูงจอ
 local COIN_TEXT_MAX = 52
 local COIN_TEXT_HEIGHT_RATIO = 0.075
+-- ⚠️ UI-fix รอบ 1: ดันเงินขึ้นชิดขอบบนสุดเท่าที่ทำได้ (ยอมรับได้ถ้าทับ/ชิดแถบเพลเยอร์ลิสต์
+-- หรือปุ่ม Robux ของ Roblox เอง — ตัดสินใจแล้วว่าไม่ต้องเผื่อระยะห่างจาก topbar เหมือนของอื่น)
+-- ⚠️ ตั้งใจไม่ใช้ getTopbarBottom()/topGap แบบของอื่นในไฟล์นี้ — นั่นคือระยะที่ "เผื่อ" ไม่ให้ชนแถบบน
+local COIN_TOP_MARGIN = 2
 -- ระยะห่างจากขอบจอ (ขวา/ล่าง) และใต้แถบบนของ Roblox (สัดส่วนความสูงจอ · 4–10 px)
 local HUD_EDGE_MARGIN = 16
 local HUD_TOP_GAP_RATIO = 0.012
@@ -127,13 +156,17 @@ local JUMP_BUTTON_GAP = 8
 pcall(function()
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 end)
+-- ⚠️ 5D: ปิดแถบเลือด + จอแดงของ Roblox — แถบเลือดของเกม (HealthBar เหนือ hotbar) + จอแดงวาบมาแทน (กันซ้อนสองชุด)
+pcall(function()
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)
+end)
 
 local lastPayload: any = nil
 
 --------------------------------------------------------------------------------
 -- ScreenGui สองชั้น
 --------------------------------------------------------------------------------
--- `gui` (ของเดิม · IgnoreGuiInset = false): ว่างแล้ว — เหลือเป็นฐาน DisplayOrder ของกล่องยืนยัน/popup ผ่านด่าน
+-- `gui` (ของเดิม · IgnoreGuiInset = false): ว่างแล้ว — เหลือเป็นฐาน DisplayOrder ของ popup ผ่านด่าน
 -- `hud` (UI-1 · IgnoreGuiInset = true): ทุกอย่างที่วางตามสัดส่วนของจอเต็มจากภาพต้นแบบ + ปุ่มแถบบน
 -- (TopbarInset เป็นพิกัดของจอเต็ม จึงต้องอยู่ใน ScreenGui ที่ไม่เว้น inset)
 
@@ -409,7 +442,7 @@ local function layoutHud()
 		math.max(0, viewport.X - HUD_EDGE_MARGIN - barsRight - COIN_BARS_GAP),
 		math.floor(coinHeight * 1.25)
 	)
-	coinLabel.Position = UDim2.new(1, -HUD_EDGE_MARGIN, 0, top)
+	coinLabel.Position = UDim2.new(1, -HUD_EDGE_MARGIN, 0, COIN_TOP_MARGIN)
 
 	-- toast: ใต้หลอดเลือดตอนเปิดอัญเชิญ · ใต้แถบบนตอนปิด
 	local toastTop = if combatBars.Visible then top + barsHeight + topGap else top
@@ -440,154 +473,6 @@ do
 	end
 end
 GuiService:GetPropertyChangedSignal("TopbarInset"):Connect(layoutHud)
-
---------------------------------------------------------------------------------
--- กล่องยืนยัน "ส่งแม่ไปรบ?" (Phase 3C-2) — ปุ่มส่งไปรบ (TEMP ในหน้ารายละเอียดแม่) แค่เปิดกล่องนี้
---------------------------------------------------------------------------------
--- ⚠️ ส่งแม่ไปรบ = แม่ตายถาวรตอนด่านพัง ดึงกลับไม่ได้ · ยิง remote เฉพาะตอนกด "ยืนยันส่งรบ"
--- · "ยกเลิก" แค่ปิดกล่อง ไม่ส่งอะไรไป server เลย
-
-local function isBattleRosterFull(): boolean
-	return lastPayload ~= nil and #(lastPayload.battleRoster or {}) >= MAX_BATTLE_MOTHERS
-end
-
-local function showRosterFull()
-	showToast(`roster เต็มแล้ว ({#(lastPayload.battleRoster or {})}/{MAX_BATTLE_MOTHERS})`, false)
-end
-
-local confirmGui = Instance.new("ScreenGui")
-confirmGui.Name = "BattleConfirm"
-confirmGui.ResetOnSpawn = false
-confirmGui.IgnoreGuiInset = true
-confirmGui.DisplayOrder = gui.DisplayOrder + 10
-confirmGui.Enabled = false
-confirmGui.Parent = playerGui
-
-local confirmBackdrop = Instance.new("TextButton")
-confirmBackdrop.Name = "Backdrop"
-confirmBackdrop.Size = UDim2.fromScale(1, 1)
-confirmBackdrop.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-confirmBackdrop.BackgroundTransparency = 0.45
-confirmBackdrop.BorderSizePixel = 0
-confirmBackdrop.AutoButtonColor = false
-confirmBackdrop.Text = ""
-confirmBackdrop.Parent = confirmGui
-
-local confirmBox = Instance.new("Frame")
-confirmBox.Name = "Dialog"
-confirmBox.AnchorPoint = Vector2.new(0.5, 0.5)
-confirmBox.Position = UDim2.fromScale(0.5, 0.5)
-confirmBox.Size = UDim2.new(0, 360, 0, 0)
-confirmBox.AutomaticSize = Enum.AutomaticSize.Y
-confirmBox.BackgroundColor3 = BG
-confirmBox.BorderSizePixel = 0
-confirmBox.Parent = confirmGui
-
-local confirmBoxCorner = Instance.new("UICorner")
-confirmBoxCorner.CornerRadius = UDim.new(0, 10)
-confirmBoxCorner.Parent = confirmBox
-
-local confirmBoxStroke = Instance.new("UIStroke")
-confirmBoxStroke.Color = BATTLE_RISK_COLOR
-confirmBoxStroke.Thickness = 2
-confirmBoxStroke.Parent = confirmBox
-
-local confirmBoxPadding = Instance.new("UIPadding")
-confirmBoxPadding.PaddingTop = UDim.new(0, 14)
-confirmBoxPadding.PaddingBottom = UDim.new(0, 14)
-confirmBoxPadding.PaddingLeft = UDim.new(0, 16)
-confirmBoxPadding.PaddingRight = UDim.new(0, 16)
-confirmBoxPadding.Parent = confirmBox
-
-local confirmBoxLayout = Instance.new("UIListLayout")
-confirmBoxLayout.Padding = UDim.new(0, 8)
-confirmBoxLayout.SortOrder = Enum.SortOrder.LayoutOrder
-confirmBoxLayout.Parent = confirmBox
-
-local function makeConfirmText(order: number, textSize: number, font: Enum.Font, color: Color3): TextLabel
-	local label = Instance.new("TextLabel")
-	label.LayoutOrder = order
-	label.Size = UDim2.new(1, 0, 0, 0)
-	label.AutomaticSize = Enum.AutomaticSize.Y
-	label.BackgroundTransparency = 1
-	label.TextColor3 = color
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.TextWrapped = true
-	label.TextSize = textSize
-	label.Font = font
-	label.Text = ""
-	label.Parent = confirmBox
-	return label
-end
-
-local confirmTitle = makeConfirmText(1, 20, Enum.Font.SourceSansBold, FG)
-confirmTitle.Text = "ส่งแม่ไปรบ?"
-local confirmMotherInfo = makeConfirmText(2, 15, Enum.Font.SourceSans, FG)
-local confirmWarning = makeConfirmText(3, 14, Enum.Font.SourceSansBold, ERROR_COLOR)
-confirmWarning.Text = "⚠️ แม่ตัวนี้จะตายถาวรทันทีที่ด่านที่กำลังตีอยู่พังสำเร็จ ไม่สามารถดึงกลับได้"
-
-local confirmButtons = Instance.new("Frame")
-confirmButtons.Name = "Buttons"
-confirmButtons.LayoutOrder = 4
-confirmButtons.Size = UDim2.new(1, 0, 0, 36)
-confirmButtons.BackgroundTransparency = 1
-confirmButtons.Parent = confirmBox
-
-local CONFIRM_BUTTON_GAP = 10
-
-local function makeConfirmButton(name: string, text: string, color: Color3, xScale: number, xOffset: number): TextButton
-	local button = Instance.new("TextButton")
-	button.Name = name
-	button.Position = UDim2.new(xScale, xOffset, 0, 0)
-	button.Size = UDim2.new(0.5, -CONFIRM_BUTTON_GAP / 2, 1, 0)
-	button.BackgroundColor3 = color
-	button.BorderSizePixel = 0
-	button.TextColor3 = Color3.fromRGB(255, 255, 255)
-	button.TextSize = 15
-	button.Font = Enum.Font.SourceSansBold
-	button.Text = text
-	button.AutoButtonColor = true
-	button.Parent = confirmButtons
-
-	local buttonCorner = Instance.new("UICorner")
-	buttonCorner.CornerRadius = UDim.new(0, 6)
-	buttonCorner.Parent = button
-
-	return button
-end
-
-local confirmCancelButton = makeConfirmButton("Cancel", "ยกเลิก", TAB_INACTIVE_COLOR, 0, 0)
-local confirmSendButton = makeConfirmButton("Confirm", "ยืนยันส่งรบ", BATTLE_RISK_COLOR, 0.5, CONFIRM_BUTTON_GAP / 2)
-
--- uid ของแม่ที่กล่องเปิดค้างอยู่ — จับไว้ตอนเปิดกล่อง ไม่อ่านการเลือกในกระเป๋าตอนกดยืนยัน
--- (sync ทุก 1 วิอาจล้าง/เปลี่ยน selection ระหว่างที่กล่องเปิดอยู่)
-local pendingBattleUid: string? = nil
-
-local function closeBattleConfirm()
-	pendingBattleUid = nil
-	confirmGui.Enabled = false
-end
-
-local function openBattleConfirm(mother: any)
-	pendingBattleUid = mother.uid
-	confirmMotherInfo.Text = `{mother.charName} · คลาส {mother.class} · {mother.weightText} kg`
-	confirmGui.Enabled = true
-end
-
-confirmCancelButton.Activated:Connect(closeBattleConfirm)
-
-confirmSendButton.Activated:Connect(function()
-	local uid = pendingBattleUid
-	closeBattleConfirm()
-	if not uid then
-		return
-	end
-	if isBattleRosterFull() then
-		showRosterFull()
-		return
-	end
-	sendMotherToBattleRequest:FireServer(uid)
-end)
 
 -- ⚠️ เรียกทุกครั้งที่ sync มาใหม่ — ผลรวมทหารในคลัง = ผลรวม count ของทุกกองใน lastPayload.children
 local function updateCombatHud()
@@ -634,221 +519,36 @@ local function updateCombatHud()
 end
 
 --------------------------------------------------------------------------------
--- แผง TEMP — ของเดิมที่ของใหม่จะมาแทนในรอบหลัง (docs/ui-overhaul-plan.md §2)
---------------------------------------------------------------------------------
--- อัญเชิญ + กองลูก → แท่นอัญเชิญ (UI-3) · (อัปคอก/ดาเมจ/ความเร็ว ย้ายไปป้ายบนแมพแล้วใน UI-2 · MapSigns)
--- ⚠️ ขนาดเป็น pixel ตายตัวภายในแผง (ของชั่วคราว ไม่ได้ทำตามต้นแบบ) — แผงเลื่อนได้
-
-local TEMP_ROW_HEIGHT = 30
-
-local tempPanel = UiKit.frame({
-	Name = "TempPanel",
-	Position = UDim2.fromScale(0.16, 0.14),
-	Size = UDim2.fromScale(0.3, 0.62),
-	BackgroundColor3 = BG,
-	BackgroundTransparency = 0.08,
-	Visible = false,
-})
-UiKit.corner(tempPanel, 10)
-UiKit.border(tempPanel, TEMP_COLOR, 3)
-tempPanel.Parent = hud
-
-local tempTitle = UiKit.label({
-	Position = UDim2.new(0, 10, 0, 6),
-	Size = UDim2.new(1, -54, 0, 26),
-	Text = "🛠 TEMP — ย้ายไปแท่นอัญเชิญใน UI-3",
-	TextXAlignment = Enum.TextXAlignment.Left,
-	TextColor3 = TEMP_COLOR,
-	FontFace = UiKit.FONT_HEAVY,
-})
-tempTitle.Parent = tempPanel
-
-local tempClose = UiKit.button({
-	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(1, -8, 0, 6),
-	Size = UDim2.fromOffset(34, 26),
-	BackgroundColor3 = BATTLE_RISK_COLOR,
-	Text = "✕",
-})
-UiKit.corner(tempClose, 6)
-tempClose.Parent = tempPanel
-
-local tempScroll = Instance.new("ScrollingFrame")
-tempScroll.Name = "List"
-tempScroll.Position = UDim2.new(0, 8, 0, 38)
-tempScroll.Size = UDim2.new(1, -16, 1, -46)
-tempScroll.BackgroundTransparency = 1
-tempScroll.BorderSizePixel = 0
-tempScroll.ScrollBarThickness = 6
-tempScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-tempScroll.CanvasSize = UDim2.fromOffset(0, 0)
-tempScroll.Parent = tempPanel
-local tempLayout = Instance.new("UIListLayout")
-tempLayout.Padding = UDim.new(0, 5)
-tempLayout.SortOrder = Enum.SortOrder.LayoutOrder
-tempLayout.Parent = tempScroll
-
-local function makeTempButton(order: number): TextButton
-	local button = Instance.new("TextButton")
-	button.LayoutOrder = order
-	button.Size = UDim2.new(1, -8, 0, TEMP_ROW_HEIGHT)
-	button.BackgroundColor3 = ACCENT
-	button.BorderSizePixel = 0
-	button.TextColor3 = Color3.fromRGB(255, 255, 255)
-	button.TextSize = 14
-	button.TextWrapped = true
-	button.Font = Enum.Font.SourceSansBold
-	button.AutoButtonColor = true
-	button.Text = "กำลังโหลด..."
-	UiKit.corner(button, 6)
-	button.Parent = tempScroll
-	return button
-end
-
-local function makeTempText(order: number, color: Color3): TextLabel
-	local label = Instance.new("TextLabel")
-	label.LayoutOrder = order
-	label.Size = UDim2.new(1, -8, 0, 0)
-	label.AutomaticSize = Enum.AutomaticSize.Y
-	label.BackgroundTransparency = 1
-	label.TextColor3 = color
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.TextWrapped = true
-	label.TextSize = 14
-	label.Font = Enum.Font.SourceSans
-	label.Text = ""
-	label.Parent = tempScroll
-	return label
-end
-
-local function setTempButton(button: TextButton, text: string, enabled: boolean, color: Color3?)
-	button.Text = text
-	button.Active = enabled
-	button.AutoButtonColor = enabled
-	button.BackgroundColor3 = if enabled then (color or ACCENT) else DISABLED_ACTION_COLOR
-end
-
-local autoPauseLabel = makeTempText(4, ERROR_COLOR)
-local summonButton = makeTempButton(5)
-local stacksHeader = makeTempText(6, FG)
-local stacksLabel = makeTempText(7, DIM)
-local releaseHint = makeTempText(8, DIM)
-releaseHint.Text = "จัดคิวปล่อยทหาร: เดินไปที่จุดปล่อยทหารต้นเลน แผงจะขึ้นเอง"
-
-local function updateTempPanel()
-	if not lastPayload or not tempPanel.Visible then
-		return
-	end
-	local payload = lastPayload
-
-	autoPauseLabel.Text = if payload.combatAutoPaused
-		then "⚠️ ตีไม่เข้า — หยุดปล่อยอัตโนมัติ กดเปิดอัญเชิญใหม่เมื่อพร้อม"
-		else ""
-	autoPauseLabel.Visible = payload.combatAutoPaused == true
-	setTempButton(
-		summonButton,
-		if payload.summonEnabled then "ปิดอัญเชิญ (หยุดปล่อยทหาร สะสมในคลังแทน)" else "เปิดอัญเชิญ (ปล่อยทหารต่อเนื่อง)",
-		true,
-		if payload.summonEnabled then BATTLE_RISK_COLOR else ACCENT
-	)
-
-	-- กองลูกทั้งหมด (แท็บ "ลูก" เดิม) — ดูอย่างเดียว
-	local total = 0
-	local lines: { string } = {}
-	for _, stack in payload.children do
-		total += stack.count
-		table.insert(lines, `{stack.class} {stack.charName} {stack.weightText} kg × {formatCommaNumber(stack.count)}`)
-	end
-	stacksHeader.Text = `กองลูก {#payload.children} กอง · รวม {formatCommaNumber(total)} ตัว`
-	stacksLabel.Text = if #lines > 0
-		then table.concat(lines, "\n")
-		else "(ยังไม่มีลูก — ต้องมีแม่ในคอกก่อนถึงจะเริ่มผลิต)"
-end
-
-summonButton.Activated:Connect(function()
-	if lastPayload then
-		setSummonEnabledRequest:FireServer(not lastPayload.summonEnabled)
-	end
-end)
-
---------------------------------------------------------------------------------
--- หน้าต่าง "เร็วๆ นี้" (ร้านค้า → UI-5 · ดัชนี → UI-4)
+-- จัดการหน้าต่างกลางจอ — เปิดได้ทีละอัน (กระเป๋า · ร้านค้า Robux · ดัชนี · ร้านขายแม่ · แท่นอัญเชิญ)
+-- ⚠️ UI-5: หน้าต่าง "เร็วๆ นี้" (placeholder ของร้านค้า) ปิดไปแล้ว — แทนที่ด้วย RobuxShopWindow จริง
 --------------------------------------------------------------------------------
 
-local comingSoon = UiKit.frame({
-	Name = "ComingSoon",
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.fromScale(0.5, 0.5),
-	Size = UDim2.fromScale(0.36, 0.36),
-	BackgroundColor3 = BG,
-	BackgroundTransparency = 0.05,
-	Visible = false,
-})
-UiKit.corner(comingSoon, UDim.new(0.06, 0))
-UiKit.border(comingSoon, UiKit.BLACK, 3)
-comingSoon.Parent = hud
-
-local comingSoonTitle = UiKit.label({
-	Position = UDim2.fromScale(0.05, 0.06),
-	Size = UDim2.fromScale(0.75, 0.18),
-	TextXAlignment = Enum.TextXAlignment.Left,
-	FontFace = UiKit.FONT_HEAVY,
-})
-UiKit.textStroke(comingSoonTitle, 1.5)
-comingSoonTitle.Parent = comingSoon
-
-local comingSoonBody = UiKit.label({
-	Position = UDim2.fromScale(0.1, 0.36),
-	Size = UDim2.fromScale(0.8, 0.26),
-	Text = "เร็วๆ นี้",
-	FontFace = UiKit.FONT_HEAVY,
-	TextColor3 = Color3.fromRGB(255, 220, 90),
-})
-UiKit.textStroke(comingSoonBody, 2)
-comingSoonBody.Parent = comingSoon
-
-local comingSoonNote = UiKit.label({
-	Position = UDim2.fromScale(0.1, 0.68),
-	Size = UDim2.fromScale(0.8, 0.12),
-	TextColor3 = DIM,
-})
-comingSoonNote.Parent = comingSoon
-
-local comingSoonClose = UiKit.button({
-	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.fromScale(0.96, 0.06),
-	Size = UDim2.fromScale(0.12, 0.16),
-	BackgroundColor3 = BATTLE_RISK_COLOR,
-	Text = "✕",
-})
-UiKit.corner(comingSoonClose, UDim.new(0.25, 0))
-comingSoonClose.Parent = comingSoon
-
---------------------------------------------------------------------------------
--- จัดการหน้าต่างกลางจอ — เปิดได้ทีละอัน (กระเป๋า · ร้านค้า · ดัชนี · TEMP · ร้านขายแม่)
---------------------------------------------------------------------------------
-
-type WindowName = "bag" | "shop" | "index" | "temp" | "sell"
-
-local comingSoonKind: WindowName? = nil
+type WindowName = "bag" | "shop" | "index" | "sell" | "summon" | "weapon"
 
 local function isWindowOpen(name: WindowName): boolean
 	if name == "bag" then
 		return BagWindow.isOpen()
 	elseif name == "sell" then
 		return SellWindow.isOpen()
-	elseif name == "temp" then
-		return tempPanel.Visible
+	elseif name == "summon" then
+		return SummonWindow.isOpen()
+	elseif name == "index" then
+		return IndexWindow.isOpen()
+	elseif name == "shop" then
+		return RobuxShopWindow.isOpen()
+	elseif name == "weapon" then
+		return WeaponShopWindow.isOpen()
 	end
-	return comingSoon.Visible and comingSoonKind == name
+	return false
 end
 
 local function closeAllWindows()
 	BagWindow.close()
 	SellWindow.close()
-	tempPanel.Visible = false
-	comingSoon.Visible = false
-	comingSoonKind = nil
+	SummonWindow.close()
+	IndexWindow.close()
+	RobuxShopWindow.close()
+	WeaponShopWindow.close()
 end
 
 -- กดปุ่มเดิมซ้ำ = ปิด · กดปุ่มอื่น = ปิดอันเก่าแล้วเปิดอันใหม่
@@ -862,24 +562,19 @@ local function toggleWindow(name: WindowName)
 		BagWindow.open()
 	elseif name == "sell" then
 		SellWindow.open()
-	elseif name == "temp" then
-		tempPanel.Visible = true
-		updateTempPanel()
-	else
-		comingSoonKind = name
-		comingSoonTitle.Text = if name == "shop" then "🛒 ร้านค้า" else "📖 ดัชนี"
-		comingSoonNote.Text = if name == "shop"
-			then "ร้านค้า Robux (ไข่ตำนาน · เร่งฟัก · ซื้อเลเวล) มาในรอบ UI-5"
-			else "ดัชนีตัวละครทั้ง 12 ตัว มาในรอบ UI-4"
-		comingSoon.Visible = true
+	elseif name == "summon" then
+		SummonWindow.open()
+	elseif name == "index" then
+		IndexWindow.open() -- ล้างจุดแดงบนปุ่มดัชนีด้วย
+	elseif name == "shop" then
+		RobuxShopWindow.open()
+	elseif name == "weapon" then
+		WeaponShopWindow.open()
 	end
 end
 
-tempClose.Activated:Connect(closeAllWindows)
-comingSoonClose.Activated:Connect(closeAllWindows)
-
 --------------------------------------------------------------------------------
--- ปุ่มซ้าย: ร้านค้า · ดัชนี (+ ปุ่ม TEMP ช่วงเปลี่ยนผ่าน)
+-- ปุ่มซ้าย: ร้านค้า · ดัชนี
 --------------------------------------------------------------------------------
 
 local function makeLeftButton(name: string, y: number, color: Color3, borderColor: Color3, icon: string, text: string): TextButton
@@ -914,17 +609,25 @@ end
 
 local shopButton = makeLeftButton("ShopButton", SHOP_BUTTON_Y, Color3.fromRGB(110, 225, 70), Color3.fromRGB(35, 95, 25), "🛒", "ร้านค้า")
 local indexButton = makeLeftButton("IndexButton", INDEX_BUTTON_Y, Color3.fromRGB(80, 190, 245), Color3.fromRGB(25, 75, 125), "📖", "ดัชนี")
-local tempButton = makeLeftButton("TempButton", TEMP_BUTTON_Y, TEMP_COLOR, Color3.fromRGB(110, 65, 15), "🛠", "TEMP")
-tempButton.Size = UDim2.fromScale(LEFT_BUTTON_SIZE.X.Scale, 0.06)
+-- UI-4: หน้าต่างดัชนี + จุดแดงบนปุ่มเมื่อได้ตัวละครใหม่ครั้งแรก (หายเมื่อเปิดดัชนี · จำใน client เท่านั้น)
+IndexWindow.create(hud)
+IndexWindow.attachBadge(indexButton)
+
+-- ⚠️ UI-5: จุดเดียวที่เรียก PromptProductPurchase — ไม่ใช่ FireServer (server ไม่เกี่ยวจนกว่าจะถึง
+-- ProcessReceipt) ใช้ closure เดียวกันทั้งจากหน้าต่างร้านค้าและปุ่ม "เติบโตทั้งหมด" ในแผงไข่ (SidePanels)
+local function buyRobuxProduct(productId: number)
+	MarketplaceService:PromptProductPurchase(player, productId)
+end
+
+RobuxShopWindow.create(hud, {
+	buyProduct = buyRobuxProduct,
+})
 
 shopButton.Activated:Connect(function()
 	toggleWindow("shop")
 end)
 indexButton.Activated:Connect(function()
 	toggleWindow("index")
-end)
-tempButton.Activated:Connect(function()
-	toggleWindow("temp")
 end)
 
 --------------------------------------------------------------------------------
@@ -998,6 +701,9 @@ Hotbar.create(hud, function(): number
 	local width = if camera then camera.ViewportSize.X else 0
 	return (LEVEL_LABEL_X + LEVEL_LABEL_WIDTH + HOTBAR_SIDE_GAP) * width
 end)
+-- 5D: แถบเลือดเหนือ hotbar (เฉพาะในสนามรบหรือเลือดไม่เต็ม) + จอแดงวาบตอนโดนตี · อ่าน Humanoid ของตัวเองล้วน ๆ
+HealthBar.create(hud, Hotbar.getFrame())
+HealthBar.start()
 
 BagWindow.create(hud, {
 	moveMother = function(uid: string, target: string)
@@ -1006,19 +712,11 @@ BagWindow.create(hud, {
 	toggleLock = function(uid: string)
 		toggleMotherLockRequest:FireServer(uid)
 	end,
-	sendToBattle = function(mother: any)
-		if isBattleRosterFull() then
-			showRosterFull()
-			return
-		end
-		openBattleConfirm(mother)
-	end,
 	placeEgg = function(heldEggId: number)
 		-- ⚠️ ส่ง **id ประจำฟอง** ไม่ใช่ชนิดไข่ และไม่ใช่ตำแหน่งในลิสต์
 		placeEggRequest:FireServer(heldEggId)
 	end,
 	notify = showToast,
-	isRosterFull = isBattleRosterFull,
 })
 
 SidePanels.create(hud, {
@@ -1028,16 +726,49 @@ SidePanels.create(hud, {
 	equipBest = function()
 		autoFillPenRequest:FireServer()
 	end,
+	-- UI-5: ปุ่ม "เติบโตทั้งหมด" — ทางลัดเดียวกับการ์ด "เร่งฟักไข่ทั้งหมด" ในร้านค้า Robux (productId เดียวกัน)
+	rushHatching = function()
+		local rushProduct = Config.getRobuxProduct("robux_hatch_rush")
+		if rushProduct then
+			buyRobuxProduct(rushProduct.productId)
+		end
+	end,
 })
 
 --------------------------------------------------------------------------------
 -- UI-2: ร้านขายแม่ + ป้ายอัปเกรดบนแมพ
 --------------------------------------------------------------------------------
 
--- ⚠️ ขายทีละ uid ด้วย remote เดิม (server ตรวจกระเป๋า/ล็อก/คิดราคาเองทุกตัว · ผลกลับทาง toast)
+-- ⚠️ ขายเป็นชุดครั้งเดียว (server ตรวจกระเป๋า/ล็อก/คิดราคาเองทุกตัว · ข้อความสรุปกลับทาง toast ครั้งเดียว)
 SellWindow.create(hud, {
-	sellMother = function(uid: string)
-		sellMotherRequest:FireServer(uid)
+	sellMothers = function(uids: { string })
+		sellMothersBatchRequest:FireServer(uids)
+	end,
+	notify = showToast,
+})
+
+-- 5C: ร้านกระบอง — ปุ่มซื้อยิง remote ไม่มีพารามิเตอร์ (server ซื้อขั้นถัดไปเอง) · ผล "ได้กระบองขั้น N" กลับทาง toast
+WeaponShopWindow.create(hud, {
+	buyNext = function()
+		buyClubTierRequest:FireServer()
+	end,
+	notify = showToast,
+})
+
+--------------------------------------------------------------------------------
+-- UI-3: หน้าต่างแท่นอัญเชิญ
+--------------------------------------------------------------------------------
+-- ⚠️ ลำดับยิงตายตัว (SummonWindow เรียกตามนี้): ส่งแม่เป็นชุด → ตั้งลำดับปล่อยลูก → เปิดอัญเชิญ
+-- RemoteEvent ของผู้เล่นคนเดียวถึง server ตามลำดับที่ยิง → แม่เข้า roster ก่อนอัญเชิญเริ่มตีเสมอ
+SummonWindow.create(hud, {
+	sendMothers = function(uids: { string })
+		sendMothersToBattleBatchRequest:FireServer(uids)
+	end,
+	setReleaseOrder = function(keys: { string })
+		setReleaseOrderRequest:FireServer(keys)
+	end,
+	setSummonEnabled = function(enabled: boolean)
+		setSummonEnabledRequest:FireServer(enabled)
 	end,
 	notify = showToast,
 })
@@ -1064,221 +795,39 @@ MapSigns.start(playerGui, {
 		end
 	end,
 	isSellShopOpen = SellWindow.isOpen,
+	openWeaponShop = function()
+		if not WeaponShopWindow.isOpen() then
+			toggleWindow("weapon")
+		end
+	end,
+	closeWeaponShop = function()
+		if WeaponShopWindow.isOpen() then
+			WeaponShopWindow.close()
+		end
+	end,
+	isWeaponShopOpen = WeaponShopWindow.isOpen,
+	openSummon = function()
+		if not SummonWindow.isOpen() then
+			toggleWindow("summon")
+		end
+	end,
+	closeSummon = function()
+		if SummonWindow.isOpen() then
+			SummonWindow.close()
+		end
+	end,
+	isSummonOpen = SummonWindow.isOpen,
+	-- ⚠️ UI-fix รอบ 1: ทางลัดหยุดอัญเชิญจากแท่นโดยตรง — remote เดิมของปุ่ม "หยุดอัญเชิญ" ในหน้าต่าง
+	-- ไม่เปิด/แตะหน้าต่างเลย (ปิดอยู่ก็ยังปิดต่อ · เปิดอยู่ก็ไม่ถูกสั่งปิดตาม — sync จะทำให้หน้าต่างอัปเดตเอง)
+	stopSummon = function()
+		setSummonEnabledRequest:FireServer(false)
+	end,
 })
-
---------------------------------------------------------------------------------
--- แผงจัดคิวปล่อยทหาร — เปิดเฉพาะตอนผู้เล่นเข้าใกล้จุดปล่อยทหาร (Phase 3B-1)
---------------------------------------------------------------------------------
--- ⚠️ แยกจากหน้าต่างอื่นตั้งใจ: การจัดลำดับปล่อยมีความหมายก็ต่อเมื่อยืนอยู่หน้าจุดปล่อย
--- (เหมือนบอกทหารว่า "แถวไหนออกก่อน" ตอนกำลังจะส่งจริง) ไม่ใช่ของที่ต้องเปิดค้างตลอดเวลา
--- จึงเป็น Frame แยก โผล่/หายตามระยะห่างจากจุดปล่อย · ⚠️ UI-3 จะเอาแท่นอัญเชิญมาแทนแผงนี้
-
-local RELEASE_ORDER_PROXIMITY = 30 -- studs — ระยะที่เริ่มโชว์แผงนี้
-local RELEASE_ROW_HEIGHT = 26
-
-local releasePanel = Instance.new("Frame")
-releasePanel.Name = "ReleaseOrderPanel"
-releasePanel.AnchorPoint = Vector2.new(0.5, 1)
--- ⚠️ UI-1: ยกขึ้นไปอยู่เหนือแถบ Hotbar (เดิม 100 px จากขอบล่าง — บน PC ถูก Hotbar ทับครึ่งล่าง)
--- และสูงตามจอ (เพดาน 260) ให้จอมือถือเตี้ย ๆ ไม่ล้นขึ้นไปชนแถบบน
-releasePanel.Position = UDim2.new(0.5, 0, 1 - HOTBAR_BAND, -8)
-releasePanel.Size = UDim2.new(0, 320, 0.45, 0)
-releasePanel.BackgroundColor3 = BG
-releasePanel.BackgroundTransparency = 0.1
-releasePanel.BorderSizePixel = 0
-releasePanel.Visible = false
-releasePanel.Parent = hud
-
-local releasePanelLimit = Instance.new("UISizeConstraint")
-releasePanelLimit.MaxSize = Vector2.new(320, 260)
-releasePanelLimit.Parent = releasePanel
-
-local releasePanelCorner = Instance.new("UICorner")
-releasePanelCorner.CornerRadius = UDim.new(0, 8)
-releasePanelCorner.Parent = releasePanel
-
-local releaseTitle = Instance.new("TextLabel")
-releaseTitle.Size = UDim2.new(1, -16, 0, 26)
-releaseTitle.Position = UDim2.new(0, 8, 0, 4)
-releaseTitle.BackgroundTransparency = 1
-releaseTitle.TextColor3 = FG
-releaseTitle.TextXAlignment = Enum.TextXAlignment.Left
-releaseTitle.TextSize = 15
-releaseTitle.Font = Enum.Font.SourceSansBold
-releaseTitle.Text = "จัดคิวปล่อยทหาร (หัวแถว = ปล่อยก่อน)"
-releaseTitle.Parent = releasePanel
-
-local releaseScroll = Instance.new("ScrollingFrame")
-releaseScroll.Name = "List"
-releaseScroll.Position = UDim2.new(0, 8, 0, 32)
-releaseScroll.Size = UDim2.new(1, -16, 1, -40)
-releaseScroll.BackgroundColor3 = Color3.fromRGB(20, 22, 26)
-releaseScroll.BackgroundTransparency = 0.2
-releaseScroll.BorderSizePixel = 0
-releaseScroll.ScrollBarThickness = 6
-releaseScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-releaseScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-releaseScroll.Parent = releasePanel
-
-local releaseScrollCorner = Instance.new("UICorner")
-releaseScrollCorner.CornerRadius = UDim.new(0, 6)
-releaseScrollCorner.Parent = releaseScroll
-
-local releaseScrollLayout = Instance.new("UIListLayout")
-releaseScrollLayout.Padding = UDim.new(0, 4)
-releaseScrollLayout.SortOrder = Enum.SortOrder.LayoutOrder
-releaseScrollLayout.Parent = releaseScroll
-
-local releaseScrollPadding = Instance.new("UIPadding")
-releaseScrollPadding.PaddingTop = UDim.new(0, 4)
-releaseScrollPadding.PaddingBottom = UDim.new(0, 4)
-releaseScrollPadding.PaddingLeft = UDim.new(0, 4)
-releaseScrollPadding.PaddingRight = UDim.new(0, 4)
-releaseScrollPadding.Parent = releaseScroll
-
-local function clearReleaseList()
-	for _, child in releaseScroll:GetChildren() do
-		if child.Name == "ReleaseRow" then
-			child:Destroy()
-		end
-	end
-end
-
--- ⚠️ กองที่หมด (count=0/ไม่มีใน children) ยังค้างอยู่ใน releaseOrder ตามที่ CombatService (3A)
--- ออกแบบไว้ (ไม่ลบ เผื่อผลิตเพิ่มมาเติมทีหลัง) — โชว์เป็น "(ว่าง)" แทนที่จะซ่อนทิ้งไป
--- เพื่อให้ผู้เล่นยังเห็นและจัดลำดับล่วงหน้าได้ก่อนของจะมาเติม
-local function renderReleaseOrderPanel()
-	clearReleaseList()
-	if not lastPayload then
-		return
-	end
-
-	local order: { string } = lastPayload.releaseOrder
-	local byKey: { [string]: any } = {}
-	for _, stack in lastPayload.children do
-		byKey[stack.key] = stack
-	end
-
-	for index, key in order do
-		local stack = byKey[key]
-		local rowFrame = Instance.new("Frame")
-		rowFrame.Name = "ReleaseRow"
-		rowFrame.LayoutOrder = index
-		rowFrame.Size = UDim2.new(1, 0, 0, RELEASE_ROW_HEIGHT)
-		rowFrame.BackgroundColor3 = if index == 1 then ACCENT else Color3.fromRGB(46, 50, 58)
-		rowFrame.BorderSizePixel = 0
-		rowFrame.Parent = releaseScroll
-
-		local rowCorner = Instance.new("UICorner")
-		rowCorner.CornerRadius = UDim.new(0, 4)
-		rowCorner.Parent = rowFrame
-
-		local label = Instance.new("TextLabel")
-		label.Size = UDim2.new(1, -60, 1, 0)
-		label.Position = UDim2.new(0, 6, 0, 0)
-		label.BackgroundTransparency = 1
-		label.TextColor3 = Color3.fromRGB(255, 255, 255)
-		label.TextXAlignment = Enum.TextXAlignment.Left
-		label.TextTruncate = Enum.TextTruncate.AtEnd
-		label.TextSize = 12
-		label.Font = Enum.Font.SourceSans
-		label.Text = if stack
-			then `{stack.charName} {stack.weightText} × {formatCommaNumber(stack.count)}`
-			else `(ว่าง) {key}`
-		label.Parent = rowFrame
-
-		local upButton = Instance.new("TextButton")
-		upButton.Size = UDim2.new(0, 26, 0, 22)
-		upButton.Position = UDim2.new(1, -56, 0.5, -11)
-		upButton.BackgroundColor3 = if index > 1 then Color3.fromRGB(70, 74, 82) else DISABLED_ACTION_COLOR
-		upButton.BorderSizePixel = 0
-		upButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-		upButton.Text = "▲"
-		upButton.TextSize = 12
-		upButton.Active = index > 1
-		upButton.AutoButtonColor = index > 1
-		upButton.Parent = rowFrame
-
-		local downButton = Instance.new("TextButton")
-		downButton.Size = UDim2.new(0, 26, 0, 22)
-		downButton.Position = UDim2.new(1, -28, 0.5, -11)
-		downButton.BackgroundColor3 = if index < #order then Color3.fromRGB(70, 74, 82) else DISABLED_ACTION_COLOR
-		downButton.BorderSizePixel = 0
-		downButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-		downButton.Text = "▼"
-		downButton.TextSize = 12
-		downButton.Active = index < #order
-		downButton.AutoButtonColor = index < #order
-		downButton.Parent = rowFrame
-
-		-- ⚠️ ส่งลำดับใหม่ "ทั้งชุด" เสมอ (ไม่ใช่แค่ตำแหน่งที่สลับ) ตามที่ SetReleaseOrderRequest
-		-- ต้องการ (CombatService.validateReleaseOrder เช็คทั้งชุดแล้วแทนที่ทั้งก้อน)
-		upButton.Activated:Connect(function()
-			if index <= 1 then
-				return
-			end
-			local newOrder = table.clone(order)
-			newOrder[index], newOrder[index - 1] = newOrder[index - 1], newOrder[index]
-			setReleaseOrderRequest:FireServer(newOrder)
-		end)
-
-		downButton.Activated:Connect(function()
-			if index >= #order then
-				return
-			end
-			local newOrder = table.clone(order)
-			newOrder[index], newOrder[index + 1] = newOrder[index + 1], newOrder[index]
-			setReleaseOrderRequest:FireServer(newOrder)
-		end)
-	end
-
-	if #order == 0 then
-		local emptyLabel = Instance.new("TextLabel")
-		emptyLabel.Name = "ReleaseRow"
-		emptyLabel.Size = UDim2.new(1, 0, 0, RELEASE_ROW_HEIGHT)
-		emptyLabel.BackgroundTransparency = 1
-		emptyLabel.TextColor3 = DIM
-		emptyLabel.TextXAlignment = Enum.TextXAlignment.Left
-		emptyLabel.TextSize = 12
-		emptyLabel.Font = Enum.Font.SourceSans
-		emptyLabel.Text = "  (ยังไม่มีลูกเลย — ต้องมีแม่ในคอกก่อน)"
-		emptyLabel.Parent = releaseScroll
-	end
-end
-
--- ⚠️ โพลระยะทางแทน RunService.Heartbeat — เป็นแค่ show/hide ไม่ต้องละเอียดระดับเฟรม
--- (ดู Config.getLaneStartX/ReleasePadSize — จุดเดียวกับที่ MapBuilder วาง ReleasePad จริงฝั่ง server)
-task.spawn(function()
-	while true do
-		task.wait(0.25)
-
-		local character = player.Character
-		local near = false
-
-		if character then
-			local root = character.PrimaryPart
-			if root then
-				local pad =
-					Vector3.new(Config.getLaneStartX() + Config.MapDimensions.Lane.ReleasePadSize.X / 2, 0, 0)
-				local flat = Vector3.new(root.Position.X, pad.Y, root.Position.Z)
-				near = (flat - pad).Magnitude <= RELEASE_ORDER_PROXIMITY
-			end
-		end
-
-		if near ~= releasePanel.Visible then
-			releasePanel.Visible = near
-			if near then
-				renderReleaseOrderPanel()
-			end
-		end
-	end
-end)
 
 --------------------------------------------------------------------------------
 -- popup "ผ่านด่านสำเร็จ" (Phase 4A · 4B รวมแจ้งแม่ในสนามรบที่ตายไว้ใน popup เดียวกัน)
 --------------------------------------------------------------------------------
--- ⚠️ แยกจากกล่องยืนยันส่งแม่ไปรบโดยตั้งใจ (คนละ flow: นี่ server แจ้งเอง ไม่มีอะไรให้ยืนยัน)
--- ใช้แบบเดียวกัน: ScreenGui แยก DisplayOrder สูง + ฉากหลังมืดเต็มจอ กันกดโดนปุ่มข้างหลัง
+-- server แจ้งเอง ไม่มีอะไรให้ยืนยัน · ScreenGui แยก DisplayOrder สูง + ฉากหลังมืดเต็มจอ กันกดโดนปุ่มข้างหลัง
 -- ⚠️ มาจาก StageClearedNotify ครั้งเดียวต่อเหตุการณ์ ไม่อ่านจาก sync → resync กี่รอบก็ไม่โผล่ซ้ำ
 -- · ถ้าแจ้งมาซ้อนกัน (พังหลายด่านติดกัน) ต่อคิว โชว์ทีละอัน กด "ตกลง" แล้วขึ้นอันถัดไป
 
@@ -1407,10 +956,13 @@ farmStateSync.OnClientEvent:Connect(function(payload)
 	speedLevelLabel.Text = `👟 Lv. {payload.speedLevel}`
 	damageLevelLabel.Text = `⚔️ Lv. {payload.damageLevel}`
 	updateCombatHud()
-	updateTempPanel()
 	BagWindow.setPayload(payload)
 	SidePanels.setPayload(payload)
 	SellWindow.setPayload(payload)
+	SummonWindow.setPayload(payload)
+	IndexWindow.setPayload(payload)
+	RobuxShopWindow.setPayload(payload)
+	WeaponShopWindow.setPayload(payload)
 	MapSigns.setPayload(payload)
 
 	-- ⚠️ Phase 3B-1: กำแพง (WallRenderer) กับโมเดลทหาร (TroopRenderer) อ่านจากของจริงที่ sync
@@ -1420,14 +972,21 @@ farmStateSync.OnClientEvent:Connect(function(payload)
 	-- ⚠️ Phase 3B-2: เทียบ defendersRemaining/wallHpRemaining ของด่านที่กำลังตีกับรอบ sync
 	-- ก่อนหน้า (state เก็บอยู่ในตัว CombatEffects เอง) แล้วโชว์เลขลอย+burst ถ้ามี damage เกิดขึ้นจริง
 	CombatEffects.onSync(payload)
-	if releasePanel.Visible then
-		renderReleaseOrderPanel()
-	end
 end)
 
 -- ⚠️ ผลลัพธ์ของทุกคำขอ (วางไข่/ย้าย/อัปเกรด/ขาย/สวมใส่ที่ดีที่สุด/ส่งไปรบ/ล็อก) → toast
 actionResult.OnClientEvent:Connect(function(ok: boolean, message: string)
 	showToast(message, ok)
+end)
+
+-- ⚠️ 5B: ตัวเลขต่อท้าย (น้ำหนักไข่ · เงินที่ได้ · จำนวนคนแบ่ง) มาจาก server เสมอ — ที่นี่แค่จัดรูปข้อความ
+-- 5B-2: + เลขห้อง ("killed"/"locked" = a · "reward" = c) · "heavy" = รายการ { room, weight } ทุกห้องในข้อความเดียว
+-- เหตุการณ์ "ทำไม่สำเร็จ/เสียของ" (หยิบไม่ได้ · กระเป๋าเต็ม · ไข่หาย · ติดล็อก) โชว์สีเตือน
+bossEventNotify.OnClientEvent:Connect(function(kind: string, a: any?, b: number?, c: number?)
+	local message = Config.formatBossEventMessage(kind, a, b, c)
+	if message ~= "" then
+		showToast(message, not Config.isBossEventWarning(kind))
+	end
 end)
 
 eggHatched.OnClientEvent:Connect(function(payload)
@@ -1442,6 +1001,22 @@ WallRenderer.start()
 
 -- ⚠️ Phase 3B-1: โมเดลทหารฝ่ายเรา/ฝ่ายรับ วาดฝั่งนี้ด้วยเหตุผลเดียวกัน (ดู TroopRenderer.lua)
 TroopRenderer.start()
+
+-- ⚠️ Phase 5A: ตัวเลข 59 → 0 บนกำแพงกั้นกลางคืน (รอของจาก server เบื้องหลัง ไม่บล็อกบรรทัดถัดไป)
+-- ⚠️ 5B: + จุดกด E ค้างที่ไข่บอส — ยิงแค่ "ฟองที่ i" · server ตัดสินทุกอย่างเอง (บอสตายไหม · ระยะ · ถืออยู่แล้วไหม)
+-- ⚠️ 5B-2: + บอกจังหวะเริ่มกด/ปล่อย (server จับเวลากดค้างเอง) · ห้องไหน server ดูจากตำแหน่งตัวละครเอง
+-- ⚠️ 5C: + เลขดาเมจเด้งเหนือบอสตอนโดน (BossHud เทียบ HP ห้องนั้นกับค่าก่อนหน้า · ภาพล้วน)
+local BOSS_HIT_COLOR = Color3.fromRGB(255, 235, 90)
+BossHud.start(playerGui, function(index: number)
+	pickUpBossEggRequest:FireServer(index)
+end, function(index: number, holding: boolean)
+	bossEggHoldRequest:FireServer(index, holding)
+end, function(room: number, damage: number)
+	local top = Config.getBossCornerCenter(room) + Vector3.new(0, Config.MapDimensions.BossArena.BossSize.Y, 0)
+	CombatEffects.floatingText(top, `-{UiKit.formatShort(damage)}`, BOSS_HIT_COLOR)
+end)
+-- กลางคืน = เปลี่ยนฟ้าเป็นพระจันทร์ + มืดลง · เช้า = กลับค่าเดิม (อ่าน Phase บน BossState ตัวเดียวกับ BossHud)
+NightSky.start()
 
 print("[egg-army-game] client พร้อมแล้ว")
 print("   จำลองด่านที่พังแล้วเพื่อทดสอบกำแพง (ค่าจริงจาก sync จะเขียนทับทันที): WallRenderer.setWallProgress(n)")

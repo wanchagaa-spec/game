@@ -209,23 +209,7 @@ local function buildWall(stage: number, parent: Folder, tier: number)
 	cap.Material = Enum.Material.Slate
 	cap.Parent = model
 
-	local gui = Instance.new("BillboardGui")
-	gui.Name = "Label"
-	gui.Size = UDim2.fromOffset(200, 44)
-	gui.StudsOffsetWorldSpace = Vector3.new(0, MAP.Lane.WallHeight / 2 + 4, 0)
-	gui.MaxDistance = 300
-	gui.Adornee = body
-	gui.Parent = body
-
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.TextColor3 = Color3.fromRGB(255, 226, 190)
-	label.TextStrokeTransparency = 0.3
-	label.TextScaled = true
-	label.Font = Enum.Font.SourceSansBold
-	label.Text = `กำแพงด่าน {stage}`
-	label.Parent = gui
+	-- ⚠️ 5B-2 รอบแก้ป้าย (ผู้ใช้เลือก): ป้ายลอย "กำแพงด่าน N" เหนือกำแพงลบแล้ว
 end
 
 -- อัปเดตตาม stageProgress ปัจจุบัน — ⚠️ Phase 3B-2: **ไม่ ClearAllChildren + rebuild ทั้งชุดอีก

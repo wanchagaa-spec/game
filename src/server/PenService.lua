@@ -109,7 +109,8 @@ local wanderConnection: RBXScriptConnection? = nil
 
 local rng = Random.new()
 
-local EMPTY_LABEL = "ว่าง"
+-- ⚠️ ขนาดป้ายชื่อ+น้ำหนักเหนือแม่ในคอก — **studs ในโลก** (กว้าง · สูง · 2 บรรทัด) ไม่ใช่พิกเซลบนจอ
+local MOTHER_TAG_SIZE = Vector2.new(8, 2)
 
 --------------------------------------------------------------------------------
 -- ขอบเขตที่วางของได้ในแปลง
@@ -639,9 +640,10 @@ function PenService.refreshMothers(player: Player, mothers: { any })
 			visual = part
 		end
 
+		-- ⚠️ ขนาดป้ายเป็น **studs ในโลก** (เดิม fromOffset(170, 38) = คงที่บนจอ → ยิ่งถอยออกไกลยิ่งดูใหญ่ · ผลทดสอบ Studio)
 		local gui = Instance.new("BillboardGui")
 		gui.Name = "Tag"
-		gui.Size = UDim2.fromOffset(170, 38)
+		gui.Size = UDim2.fromScale(MOTHER_TAG_SIZE.X, MOTHER_TAG_SIZE.Y)
 		gui.StudsOffsetWorldSpace = Vector3.new(0, visualHeight / 2 + 1.6, 0)
 		gui.MaxDistance = 120
 		gui.Adornee = visual
@@ -687,7 +689,8 @@ function PenService.clearVisuals(pen: Pen)
 	dropRoamersUnder(pen.mothersFolder)
 	pen.mothersFolder:ClearAllChildren()
 	pen.eggsFolder:ClearAllChildren()
-	pen.plot.label.Text = `คอก {pen.index} · {EMPTY_LABEL}`
+	-- ชื่อเจ้าของเขียนอยู่บนป้ายไม้คอก (ไม่ใช่ป้ายลอย) — คืนคอกแล้วกลับเป็น "ว่าง"
+	MapBuilder.setPenOwnerName(pen.index, nil)
 end
 
 --------------------------------------------------------------------------------
@@ -703,10 +706,10 @@ function PenService.assign(player: Player): Pen?
 		if pen.ownerUserId == nil then
 			pen.ownerUserId = player.UserId
 			penByUserId[player.UserId] = pen
-			pen.plot.label.Text = `คอก {pen.index} · {player.DisplayName}`
 			-- ⚠️ UI-2: client ต้องรู้ว่าคอกไหนเป็นของตัวเอง — ติดจุดกด E เฉพาะป้ายค่าวิ่ง/อัปคอกของคอกนี้
 			-- (แค่ซ่อนปุ่มให้ไม่งง · remote ซื้อไม่ได้อ่านค่านี้ ซื้อได้เหมือนเดิมทุกประการ)
 			player:SetAttribute(Config.PEN_INDEX_ATTRIBUTE, pen.index)
+			MapBuilder.setPenOwnerName(pen.index, player.DisplayName)
 			return pen
 		end
 	end

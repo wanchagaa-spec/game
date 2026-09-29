@@ -10,6 +10,7 @@
 -- Phase 2A: ข้อมูลเซฟลง DataStore แล้ว ออกเกมแล้วเข้าใหม่ของยังอยู่
 
 local Players = game:GetService("Players")
+local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -25,6 +26,7 @@ local PenService = require(ServerScriptService.PenService)
 local EggService = require(ServerScriptService.EggService)
 local ProductionService = require(ServerScriptService.ProductionService)
 local CombatService = require(ServerScriptService.CombatService)
+local BossService = require(ServerScriptService.BossService)
 
 -- ⚠️ กันตัวละครเกิดก่อนแมพสร้างเสร็จ
 -- แมพทั้งใบ generate ตอน server start ดังนั้น**ก่อนหน้านั้นโลกว่างเปล่า ไม่มีพื้นเลย**
@@ -133,6 +135,16 @@ end
 
 Remotes.setupServer()
 DataService.init()
+
+-- ⚠️ UI-5: ร้าน Robux — ผูกก่อนปล่อยให้ใครเข้าเล่นเสมอ (เหตุผลเดียวกับ BindToClose ด้านล่าง
+-- ต่อช้ากว่านี้ = มีช่วงที่ซื้อของแล้ว ProcessReceipt ยังไม่มีใครรับ)
+-- ตัว handler จริงอยู่ที่ EggService.processReceipt (idempotent + ให้ของก่อนเซฟก่อนคืนผล — §8.7)
+-- ⚠️ EggService.processReceipt คืน string ธรรมดา ("PurchaseGranted"/"NotProcessedYet") ไม่ใช่ Enum
+-- ตรง ๆ (กัน EggService.lua ต้องรู้จัก Roblox global `Enum` — ทดสอบนอก Studio ได้มากขึ้น) แปลงตรงนี้ที่เดียว
+MarketplaceService.ProcessReceipt = function(receiptInfo)
+	return Enum.ProductPurchaseDecision[EggService.processReceipt(receiptInfo)]
+end
+
 MapBuilder.build()
 PenService.buildWorld()
 -- UI-1: โหลดโมเดลตัวละครล่วงหน้า (เบื้องหลัง) ให้รูปในกระเป๋าฝั่ง client มีโมเดลใช้ตั้งแต่ต้น
@@ -150,8 +162,16 @@ ProductionService.start(EggService.sync)
 -- EggService (อ่าน docs/data-schema.md §7) ต่อ RemoteEvent ของตัวเอง (SetReleaseOrderRequest /
 -- SetSummonEnabledRequest) และเซฟผ่าน DataService path เดิม (stageProgress/currency ก็คือ
 -- PlayerData fields ธรรมดา ไม่มีระบบเซฟแยก)
+-- ⚠️ Phase 5A: วงจรกลางวัน/กลางคืน + บอส (5B-2: ครบทุกห้อง) — ต้องหลัง MapBuilder.build (ใช้กำแพงกั้น/ตัวบอสที่สร้างไว้)
+-- และก่อน CombatService.start (ส่ง gate ของล็อกอัญเชิญเข้าไป) · EggService อ่านสถานะล็อกผ่าน provider ที่ inject
+-- ⚠️ Phase 5B: inject ทางเข้ากระเป๋าไข่ (EggService.grantBossEgg = ทางเพิ่มไข่เดิม) + sync (เงินบอส/ไข่ใหม่ขึ้นจอทันที)
+-- แทน require ตรง ๆ — กัน BossService ผูกกับ EggService (หลักเดียวกับ ProductionService.start(EggService.sync))
+BossService.start(EggService.grantBossEgg, EggService.sync)
+EggService.setBossLockProvider(BossService.isLocked)
+
 -- ⚠️ Phase 4A: inject ตัวแจกไข่รางวัลผ่านด่านเข้าไป (กัน circular require แบบเดียวกับ ProductionService)
-CombatService.start(EggService.grantStageClearBonus)
+-- ⚠️ Phase 5A: + gate ของบอส (ล็อกอัญเชิญเมื่อพังกำแพงขณะบอสยังอยู่ · ปฏิเสธเปิดอัญเชิญตอนติดล็อก)
+CombatService.start(EggService.grantStageClearBonus, BossService.getGate())
 
 -- ⚠️ DEBUG (Studio เท่านั้น): สะพานให้ Command Bar เรียก `EggService.debug*` ของเกมที่รันอยู่จริง
 -- `require(game.ServerScriptService.EggService)` จาก Command Bar ได้โมดูล**อีกชุดหนึ่ง** (แคช require
@@ -164,11 +184,16 @@ if RunService:IsStudio() then
 	debugBridge.Name = "EggServiceDebug"
 	debugBridge.OnInvoke = function(name: unknown, ...: any): ...any
 		if type(name) ~= "string" or string.sub(name, 1, 5) ~= "debug" then
-			error(`EggServiceDebug: เรียกได้เฉพาะ EggService.debug* — ได้ {tostring(name)}`)
+			error(`EggServiceDebug: เรียกได้เฉพาะ EggService.debug* / BossService.debug* — ได้ {tostring(name)}`)
 		end
+		-- Phase 5A/5B: คำสั่งบอส (debugBossNight/debugBossDay/debugDamageBoss/debugKillBoss/debugBossStatus/debugBossEggs)
+		-- อยู่ที่ BossService — สะพานเดียวกัน ชื่อไม่ชนกับของ EggService · 5B-2: คำสั่งที่เกี่ยวกับห้องรับเลขห้องต่อท้าย
 		local fn = (EggService :: any)[name]
 		if type(fn) ~= "function" then
-			error(`EggServiceDebug: ไม่มีฟังก์ชัน EggService.{name}`)
+			fn = (BossService :: any)[name]
+		end
+		if type(fn) ~= "function" then
+			error(`EggServiceDebug: ไม่มีฟังก์ชัน EggService.{name} / BossService.{name}`)
 		end
 		return fn(...)
 	end

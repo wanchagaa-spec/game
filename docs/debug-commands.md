@@ -127,7 +127,7 @@ EggService.debugSetStageProgress(player, 5, 0, 0)
   ```lua
   EggService.debugSetStageProgress(player, 2, 0, 1)  -- ตาถัดไปที่มี damage → ด่าน 2 พัง → popup + ไข่ 1 ฟอง
   ```
-- **Phase 4B — popup รวมไข่ + แม่ตาย:** ส่งแม่ไปรบก่อน (ปุ่ม "ส่งไปรบ" ในแท็บกระเป๋า) แล้วค่อยเหลือกำแพง 1 HP
+- **Phase 4B — popup รวมไข่ + แม่ตาย:** ส่งแม่ไปรบก่อน (UI-3: แท่นอัญเชิญปากเลน → แท็บแม่ → ส่งไปรบ) แล้วค่อยเหลือกำแพง 1 HP
   → popup เดียว "ผ่านด่าน N สำเร็จ! ได้รับไข่ฟรี X ฟอง • เสียแม่ในสนามรบ Y ตัว" (ขอบแดง)
   · ด่านที่เคยได้รางวัลแล้ว (ธง `stageClearBonusGranted` = true) ตั้ง HP กลับมาแล้วพังซ้ำพร้อมแม่ในสนาม
   → "ผ่านด่าน N สำเร็จ! เสียแม่ในสนามรบ Y ตัว" · พังซ้ำโดยไม่มีแม่ในสนาม → ไม่มี popup (ตั้งใจ)
@@ -143,6 +143,47 @@ EggService.debugSetCurrency(player, 1000000000)  -- พอสำหรับอ�
 - แตะแค่ `coins` ไม่แตะ `gems` (คนละบ่อ)
 - ค่าติดลบถูก clamp เป็น 0
 - print ค่าก่อน/หลังเสมอ
+
+### `EggService.debugSetWeaponTier(player, tier)` (5C)
+
+ตั้งขั้นกระบองตรง ๆ **ไม่หักเงิน** — ทดสอบดาเมจ/หน้าตากระบองแต่ละขั้น หรือทดสอบร้านจากขั้นกลาง ๆ
+
+```lua
+game.ServerStorage.EggServiceDebug:Invoke("debugSetWeaponTier", game.Players:GetPlayers()[1], 5)
+--> "debugSetWeaponTier: <ชื่อ> กระบอง 1 → 5 (กระบองเหล็ก · ดาเมจ 3000/ครั้ง) · ..."
+```
+
+- รับจำนวนเต็ม 1–10 เท่านั้น · ค่าอื่น (0 · 11 · 2.5 · "5") = ปฏิเสธ คืนข้อความ ไม่แตะข้อมูล
+- ตั้งลดลงได้ (ทดสอบซื้อซ้ำ) · sync ทันที (หน้าต่างร้านอัปเดต) · กระบองในมือประกอบใหม่เองภายใน 0.25 วิ (BossService เทียบขั้นทุก tick)
+- `debugResetAll` คืนกระบองเป็นขั้น 1 ด้วย
+
+### `EggService.debugSimulateReceipt(player, productKey, purchaseId)`
+
+⚠️ **UI-5** — จำลอง `MarketplaceService.ProcessReceipt` โดยไม่ต้องมี Robux จริง ไม่ต้อง publish จริง
+เรียก `EggService.processReceipt` **ตัวเดียวกับที่ผูกไว้กับ `MarketplaceService.ProcessReceipt` จริง**
+(ไม่ใช่โค้ดทดสอบแยกชุด) จึงทดสอบ idempotency ได้ตรง ๆ ผ่าน command bar
+
+```lua
+-- ซื้อไข่ตำนานครั้งแรก
+EggService.debugSimulateReceipt(player, "legendary_egg", "test-purchase-1")
+-- "PurchaseGranted"
+
+-- เรียกซ้ำด้วย purchaseId เดิม (จำลอง Roblox retry ใบเสร็จเดิม) → ต้องได้ Granted เหมือนกัน
+-- แต่ **ไม่ได้ไข่เพิ่มอีกฟอง** (เช็คด้วย debugSnapshot ก่อน/หลัง)
+EggService.debugSimulateReceipt(player, "legendary_egg", "test-purchase-1")
+-- "PurchaseGranted" (ของเดิม ไม่ให้ซ้ำ)
+
+-- purchaseId ใหม่ → ให้ของอีกครั้งได้ตามปกติ
+EggService.debugSimulateReceipt(player, "legendary_egg", "test-purchase-2")
+
+-- productKey อื่น: "robux_damage_step" · "robux_speed_step" · "robux_hatch_rush"
+EggService.debugSimulateReceipt(player, "robux_damage_step", "test-purchase-3")
+```
+
+- `productKey` คือ key ใน `Config.DeveloperProducts` หรือ `Config.RobuxProducts` (ไม่ใช่ตัวเลข `productId`)
+- คืน string ธรรมดา `"PurchaseGranted"` หรือ `"NotProcessedYet"` (ไม่ใช่ Enum ตรง ๆ — Main.server.lua เป็นคนแปลงเป็น Enum จริงตอนคืนให้ MarketplaceService)
+- ถ้าให้ของสำเร็จ ฟังก์ชันนี้ **เซฟจริงลง DataStore ทันที** (เหมือน `ProcessReceipt` จริงทุกประการ — ดู
+  `docs/data-schema.md` §8.7) ไม่ใช่แค่แก้ในหน่วยความจำ
 
 ### `EggService.debugSnapshot(player)`
 
@@ -187,6 +228,55 @@ EggService.debugWipeSavedData(player, player.Name)  -- ต้องส่งช�
 - ใช้ได้เฉพาะผู้เล่นที่ยังออนไลน์อยู่ตอนนี้เท่านั้น (ต้องมีข้อมูลอยู่ในแคชของเซิร์ฟเวอร์นี้)
 - คืนค่า `(boolean, string?)` — `false, เหตุผล` เกิดได้ถ้าไม่ยืนยันชื่อ หรือ `RemoveAsync`
   ล้มครบ 3 ครั้ง (กรณีหลังผู้เล่นจะไม่ถูกเตะ ข้อมูลเดิมยังอยู่ครบ ลองเรียกใหม่ได้)
+
+---
+
+## คำสั่งบอส + วงจรกลางวัน/กลางคืน + ไข่บอส + บอสฟาด/เลือด (Phase 5A · 5B · 5B-2 · 5D) — อยู่ที่ `BossService`
+
+เรียกผ่าน**สะพานเดียวกัน** (`ServerStorage.EggServiceDebug`) — สะพานหาชื่อใน `EggService` ก่อน ไม่เจอค่อยหาใน `BossService`
+ทุกคำสั่งคืน**ข้อความสรุปสถานะ** (phase · เหลือกี่วิ · บอสยังอยู่กี่ห้อง · ล็อกใครเพราะห้องไหน · บรรทัดละห้อง) ให้ดูใน Output ทันที
+⚠️ ไม่มีอะไรเซฟลง DataStore — สถานะบอสเป็นของเซิร์ฟ (memory) · คำสั่งพวกนี้วิ่งทางเดียวกับลูปจริง (วาป · กำแพงกั้น · แจ้งเตือน · แบ่งเงิน)
+⚠️ **5B-2: บอสมีทุกห้อง (1–9)** — คำสั่งที่เกี่ยวกับห้องรับ**เลขห้องต่อท้าย** · **ไม่ใส่ = ห้อง 1** (เหมือนเดิม) ·
+`debugDamageBoss`/`debugKillBoss` **ข้ามสิทธิ์เข้าห้อง + ระยะ** (ไว้ทดสอบห้องไกลโดยไม่ต้องพังกำแพงจริง) แต่ยังต้องกลางวัน + บอสห้องนั้นอยู่ ·
+การแบ่งเงินยังตามกติกาจริง (ต้องยืนอยู่ในห้องนั้นถึงได้เงิน)
+
+| คำสั่ง | ทำอะไร |
+|---|---|
+| `debugBossNight(firstEggKg?, room?)` | ข้ามไป**ต้นกลางคืน**ทันที: วาป**คนที่อยู่ในสนามรบ**มาหน้าป้อม (ฝั่งลาน · 5B-fix — คนในคอก/ลานอยู่ที่เดิม) · กำแพงกั้นปิดปากเลน · **บอสทั้ง 9 ห้องเกิด** (ตัวเก่ายังไม่ตาย = ฟื้น HP เต็ม) · **ไข่ 6 ฟองชุดใหม่ทุกห้อง** (ชุดเก่า + ที่ใครถืออยู่หาย) · นับ 59 → 0 ใหม่ · ใส่ `firstEggKg` (≥ 100) = บังคับน้ำหนักไข่ฟองที่ 1 **ของห้อง `room`** (ไม่ใส่ห้อง = ห้อง 1) **ก่อน**ประกาศ — ทดสอบประกาศไข่หนัก (> 100,000) โดยไม่ต้องรอดวง |
+| `debugBossDay()` | ข้ามไป**ต้นกลางวัน**ทันที: กำแพงกั้นหาย เข้าไปตีบอสได้ (บอสห้องไหนตายไปแล้ว = ใช้ `debugBossNight` ก่อน · เปิดเซิร์ฟใหม่มีบอสครบทุกห้องอยู่แล้ว ไม่ต้องสั่งอะไร) |
+| `debugDamageBoss(player, amount, room?)` | ทำดาเมจ `amount` ใส่บอส**ห้อง `room`** ในนามผู้เล่นคนนั้น — นับเข้าบันทึกผู้ทำดาเมจห้องนั้นเหมือนตีจริง · ต้องกลางวัน + บอสห้องนั้นยังอยู่ |
+| `debugKillBoss(player, room?)` | ฆ่าบอส**ห้อง `room`** ในนามผู้เล่นคนนั้น (ดาเมจเท่า HP ที่เหลือ) → "กำจัดบอสห้อง N แล้ว!" · ปลดล็อกอัญเชิญ**เฉพาะคนที่ติดเพราะห้องนั้น** · ไข่ห้องนั้นหยิบได้ · **จ่ายเงินบอสห้องนั้น**ตามกติกาจริง (`Config.getBossKillReward(ห้อง)` · ต้องยืนอยู่ในห้องนั้นถึงได้) |
+| `debugBossStatus()` | ดูสถานะอย่างเดียว ไม่เปลี่ยนอะไร — บรรทัดแรก phase/เวลา/ล็อก · ตามด้วยบรรทัดละห้อง (HP · ผู้ทำดาเมจ · ไข่) |
+| `debugBossEggs(room?)` | น้ำหนัก · วาง/ถือ/เก็บแล้ว · ใครถือ ของไข่ + บอกว่าหยิบได้หรือยัง · ใส่ห้อง = ห้องเดียว · **ไม่ใส่ = ทุกห้อง** |
+| `debugBossAttack(on)` (5D) | เปิด/ปิด**บอสฟาด**ทั้งเซิร์ฟชั่วคราว · รับ `true/false` · `"on"/"off"` · `1/0` · ปิด = วงแดงที่ง้างค้างหายทันที ไม่มีใครโดน · ไม่แตะ `BossCycle.BOSS_ATTACK_ENABLED` (เซิร์ฟเปิดใหม่กลับเป็นค่าใน Config = เปิด) · ค่าแปลก = ไม่แตะอะไร |
+| `debugSetHealth(player, n)` (5D) | ตั้งเลือดผู้เล่น 0–เลือดเต็ม (100) · นับเป็น "เพิ่งโดนตี" → ยังไม่ฟื้นจนไม่โดนตีครบ 10 วิ แล้วฟื้นทีละนิด (20/วิ) · ⚠️ ยืนในเซฟโซน = เต็มทันทีใน 0.25 วิ (กติกา) — ทดสอบฟื้นเลือดให้ยืนในเลน · `0` = ตาย (ในสนามรบ → เกิดหน้าทางเข้าเลน · ในเซฟโซน → คอก) |
+
+```lua
+local P1 = game.Players:GetPlayers()[1]
+game.ServerStorage.EggServiceDebug:Invoke("debugBossNight")
+game.ServerStorage.EggServiceDebug:Invoke("debugBossNight", 152300)      -- ห้อง 1 ไข่ฟองที่ 1 หนัก 152,300 → ประกาศทั้งเซิร์ฟ
+game.ServerStorage.EggServiceDebug:Invoke("debugBossNight", 152300, 7)   -- ห้อง 7 → "คืนนี้: ห้อง 7 ไข่ 152,300 กก."
+game.ServerStorage.EggServiceDebug:Invoke("debugBossDay")
+game.ServerStorage.EggServiceDebug:Invoke("debugDamageBoss", P1, 30)      -- ห้อง 1
+game.ServerStorage.EggServiceDebug:Invoke("debugDamageBoss", P1, 300, 3)  -- ห้อง 3
+game.ServerStorage.EggServiceDebug:Invoke("debugKillBoss", P1)            -- ห้อง 1
+game.ServerStorage.EggServiceDebug:Invoke("debugKillBoss", P1, 5)         -- ห้อง 5
+print(game.ServerStorage.EggServiceDebug:Invoke("debugBossStatus"))
+print(game.ServerStorage.EggServiceDebug:Invoke("debugBossEggs"))         -- ทุกห้อง
+print(game.ServerStorage.EggServiceDebug:Invoke("debugBossEggs", 3))      -- ห้อง 3
+print(game.ServerStorage.EggServiceDebug:Invoke("debugBossAttack", false)) -- 5D: ปิดบอสฟาดทั้งเซิร์ฟ (ตีบอสสบาย ๆ)
+print(game.ServerStorage.EggServiceDebug:Invoke("debugBossAttack", true))  -- 5D: เปิดกลับ
+print(game.ServerStorage.EggServiceDebug:Invoke("debugSetHealth", P1, 40)) -- 5D: เลือด 40 (ไม่โดนตี 10 วิแล้วฟื้นทีละนิด)
+print(game.ServerStorage.EggServiceDebug:Invoke("debugSetHealth", P1, 0))  -- 5D: ตายทันที (ทดสอบจุดเกิดใหม่)
+```
+
+- อยากเห็นข้อความคืนมา → ห่อด้วย `print(...)` (Output เห็นบรรทัด `[BossService] ...` อยู่แล้วทุกครั้งที่ phase เปลี่ยน/บอสตาย)
+- เลขห้องแปลก (0 · 10 · "abc") → คืนข้อความบอกว่าผิด ไม่ทำอะไร
+- ทดสอบล็อกอัญเชิญเร็ว ๆ: `debugBossNight` → `debugBossDay` (บอสทุกห้องอยู่) → `debugSetStageProgress(player, 2, 0, 1)`
+  (ด่าน 2 เหลือ HP 1) → เปิดอัญเชิญ → ทหารพังกำแพงด่าน 2 → **ติดล็อกเพราะบอสห้อง 2** · `debugKillBoss(P1, 3)` ไม่ปลด ·
+  `debugKillBoss(P1, 2)` ปลด · ขั้นตอนเต็มใน `docs/phase5-test-checklist.md` §14
+- ~~ยังไม่มีคำสั่งตั้ง `weaponLevel`~~ → 5C: `debugSetWeaponTier(player, ขั้น)` (ข้างบน) · หรือ `debugKillBoss` ข้ามการตีจริง
+- 5D: บอสฟาดทำงานเฉพาะ**กลางวัน + บอสห้องนั้นยังอยู่ + มีคนในวงแดง** — ทดสอบ: `debugBossNight` → `debugBossDay` → เดินเข้าใกล้บอสห้อง 1
 
 ---
 
@@ -275,7 +365,7 @@ EggService.debugWipeSavedData(player, player.Name)
 - `EggService.debugFillHatchery(player)` — วางไข่ในกระเป๋าลงสวนฟักจนเต็ม/หมด
 - `EggService.debugClearBag(player)` — ล้างแม่+ไข่ในกระเป๋า (ไม่แตะคอก/สวนฟัก)
 - `EggService.debugResetAll(player)` — ล้างทุกอย่าง (คอก/กระเป๋า/สวนฟัก/stageProgress/
-  wallProgress/ธงรางวัลผ่านด่าน) กลับสู่สภาพเริ่มต้นจริง — ใช้ล้างสภาพที่ตั้งเองผ่าน `debugSetWallProgress`
+  wallProgress/ธงรางวัลผ่านด่าน/**กระบองกลับขั้น 1** (5C)) กลับสู่สภาพเริ่มต้นจริง — ใช้ล้างสภาพที่ตั้งเองผ่าน `debugSetWallProgress`
   หรือตีด่านทดสอบค้างไว้ (⚠️ ไม่แตะ `currency` — ล้างแยกด้วย `debugSetCurrency` · และไม่แตะ
   `children`/`releaseOrder` เลย ยังไม่มีคำสั่ง debug สำหรับสองอย่างนี้)
 

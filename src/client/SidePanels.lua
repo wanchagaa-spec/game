@@ -18,6 +18,9 @@ local SidePanels = {}
 export type Actions = {
 	unequip: (uid: string) -> (),
 	equipBest: () -> (),
+	-- UI-5: ปุ่มหัวแผงไข่ "เติบโตทั้งหมด" — พรอมต์ซื้อ Robux แล้วเร่งไข่ที่กำลังฟัก**ทุกฟอง**ให้เสร็จทันที
+	-- (เลือก "เร่งทั้งหมด" แทน "เร่งฟองที่เลือก" — ดูเหตุผลที่ EggService.rushAllHatching)
+	rushHatching: () -> (),
 }
 
 type PanelName = "eggs" | "paw"
@@ -30,9 +33,15 @@ local BUTTON_SIZE = UDim2.fromScale(0.043, 0.093)
 local BUTTON_RIGHT_MARGIN = 0.056
 local EGG_BUTTON_TOP = 0.328
 local PAW_BUTTON_TOP = 0.454
-local PANEL_POSITION = UDim2.fromScale(0.774, 0.418)
-local PANEL_SIZE = UDim2.fromScale(0.17, 0.315)
-local ROW_HEIGHT_RATIO = 0.27 -- ของความสูงรายการ (≈ 3 แถวเห็นพร้อมกันตามต้นแบบ)
+-- ⚠️ UI-fix รอบ 1 (ผลทดสอบ Studio): แผงเดิม (0.17 × 0.315) เล็กเกินไป ข้อความ/ปุ่ม "ถอดออก" อ่านยาก
+-- กดพลาดง่าย — ขยายทั้งกว้าง/สูง แต่ยึด**ขอบขวา**กับ**ขอบบน**เดิมไว้ (จุดอ้างอิงเดิมตามที่สั่ง)
+-- แล้วขยายลงซ้าย/ลงล่างแทน · ทุกอย่างข้างในเป็น UDim2.fromScale ล้วน (สัมพัทธ์กับแผง) จึงขยายตามอัตโนมัติ
+-- ไม่ต้องแก้ตำแหน่งย่อยทีละจุด — ยกเว้นจุดที่ระบุไว้เพิ่มเติมข้างล่าง (ปุ่มถอดออก/ระยะห่างแถว/เพดานตัวอักษร)
+local PANEL_RIGHT_EDGE = 0.774 + 0.17 -- = 0.944 (ขอบขวาเดิม — คงที่)
+local PANEL_TOP_EDGE = 0.418 -- ขอบบนเดิม — คงที่
+local PANEL_SIZE = UDim2.fromScale(0.21, 0.40)
+local PANEL_POSITION = UDim2.fromScale(PANEL_RIGHT_EDGE - 0.21, PANEL_TOP_EDGE)
+local ROW_HEIGHT_RATIO = 0.27 -- ของความสูงรายการ (≈ 3 แถวเห็นพร้อมกันตามต้นแบบ) — แผงใหญ่ขึ้น = แต่ละแถวใหญ่ขึ้นตาม ไม่ใช่เห็นแถวเพิ่ม
 
 local EGG_BUTTON_COLOR = Color3.fromRGB(225, 55, 55)
 local PAW_BUTTON_COLOR = Color3.fromRGB(245, 140, 55)
@@ -54,6 +63,7 @@ local panels: { [string]: Frame } = {}
 local lists: { [string]: ScrollingFrame } = {}
 local emptyLabels: { [string]: TextLabel } = {}
 local pawTitle: TextLabel
+local eggHeaderButton: TextButton
 local openPanel: PanelName? = nil
 
 local hatchRows: { [number]: HatchRow } = {}
@@ -169,7 +179,8 @@ local function makePanel(name: PanelName, title: string, headerButtonText: strin
 	list.CanvasSize = UDim2.fromOffset(0, 0)
 	list.Parent = panel
 	local layout = Instance.new("UIListLayout")
-	layout.Padding = UDim.new(0, 4)
+	-- ⚠️ UI-fix รอบ 1: เพิ่มจาก 4 → 6 px ให้แถวห่างกันขึ้น อ่านง่ายขึ้นตอนมีหลายแถว
+	layout.Padding = UDim.new(0, 6)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = list
 
@@ -263,18 +274,8 @@ local function getHatchRow(slotIndex: number): HatchRow
 	UiKit.textStroke(timeLabel, 1.5)
 	timeLabel.Parent = bar
 
-	-- ▶ เร่งฟักด้วย Robux — UI-5 · รอบนี้แสดงแต่กดไม่ได้
-	local speedUp = UiKit.button({
-		Name = "SpeedUp",
-		Position = UDim2.fromScale(0.81, 0.15),
-		Size = UDim2.fromScale(0.16, 0.7),
-		BackgroundColor3 = UiKit.DISABLED,
-		AutoButtonColor = false,
-		Text = "▶",
-	})
-	UiKit.corner(speedUp, UDim.new(0.2, 0))
-	UiKit.border(speedUp, UiKit.BLACK, 2)
-	speedUp.Parent = frame
+	-- ⚠️ UI-5: เร่งฟักเป็นปุ่มเดียวที่หัวแผง ("เติบโตทั้งหมด" — เร่ง**ทุกฟอง**พร้อมกัน)
+	-- ไม่มีปุ่มเร่งรายฟองแล้ว (ตัดสินใจแล้วว่า implement ง่ายกว่า — ดู EggService.rushAllHatching)
 
 	local row: HatchRow = { frame = frame, icon = icon, fill = fill, timeLabel = timeLabel }
 	hatchRows[slotIndex] = row
@@ -290,19 +291,22 @@ local function getPenRow(uid: string): PenRow
 
 	local nameLabel = UiKit.label({
 		Position = UDim2.fromScale(0.2, 0.06),
-		Size = UDim2.fromScale(0.5, 0.88),
+		Size = UDim2.fromScale(0.46, 0.88),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextWrapped = true,
 		FontFace = UiKit.FONT_HEAVY,
 	})
 	UiKit.textStroke(nameLabel, 1)
-	UiKit.maxTextSize(nameLabel, 16)
+	-- ⚠️ UI-fix รอบ 1: เพดานเดิม 16 px เล็กไปเมื่อแผงใหญ่ขึ้น — ขยับเป็น 20 ให้ข้อความใช้พื้นที่ที่เพิ่มมาได้จริง
+	UiKit.maxTextSize(nameLabel, 20)
 	nameLabel.Parent = frame
 
+	-- ⚠️ UI-fix รอบ 1: ขยายปุ่ม "ถอดออก" จาก 0.26 → 0.30 ของความกว้างแถว (กดง่ายขึ้น) —
+	-- ขยับจุดเริ่มจาก 0.72 → 0.68 คู่กับลดความกว้าง nameLabel ไม่ให้ทับกัน
 	local unequipButton = UiKit.button({
 		Name = "Unequip",
-		Position = UDim2.fromScale(0.72, 0.18),
-		Size = UDim2.fromScale(0.26, 0.64),
+		Position = UDim2.fromScale(0.68, 0.18),
+		Size = UDim2.fromScale(0.3, 0.64),
 		BackgroundColor3 = UNEQUIP_COLOR,
 		Text = "ถอดออก",
 	})
@@ -381,6 +385,11 @@ local function refreshEggs()
 	end
 	emptyLabels.eggs.Text = "ไม่มีไข่ที่กำลังฟัก — วางไข่จากกระเป๋า 🎒 แท็บไข่"
 	emptyLabels.eggs.Visible = #occupied == 0
+
+	-- UI-5: ปิดปุ่ม "เติบโตทั้งหมด" ตอนไม่มีไข่ให้เร่งเลย — กันเผลอซื้อ Robux ไปแล้วไม่มีผลอะไรเลย
+	local canRush = #occupied > 0
+	eggHeaderButton.BackgroundColor3 = if canRush then EQUIP_COLOR else UiKit.DISABLED
+	eggHeaderButton.AutoButtonColor = canRush
 	updateHatchTimers()
 end
 
@@ -473,8 +482,16 @@ function SidePanels.create(parent: ScreenGui, panelActions: Actions)
 		setOpenPanel("paw")
 	end)
 
-	local eggPanel, _, _ = makePanel("eggs", "ไข่ที่กำลังฟัก", "เติบโตทั้งหมด", EQUIP_COLOR, false)
+	-- UI-5: ปุ่มหัวแผงไข่ตอนนี้ทำงานจริง (พรอมต์ซื้อ Robux เร่งฟักทุกฟอง) — เริ่มเปิดไว้เสมอ
+	-- แล้วปิด/เปิดจริงตามว่ามีไข่กำลังฟักอยู่ไหมใน refreshEggs() (กันซื้อไปแล้วไม่มีผล)
+	local eggPanel
+	eggPanel, _, eggHeaderButton = makePanel("eggs", "ไข่ที่กำลังฟัก", "เติบโตทั้งหมด", EQUIP_COLOR, true)
 	eggPanel.Parent = parent
+	eggHeaderButton.Activated:Connect(function()
+		if eggHeaderButton.AutoButtonColor then
+			actions.rushHatching()
+		end
+	end)
 
 	local pawPanel, title, equipButton = makePanel("paw", "0/0 Active", "สวมใส่ที่ดีที่สุด", EQUIP_COLOR, true)
 	pawTitle = title

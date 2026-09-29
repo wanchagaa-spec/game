@@ -54,6 +54,7 @@ end
 -- + จำ FireClient ครั้งล่าสุดของแต่ละ remote (ต่อผู้เล่น) ไว้ตรวจสิ่งที่ส่งกลับไปหา client (Phase 4B)
 local capturedHandlers = {}
 local lastFired = {} -- [remoteName][userId] = table.pack(...args ไม่รวม player)
+local fireCounts = {} -- [remoteName][userId] = จำนวนครั้งที่ FireClient (UI-2: sync ครั้งเดียวต่อชุด)
 local FakeRemotes = {}
 function FakeRemotes.waitFor(name)
 \tlocal remote = {}
@@ -66,12 +67,18 @@ function FakeRemotes.waitFor(name)
 \tremote.FireClient = function(_self, player, ...)
 \t\tlastFired[name] = lastFired[name] or {}
 \t\tlastFired[name][player.UserId] = table.pack(...)
+\t\tfireCounts[name] = fireCounts[name] or {}
+\t\tfireCounts[name][player.UserId] = (fireCounts[name][player.UserId] or 0) + 1
 \tend
 \treturn remote
 end
 
 local function firedTo(player, remoteName)
 \treturn (lastFired[remoteName] or {})[player.UserId]
+end
+
+local function fireCount(player, remoteName)
+\treturn (fireCounts[remoteName] or {})[player.UserId] or 0
 end
 
 -- luau CLI ไม่มี Random ของ Roblox จริง (ดูคอมเมนต์เดียวกันใน tests/config.spec.luau)
@@ -837,6 +844,458 @@ do
 \tcheck("  เหตุผล", reason, "ไม่มีแม่ให้จัด")
 end
 
+'''
+
+# UI-2: ขายแม่เป็นชุด (SellMothersBatchRequest) — raw string: แท็บจริง · \n ของ Luau ไม่ต้อง escape สองชั้น
+CHECK_BATCH = r'''
+--------------------------------------------------------------------------------
+-- 2.6) ขายแม่เป็นชุด (UI-2 · SellMothersBatchRequest)
+--------------------------------------------------------------------------------
+
+local sellBatchHandler = capturedHandlers[Config.RemoteNames.SELL_MOTHERS_BATCH_REQUEST]
+assert(sellBatchHandler, "เซ็ตอัพเทสต์ผิด — ไม่ผูก callback ให้ SellMothersBatchRequest")
+
+-- ผลล่าสุดที่ส่งกลับทาง ACTION_RESULT → (ok, message)
+local function batchResult(player)
+	local fired = firedTo(player, Config.RemoteNames.ACTION_RESULT)
+	return fired and fired[1], fired and fired[2]
+end
+local function syncCount(player)
+	return fireCount(player, Config.RemoteNames.FARM_STATE_SYNC)
+end
+local function resultCount(player)
+	return fireCount(player, Config.RemoteNames.ACTION_RESULT)
+end
+
+-- แม่ชุดเดียวกันใส่ให้หลายผู้เล่นได้ (แต่ละคนมีอาเรย์ของตัวเอง)
+local BATCH_MOTHERS = {
+	{ "b-1", "wukong", 1500 },
+	{ "b-2", "monkey", 100 },
+	{ "b-3", "pig", 25000 },
+	{ "b-4", "tang", 900 },
+}
+local function stockBag(data)
+	table.clear(data.mothersInBag)
+	for _, spec in BATCH_MOTHERS do
+		table.insert(data.mothersInBag, makeMother(spec[1], spec[2], spec[3]))
+	end
+	data.currency.coins = 0
+end
+local function priceOf(data, weight)
+	return Config.getMotherSellPrice(weight, data.wallProgress, {})
+end
+
+print("\n━━ ขายเป็นชุด: ยอดรวมตรงกับขายทีละตัว · sync + ข้อความสรุปครั้งเดียว ━━")
+do
+	local single, singleData = freshPlayer("BatchSingle")
+	stockBag(singleData)
+	for _, spec in BATCH_MOTHERS do
+		pcall(sellMotherHandler, single, spec[1])
+	end
+
+	local batch, batchData = freshPlayer("BatchAll")
+	stockBag(batchData)
+	local syncBefore, resultBefore = syncCount(batch), resultCount(batch)
+	local uids = {}
+	for _, spec in BATCH_MOTHERS do
+		table.insert(uids, spec[1])
+	end
+	local ok = pcall(sellBatchHandler, batch, uids)
+	check("ไม่ error/crash", ok)
+	local expected = 0
+	for _, spec in BATCH_MOTHERS do
+		expected += priceOf(batchData, spec[3])
+	end
+	check("ขายทีละตัวได้ตามสูตร", singleData.currency.coins, expected)
+	check("ขายเป็นชุดได้เงินเท่าขายทีละตัวทุกตัวรวมกัน", batchData.currency.coins, singleData.currency.coins)
+	check("กระเป๋าว่าง", #batchData.mothersInBag, 0)
+	check("sync ครั้งเดียวต่อชุด (ไม่ใช่ทีละตัว)", syncCount(batch) - syncBefore, 1)
+	check("ข้อความสรุปครั้งเดียว", resultCount(batch) - resultBefore, 1)
+	local okResult, message = batchResult(batch)
+	check("  ผลสำเร็จ", okResult, true)
+	check("  ข้อความ = ขายแม่ N ตัว ได้ ฿X", message, `ขายแม่ 4 ตัว ได้ ฿{Config.formatCoins(expected)}`)
+end
+
+print("\n━━ ขายเป็นชุด: uid ซ้ำในชุดไม่ได้เงินซ้ำ ━━")
+do
+	local player, data = freshPlayer("BatchDup")
+	stockBag(data)
+	local expected = priceOf(data, 1500) + priceOf(data, 100)
+	pcall(sellBatchHandler, player, { "b-1", "b-1", "b-2", "b-1" })
+	check("ได้เงินของ b-1 + b-2 คนละครั้งเดียว", data.currency.coins, expected)
+	check("เหลือในกระเป๋า 2 ตัว", #data.mothersInBag, 2)
+	local _, message = batchResult(player)
+	check("  ข้อความบอกว่าข้าม 2 ตัว (ตัวซ้ำ)", message, Config.formatSellBatchMessage(2, expected, 2))
+end
+
+print("\n━━ ขายเป็นชุด: แม่ล็อก / อยู่ในคอก / ของคนอื่น ถูกข้าม ตัวอื่นขายต่อ ━━")
+do
+	local _other, otherData = freshPlayer("BatchOther")
+	table.clear(otherData.mothersInBag)
+	table.insert(otherData.mothersInBag, makeMother("theirs", "wukong", 5000))
+
+	local player, data = freshPlayer("BatchSkip")
+	stockBag(data)
+	data.mothersInBag[1].locked = true -- b-1
+	table.clear(data.mothersInPen)
+	table.insert(data.mothersInPen, makeMother("in-pen", "monkey", 300, { lastProducedAt = os.time() }))
+
+	local ok = pcall(sellBatchHandler, player, { "b-1", "in-pen", "theirs", "b-2", "b-3" })
+	check("ไม่ error/crash", ok)
+	local expected = priceOf(data, 100) + priceOf(data, 25000)
+	check("ขายได้เฉพาะ b-2 + b-3", data.currency.coins, expected)
+	check("แม่ที่ล็อกยังอยู่ในกระเป๋า", data.mothersInBag[1] ~= nil and data.mothersInBag[1].uid == "b-1")
+	check("แม่ในคอกไม่ถูกขาย", #data.mothersInPen, 1)
+	check("แม่ของคนอื่นไม่ถูกแตะ", #otherData.mothersInBag, 1)
+	local okResult, message = batchResult(player)
+	check("  ผลสำเร็จ (ขายได้บางตัว)", okResult, true)
+	check("  ข้อความบอกว่าข้าม 3 ตัว", message, Config.formatSellBatchMessage(2, expected, 3))
+end
+
+print("\n━━ ขายเป็นชุด: ขายไม่ได้สักตัว → ผลไม่สำเร็จ เงินไม่เปลี่ยน ━━")
+do
+	local player, data = freshPlayer("BatchNone")
+	stockBag(data)
+	for _, m in data.mothersInBag do
+		m.locked = true
+	end
+	pcall(sellBatchHandler, player, { "b-1", "b-2" })
+	check("เงินไม่เปลี่ยน", data.currency.coins, 0)
+	check("แม่อยู่ครบ", #data.mothersInBag, #BATCH_MOTHERS)
+	local okResult, message = batchResult(player)
+	check("  ผลไม่สำเร็จ", okResult, false)
+	check("  ข้อความ", message, "ขายไม่ได้สักตัว · ข้าม 2 ตัว (ล็อก / ไม่อยู่ในกระเป๋า / ซ้ำ)")
+end
+
+print("\n━━ ขายเป็นชุด: เกินความจุกระเป๋า → ปฏิเสธทั้งชุด ━━")
+do
+	local player, data = freshPlayer("BatchOver")
+	stockBag(data)
+	local uids = { "b-1", "b-2" }
+	for i = 1, Config.Balance.Bag.CAPACITY - 1 do
+		table.insert(uids, `ghost-{i}`)
+	end
+	local syncBefore = syncCount(player)
+	pcall(sellBatchHandler, player, uids)
+	check("ส่งมา 101 ตัว (> ความจุ 100)", #uids, Config.Balance.Bag.CAPACITY + 1)
+	check("ไม่ขายสักตัว แม้ b-1/b-2 จะขายได้", #data.mothersInBag, #BATCH_MOTHERS)
+	check("เงินไม่เปลี่ยน", data.currency.coins, 0)
+	check("ปฏิเสธแล้วไม่ sync", syncCount(player) - syncBefore, 0)
+	local okResult = batchResult(player)
+	check("  ผลไม่สำเร็จ", okResult, false)
+
+	local exact = {}
+	for i = 1, Config.Balance.Bag.CAPACITY do
+		table.insert(exact, if i <= 2 then `b-{i}` else `ghost-{i}`)
+	end
+	pcall(sellBatchHandler, player, exact)
+	check("ส่งมาพอดีความจุ → รับ (ขาย b-1/b-2 · ข้ามที่เหลือ)", #data.mothersInBag, #BATCH_MOTHERS - 2)
+end
+
+print("\n━━ ขายเป็นชุด: ข้อมูลขยะ → ปฏิเสธทั้งชุด ไม่ขายสักตัว ━━")
+do
+	local player, data = freshPlayer("BatchJunk")
+	local junk = {
+		{ "string", "b-1" },
+		{ "number", 42 },
+		{ "nil", nil },
+		{ "boolean", true },
+		{ "array ว่าง", {} },
+		{ "key เป็น string", { a = "b-1" } },
+		{ "array ปน key string", { "b-1", extra = "b-2" } },
+		{ "มีรู", { [1] = "b-1", [3] = "b-2" } },
+		{ "สมาชิกเป็นตัวเลข", { "b-1", 5 } },
+		{ "สมาชิกเป็น table", { "b-1", { "b-2" } } },
+		{ "key ทศนิยม", { [1] = "b-1", [1.5] = "b-2" } },
+	}
+	for _, case in junk do
+		stockBag(data)
+		local ok = pcall(sellBatchHandler, player, case[2])
+		check(`{case[1]}: ไม่ error/crash`, ok)
+		check(`  {case[1]}: ไม่ขายสักตัว`, #data.mothersInBag == #BATCH_MOTHERS and data.currency.coins == 0)
+		local okResult = batchResult(player)
+		check(`  {case[1]}: ผลไม่สำเร็จ`, okResult, false)
+	end
+end
+
+'''
+
+# UI-3: ส่งแม่ไปรบเป็นชุด (SendMothersToBattleBatchRequest) — ต่อสายจริงผ่าน EggService.start()
+CHECK_SEND_BATCH = r'''
+--------------------------------------------------------------------------------
+-- 2.7) ส่งแม่ไปรบเป็นชุด (UI-3 · SendMothersToBattleBatchRequest)
+--------------------------------------------------------------------------------
+
+local sendBatchHandler = capturedHandlers[Config.RemoteNames.SEND_MOTHERS_TO_BATTLE_BATCH_REQUEST]
+assert(sendBatchHandler, "เซ็ตอัพเทสต์ผิด — ไม่ผูก callback ให้ SendMothersToBattleBatchRequest")
+
+-- ผู้เล่นที่ผ่านด่าน 1 (ว่าง) แล้ว กำลังตีด่าน 2 · กระเป๋ามีแม่ s-1..s-n
+local function sendReady(tag, count)
+	local player, data = freshPlayer(tag)
+	data.stageProgress[1] = { defendersRemaining = 0, wallHpRemaining = 0 }
+	CombatService.ensureStageStarted(data, 2)
+	table.clear(data.mothersInBag)
+	table.clear(data.battleRoster)
+	for i = 1, count do
+		table.insert(data.mothersInBag, makeMother(`s-{i}`, "monkey", 100 * i))
+	end
+	return player, data
+end
+local function rosterUids(data)
+	local list = {}
+	for _, m in data.battleRoster do
+		table.insert(list, m.uid)
+	end
+	return table.concat(list, ",")
+end
+
+print("\n━━ ส่งเป็นชุด: ผลเท่ากับส่งทีละตัว · sync + ข้อความสรุปครั้งเดียว ━━")
+do
+	local single, singleData = sendReady("SendSingle", 4)
+	for _, uid in { "s-3", "s-1", "s-4" } do
+		pcall(sendToBattleHandler, single, uid)
+	end
+
+	local batch, batchData = sendReady("SendBatch", 4)
+	local syncBefore, resultBefore = syncCount(batch), resultCount(batch)
+	local ok = pcall(sendBatchHandler, batch, { "s-3", "s-1", "s-4" })
+	check("ไม่ error/crash", ok)
+	check("roster ตรงกับส่งทีละตัว (ลำดับด้วย)", rosterUids(batchData), rosterUids(singleData))
+	check("  roster = s-3,s-1,s-4 ตามลำดับที่ส่ง", rosterUids(batchData), "s-3,s-1,s-4")
+	check("กระเป๋าเหลือ s-2 เหมือนส่งทีละตัว", batchData.mothersInBag[1] and batchData.mothersInBag[1].uid, "s-2")
+	check("sync ครั้งเดียวต่อชุด (ไม่ใช่ทีละตัว)", syncCount(batch) - syncBefore, 1)
+	check("ข้อความสรุปครั้งเดียว", resultCount(batch) - resultBefore, 1)
+	local okResult, message = batchResult(batch)
+	check("  ผลสำเร็จ", okResult, true)
+	check("  ข้อความ = ส่งแม่ N ตัวไปรบ (roster X/10)", message, Config.formatSendBatchMessage(3, 3, 0))
+end
+
+print("\n━━ ส่งเป็นชุด: ในสนามแล้ว 5 ส่งเพิ่ม 10 → roster ไม่เกิน 10 ━━")
+do
+	local player, data = sendReady("SendCap", 15)
+	local first = {}
+	for i = 1, 5 do
+		table.insert(first, `s-{i}`)
+	end
+	pcall(sendBatchHandler, player, first)
+	check("ในสนาม 5 ตัว", #data.battleRoster, 5)
+	local more = {}
+	for i = 6, 15 do
+		table.insert(more, `s-{i}`)
+	end
+	pcall(sendBatchHandler, player, more)
+	check("roster = 10 พอดี", #data.battleRoster, Config.Balance.Combat.MAX_BATTLE_MOTHERS)
+	check("ตัวที่ล้น 5 ตัวยังอยู่ในกระเป๋า", #data.mothersInBag, 5)
+	local _, message = batchResult(player)
+	check("  ข้อความบอกส่ง 5 ข้าม 5", message, Config.formatSendBatchMessage(5, 10, 5))
+end
+
+print("\n━━ ส่งเป็นชุด: แม่ล็อก / อยู่ในคอก / ของคนอื่น / uid ซ้ำ ถูกข้าม ━━")
+do
+	local _other, otherData = freshPlayer("SendOther")
+	table.clear(otherData.mothersInBag)
+	table.insert(otherData.mothersInBag, makeMother("their-mom", "wukong", 5000))
+
+	local player, data = sendReady("SendSkip", 3)
+	data.mothersInBag[1].locked = true -- s-1
+	table.clear(data.mothersInPen)
+	table.insert(data.mothersInPen, makeMother("pen-mom", "monkey", 300, { lastProducedAt = os.time() }))
+
+	local ok = pcall(sendBatchHandler, player, { "s-1", "pen-mom", "their-mom", "s-2", "s-2", "s-3" })
+	check("ไม่ error/crash", ok)
+	check("roster = s-2,s-3", rosterUids(data), "s-2,s-3")
+	check("แม่ล็อกยังอยู่ในกระเป๋า", data.mothersInBag[1] and data.mothersInBag[1].uid, "s-1")
+	check("แม่ในคอกยังอยู่ในคอก", #data.mothersInPen, 1)
+	check("แม่ของคนอื่นไม่ถูกแตะ", #otherData.mothersInBag, 1)
+	local okResult, message = batchResult(player)
+	check("  ผลสำเร็จ (ส่งได้บางตัว)", okResult, true)
+	check("  ข้อความบอกว่าข้าม 4 ตัว", message, Config.formatSendBatchMessage(2, 2, 4))
+end
+
+print("\n━━ ส่งเป็นชุด: ด่านที่กำลังตี HP 0 / ผ่านครบทุกด่าน → ปฏิเสธทั้งชุด ไม่ sync ━━")
+do
+	local player, data = freshPlayer("SendStage1")
+	table.clear(data.mothersInBag)
+	table.clear(data.battleRoster)
+	table.insert(data.mothersInBag, makeMother("z-1", "monkey", 100))
+	local syncBefore = syncCount(player)
+	pcall(sendBatchHandler, player, { "z-1" })
+	check("ด่าน 1 (HP 0) → ไม่ส่ง", #data.battleRoster, 0)
+	check("  ไม่ sync", syncCount(player) - syncBefore, 0)
+	local okResult, message = batchResult(player)
+	check("  ผลไม่สำเร็จ", okResult, false)
+	check("  ข้อความบอกด่าน 1 ไม่มีศัตรู", message, "ด่าน 1 ไม่มีศัตรูให้ตี — เปิดอัญเชิญให้ผ่านด่านนี้ไปก่อน")
+
+	for stage = 1, Config.Balance.Stage.COUNT do
+		data.stageProgress[stage] = { defendersRemaining = 0, wallHpRemaining = 0 }
+	end
+	pcall(sendBatchHandler, player, { "z-1" })
+	check("ผ่านครบทุกด่าน → ไม่ส่ง", #data.battleRoster, 0)
+	local okAll, messageAll = batchResult(player)
+	check("  ผลไม่สำเร็จ", okAll, false)
+	check("  ข้อความ", messageAll, "ผ่านครบทุกด่านแล้ว ไม่มีด่านให้ส่งแม่ไปรบ")
+end
+
+print("\n━━ sync (UI-3): พลังต่อตัวของกองลูก + กองที่ติ๊กไว้แต่หมด (รอผลิต) ━━")
+do
+	local player, data = freshPlayer("SyncWaiting")
+	table.clear(data.mothersInPen)
+	local penMom = makeMother("pen-a", "wukong", 1500, { lastProducedAt = os.time() })
+	table.insert(data.mothersInPen, penMom)
+	local keyPen = Config.makeStackKey("wukong", 1500, {})
+	local keyGone = Config.makeStackKey("pig", 800, {}) -- ไม่มีแม่ผลิตเติมแล้ว
+	local keyStock = Config.makeStackKey("monkey", 100, {})
+	table.clear(data.children)
+	data.children[keyStock] = 12
+	data.releaseOrder = { keyPen, keyGone, keyStock }
+	data.damageLevel = 3
+	EggService.sync(player)
+	local payload = firedTo(player, Config.RemoteNames.FARM_STATE_SYNC)[1]
+	local waiting = payload.waitingStacks or {}
+	check("กองที่ติ๊กไว้ + หมด + แม่ในคอกผลิตเติม → อยู่ใน waitingStacks", #waiting == 1 and waiting[1].key == keyPen, true)
+	check("  count = 0", waiting[1] and waiting[1].count, 0)
+	check("  กองที่หมดและไม่มีแม่ผลิตเติม → ไม่ส่ง", #waiting, 1)
+	local stock = nil
+	for _, stack in payload.children do
+		if stack.key == keyStock then
+			stock = stack
+		end
+	end
+	local expected = Config.computeBattlePower(Config.getChildWeight(100, {}), "monkey", {}, 3)
+	check("children มี power = computeBattlePower (รวม damageLevel)", stock and stock.power, expected)
+	check("  มี charId ให้วาดรูป", stock and stock.charId, "monkey")
+	check("กองที่มีของไม่ซ้ำใน waitingStacks", waiting[1] and waiting[1].key ~= keyStock, true)
+	check("ผู้เล่นใหม่ (ด่าน 1 ไม่มีศัตรู) → sync บอกเหตุผลที่ส่งแม่ไม่ได้", payload.sendStageBlockReason,
+		"ด่าน 1 ไม่มีศัตรูให้ตี — เปิดอัญเชิญให้ผ่านด่านนี้ไปก่อน")
+
+	table.insert(data.battleRoster, makeMother("field-1", "tang", 900))
+	EggService.sync(player)
+	local roster = firedTo(player, Config.RemoteNames.FARM_STATE_SYNC)[1].battleRoster
+	local character = Config.getCharacter("tang")
+	check("battleRoster ใน sync มีชื่อ/คลาส/น้ำหนักพร้อมโชว์", roster[1] and `{roster[1].charName}/{roster[1].class}/{roster[1].weightText}`,
+		`{character.name}/{character.class}/{Config.formatWeight(900)}`)
+end
+
+print("\n━━ ส่งเป็นชุด: ข้อมูลขยะ → ปฏิเสธทั้งชุด ไม่ส่งสักตัว ━━")
+do
+	local player, data = sendReady("SendJunk", 2)
+	local eleven = {}
+	for i = 1, Config.Balance.Combat.MAX_BATTLE_MOTHERS + 1 do
+		table.insert(eleven, if i <= 2 then `s-{i}` else `ghost-{i}`)
+	end
+	local junk = {
+		{ "string", "s-1" },
+		{ "number", 42 },
+		{ "nil", nil },
+		{ "array ว่าง", {} },
+		{ "key เป็น string", { a = "s-1" } },
+		{ "มีรู", { [1] = "s-1", [3] = "s-2" } },
+		{ "สมาชิกเป็นตัวเลข", { "s-1", 5 } },
+		{ "เกิน 10 ตัว", eleven },
+	}
+	for _, case in junk do
+		local syncBefore = syncCount(player)
+		local ok = pcall(sendBatchHandler, player, case[2])
+		check(`{case[1]}: ไม่ error/crash`, ok)
+		check(`  {case[1]}: ไม่ส่งสักตัว`, #data.battleRoster == 0 and #data.mothersInBag == 2)
+		check(`  {case[1]}: ไม่ sync`, syncCount(player) - syncBefore, 0)
+		local okResult = batchResult(player)
+		check(`  {case[1]}: ผลไม่สำเร็จ`, okResult, false)
+	end
+end
+
+'''
+
+# UI-4: ดัชนี (discovered) — ทุกทางที่สร้างแม่ผ่าน PlayerData.createMother · ขาย/ตายไม่ลบ
+CHECK_INDEX = r'''
+--------------------------------------------------------------------------------
+-- 2.8) ดัชนี (UI-4 · discovered)
+--------------------------------------------------------------------------------
+
+local function discoveredOf(player)
+	local payload = firedTo(player, Config.RemoteNames.FARM_STATE_SYNC)[1]
+	return table.concat(payload.discovered or {}, ",")
+end
+
+print("\n━━ ดัชนี: ฟักไข่ได้ตัวใหม่ → บันทึก (ทางที่ 1: hatch) ━━")
+do
+	local player, data = freshPlayer("IndexHatch")
+	table.clear(data.discovered)
+	table.clear(data.mothersInPen)
+	data.hatching[1] = {
+		eggId = "egg_stage1",
+		weight = 300,
+		charId = "fish",
+		startedAt = os.time() - 100,
+		hatchAt = os.time() - 10,
+	}
+	DataService.saveAsync(player.UserId, false)
+	check("เข้าเกมใหม่ (กระตุ้นฟักไข่ที่ครบเวลา)", EggService.onPlayerAdded(player))
+	data = DataService.getCached(player.UserId)
+	check("ไข่ฟักแล้ว", data.hatching[1], false)
+	check("ฟักได้ปลา → discovered.fish", data.discovered.fish, true)
+	EggService.sync(player)
+	check("sync ส่ง discovered (array ของ charId)", discoveredOf(player), "fish")
+end
+
+print("\n━━ ดัชนี: debugGrantMother → บันทึก (ทางที่ 2) · ขาย/ส่งรบ/ตาย ไม่ลบ ━━")
+do
+	local player, data = freshPlayer("IndexDebug")
+	table.clear(data.discovered)
+	table.clear(data.mothersInBag)
+	local ok = EggService.debugGrantMother(player, 1500, "tang", "bag")
+	check("debugGrantMother สำเร็จ", ok, true)
+	check("  discovered.tang", data.discovered.tang, true)
+	EggService.debugGrantMother(player, 800, "guanyin", "bag")
+	EggService.debugGrantMother(player, 900, "bajie", "bag")
+
+	-- ขาย → ไม่ลบ
+	local tangUid = nil
+	for _, m in data.mothersInBag do
+		if m.charId == "tang" then
+			tangUid = m.uid
+		end
+	end
+	pcall(sellMotherHandler, player, tangUid)
+	local stillTang = false
+	for _, m in data.mothersInBag do
+		if m.charId == "tang" then
+			stillTang = true
+		end
+	end
+	check("ขายพระถังไปแล้ว (ไม่มีในกระเป๋า)", stillTang, false)
+	check("  ยังอยู่ในดัชนี", data.discovered.tang, true)
+
+	-- ส่งไปรบแล้วตายตอนด่านพัง → ไม่ลบ
+	data.stageProgress[1] = { defendersRemaining = 0, wallHpRemaining = 0 }
+	CombatService.ensureStageStarted(data, 2)
+	local guanyinUid = nil
+	for _, m in data.mothersInBag do
+		if m.charId == "guanyin" then
+			guanyinUid = m.uid
+		end
+	end
+	pcall(sendBatchHandler, player, { guanyinUid })
+	check("ส่งกวนอิมไปรบ", #data.battleRoster, 1)
+	check("  อยู่ในดัชนีตอนอยู่ในสนาม", data.discovered.guanyin, true)
+	local lost = CombatService.killRoster(data, 2)
+	check("ด่านพัง → แม่ในสนามตาย", lost, 1)
+	check("  ตายแล้วยังอยู่ในดัชนี", data.discovered.guanyin, true)
+	EggService.sync(player)
+	check("sync เรียงชื่อ · มีทั้งตัวที่ขาย/ตายไปแล้ว", discoveredOf(player), "bajie,guanyin,tang")
+
+	-- charId แปลกในข้อมูล (ตัวละครถูกลบจาก Config) → sync ไม่พัง ส่งไปให้ client ข้ามเอง
+	data.discovered.ghost_char = true
+	check("charId แปลกใน discovered → sync ไม่พัง", pcall(EggService.sync, player))
+
+	-- debugResetAll ล้างดัชนีด้วย
+	EggService.debugResetAll(player)
+	check("debugResetAll ล้าง discovered", next(data.discovered) == nil, true)
+end
+
+'''
+
+FOOTER = '''
 print(string.format("\\n=== ผ่าน %d / ตก %d ===", passCount, failCount))
 if failCount > 0 then
 \terror(`มีเทสต์ตก {failCount} เคส`, 0)
@@ -877,7 +1336,7 @@ def build_harness() -> str:
     src = src.replace('--!strict', '--!nocheck' + PRELUDE)
 
     escaped = src.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
-    check = CHECK.replace('__EGGSERVICE_SOURCE', f'"{escaped}"')
+    check = (CHECK + CHECK_BATCH + CHECK_SEND_BATCH + CHECK_INDEX + FOOTER).replace('__EGGSERVICE_SOURCE', f'"{escaped}"')
     return STUB + check
 
 

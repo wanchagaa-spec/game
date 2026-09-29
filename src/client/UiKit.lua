@@ -20,6 +20,7 @@ UiKit.FONT_HEAVY_ITALIC = Font.new(FONT_FAMILY, Enum.FontWeight.ExtraBold, Enum.
 UiKit.WHITE = Color3.fromRGB(255, 255, 255)
 UiKit.BLACK = Color3.fromRGB(0, 0, 0)
 UiKit.DISABLED = Color3.fromRGB(110, 110, 110)
+UiKit.SILHOUETTE = Color3.fromRGB(12, 12, 14) -- เงาดำของตัวที่ยังไม่เคยได้ (ดัชนี UI-4)
 
 -- ชุดเดียวกับ PenService ที่วาดแม่ในโลกจริง (กล่องสี) เพื่อให้ตรงกัน
 UiKit.CLASS_COLORS = {
@@ -112,6 +113,18 @@ function UiKit.maxTextSize(parent: TextLabel | TextButton | TextBox, maxSize: nu
 	constraint.Parent = parent
 end
 
+-- ══ ProximityPrompt ══ ⚠️ **ทุก prompt ในเกมต้องสร้างผ่านฟังก์ชันนี้** (tools/check-prompt-exclusivity.py ตรวจ)
+-- Exclusivity = OnePerButton: ป้าย/จุดกดที่อยู่ใกล้กันขึ้นเฉพาะอันที่ใกล้ที่สุดต่อปุ่ม (UI-2 ตัดสิน · ใช้กับแท่นอัญเชิญ UI-3 ด้วย)
+-- ค่าตั้งต้น: กดครั้งเดียว (HoldDuration 0) · ไม่ต้องมองเห็นตรง ๆ (เสาป้ายบังได้) · props ทับค่าอื่นได้ ยกเว้น Exclusivity
+function UiKit.prompt(props: { [string]: any }?): ProximityPrompt
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.HoldDuration = 0
+	prompt.RequiresLineOfSight = false
+	apply(prompt, props)
+	prompt.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
+	return prompt
+end
+
 function UiKit.padding(parent: GuiObject, scale: number)
 	local padding = Instance.new("UIPadding")
 	padding.PaddingTop = UDim.new(scale, 0)
@@ -192,9 +205,11 @@ end
 -- วาดรูปตัวละครลงใน holder — ⚠️ วาดใหม่เฉพาะตอนตัวละครเปลี่ยน/โมเดลเพิ่งโหลดเสร็จ (เช็คจาก attribute)
 -- เรียกซ้ำทุก sync ได้โดยไม่สร้าง ViewportFrame ใหม่ทุกครั้ง
 -- มีโมเดล (ReplicatedStorage.MotherModelTemplates) = ViewportFrame · ไม่มี = กล่องสีตามคลาส + ตัวอักษรคลาส
-function UiKit.setPortrait(holder: GuiObject, charId: string, class: string)
+-- silhouette = true (ดัชนี UI-4 · ตัวที่ยังไม่เคยได้): โมเดลเดียวกันทาดำทั้งตัว (ViewportFrame.ImageColor3 = ดำ)
+--   · ไม่มีโมเดล = กล่องดำ + "?" (ไม่บอกคลาส)
+function UiKit.setPortrait(holder: GuiObject, charId: string, class: string, silhouette: boolean?)
 	local template = findTemplate(charId)
-	local key = `{charId}:{if template then "model" else "box"}`
+	local key = `{charId}:{if template then "model" else "box"}:{if silhouette then "shadow" else "color"}`
 	if holder:GetAttribute("PortraitKey") == key then
 		return
 	end
@@ -209,6 +224,9 @@ function UiKit.setPortrait(holder: GuiObject, charId: string, class: string)
 		viewport.Ambient = Color3.fromRGB(190, 190, 190)
 		viewport.LightColor = Color3.fromRGB(255, 255, 255)
 		viewport.LightDirection = Vector3.new(-1, -1, -1)
+		if silhouette then
+			viewport.ImageColor3 = UiKit.BLACK -- คูณสีทั้งภาพด้วยดำ = เงาดำตามรูปทรงโมเดล
+		end
 
 		local model = template:Clone()
 		model.Parent = viewport
@@ -232,7 +250,7 @@ function UiKit.setPortrait(holder: GuiObject, charId: string, class: string)
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
 		Size = UDim2.fromScale(0.72, 0.72),
-		BackgroundColor3 = UiKit.CLASS_COLORS[class] or UiKit.CLASS_COLORS.C,
+		BackgroundColor3 = if silhouette then UiKit.SILHOUETTE else (UiKit.CLASS_COLORS[class] or UiKit.CLASS_COLORS.C),
 	})
 	local aspect = Instance.new("UIAspectRatioConstraint")
 	aspect.AspectRatio = 1
@@ -241,7 +259,8 @@ function UiKit.setPortrait(holder: GuiObject, charId: string, class: string)
 	UiKit.border(box, UiKit.BLACK, 2)
 	local letter = UiKit.label({
 		Size = UDim2.fromScale(1, 1),
-		Text = class,
+		Text = if silhouette then "?" else class,
+		TextColor3 = if silhouette then UiKit.DISABLED else UiKit.WHITE,
 		FontFace = UiKit.FONT_HEAVY,
 	})
 	UiKit.textStroke(letter, 2)

@@ -27,7 +27,19 @@ local Vector3 = { new = __v3 }
 local Color3 = { fromRGB = function() return { __color = true } end }
 local UDim2 = { fromOffset = function() return {} end, fromScale = function() return {} end, new = function() return {} end }
 local UDim = { new = function() return {} end }
-local CFrame = { new = function() return { __cf = true } end }
+-- CFrame คูณกันได้ (แท่นอัญเชิญหมุนทรงกระบอกด้วย CFrame.new(...) * CFrame.Angles(...)) — ค่าไม่สำคัญกับการตรวจนี้
+local __cfMeta = {}
+__cfMeta.__mul = function() return setmetatable({ __cf = true }, __cfMeta) end
+local CFrame = {
+	new = function() return setmetatable({ __cf = true }, __cfMeta) end,
+	Angles = function() return setmetatable({ __cf = true }, __cfMeta) end,
+}
+-- ของตกแต่ง (อนุภาค/แสง) — ไม่มีผลกับพื้น
+local Vector2 = { new = function(x, y) return { X = x or 0, Y = y or 0 } end }
+local NumberRange = { new = function() return {} end }
+local NumberSequence = { new = function() return {} end }
+local NumberSequenceKeypoint = { new = function() return {} end }
+local ColorSequence = { new = function() return {} end }
 local Enum = setmetatable({}, { __index = function()
 \treturn setmetatable({}, { __index = function() return { __enum = true } end })
 end })
@@ -41,6 +53,7 @@ function Instance.new(className)
 \tobj.GetChildren = function() return {} end
 \tobj.FindFirstChildOfClass = function() return nil end
 \tobj.PivotTo = function() end
+\tobj.SetAttribute = function() end -- 5B: ไข่บอสติด Attribute (Index/Weight/Status) — ไม่มีผลกับพื้น
 \tif className == "Part" or className == "SpawnLocation" then
 \t\ttable.insert(__created, obj)
 \tend

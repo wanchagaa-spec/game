@@ -78,12 +78,103 @@ return function(t, Config)
 		return total < 2e12
 	end)(), true)
 
-	print("── อาวุธ vs บอส: ต้องตี 10 ครั้งทุกด่าน ──")
-	for stage = 1, 9 do
-		check(`ด่าน {stage}`, Config.getBossHp(stage) / Config.getWeaponDamage(stage), 10)
-	end
-	check("อาวุธขั้น 1 = 10", Config.getWeaponDamage(1), 10)
+	-- ⚠️ 5C: สูตรอาวุธเดิม "×10 ต่อขั้น ตี 10 ครั้งพอดี" ยกเลิกแล้ว (ผู้ใช้กำหนดใหม่: ขั้น N ตีห้อง N คนเดียว ~3 นาที)
+	print("── 5C กระบอง: ดาเมจคำนวณจาก HP บอส × คูลดาวน์ ÷ เวลาเป้า (ปัดขึ้นเลขนัยสำคัญ 1 ตัว) ──")
+	local W = Config.Balance.Weapon
+	local COOLDOWN = Config.Balance.BossCycle.PLAYER_ATTACK_COOLDOWN
 	check("บอสด่าน 1 = 100 HP", Config.getBossHp(1), 100)
+	check("กระบองมี 10 ขั้น (9 ห้อง + ขั้นพิเศษ)", W.MAX_LEVEL, 10)
+	-- ✅ 5D ทางเลือก B (ผู้ใช้เลือก): ขั้น 1 = Weapon.MIN_DAMAGE = 2 (สูตรให้ 0.3) · ขั้น 2–10 ไม่เปลี่ยน
+	local expectedDamage = { 2, 3, 30, 300, 3000, 30000, 300000, 3000000, 30000000, 90000000 }
+	for tier = 1, W.MAX_LEVEL do
+		check(`ขั้น {tier} ดาเมจ {expectedDamage[tier]}/ครั้ง ตามตาราง`, Config.getClubDamage(tier), expectedDamage[tier])
+		check(`  getWeaponDamage (ชื่อเดิมที่ BossService ใช้) = getClubDamage`, Config.getWeaponDamage(tier), Config.getClubDamage(tier))
+	end
+	local rises = true
+	for tier = 2, W.MAX_LEVEL do
+		if Config.getClubDamage(tier) <= Config.getClubDamage(tier - 1) then rises = false end
+	end
+	check("ดาเมจทุกขั้นมากกว่าขั้นก่อนหน้า", rises, true)
+	check("ดาเมจไม่ได้เดา: ขั้น 5 = HP ห้อง 5 × คูลดาวน์ ÷ 180 ปัดขึ้น",
+	      Config.getClubDamage(5), Config.roundSignificant(Config.getBossHp(5) * COOLDOWN / W.TARGET_SOLO_KILL_SECONDS, 1, true))
+	check("5D ทางเลือก B: MIN_DAMAGE = 2", W.MIN_DAMAGE, 2)
+	check("  ขั้น 1 จากสูตรต่ำกว่า MIN_DAMAGE (0.3 → ยกเป็น 2)",
+	      Config.roundSignificant(Config.getBossHp(1) * COOLDOWN / W.TARGET_SOLO_KILL_SECONDS, 1, true) < W.MIN_DAMAGE, true)
+	check("  ขั้น 2 จากสูตรไม่โดน MIN_DAMAGE (ตารางขั้น 2–10 เหมือน 5C เป๊ะ)",
+	      Config.roundSignificant(Config.getBossHp(2) * COOLDOWN / W.TARGET_SOLO_KILL_SECONDS, 1, true) > W.MIN_DAMAGE, true)
+
+	print("── 5C/5D: ขั้น N ตีบอสห้อง N คนเดียวตายภายในกลางวัน **หลังหักเวลาหลบบอสฟาด** (กันติดล็อกอัญเชิญ) ──")
+	local day = Config.Balance.BossCycle.DAY_SECONDS
+	for room = 1, Config.Balance.Stage.COUNT do
+		local seconds = Config.getClubSoloKillSeconds(room, room)
+		local withDodge = Config.getClubSoloKillSecondsWithDodge(room, room)
+		check(`ห้อง {room}: ขั้น {room} คนเดียว (หักหลบแล้ว) {string.format("%.1f", withDodge)} วิ ≤ กลางวัน {day} วิ`,
+			withDodge <= day, true)
+		check(`  เวลาดิบ (ก่อนหลบ) ไม่เกินเป้า 3 นาที`, seconds <= W.TARGET_SOLO_KILL_SECONDS, true)
+		if room >= 2 then
+			check(`  ห้อง 2–9 "ราว 3 นาที" (≥ 2.5 นาที)`, seconds >= 150, true)
+		end
+	end
+	check("ห้อง 1: ขั้น 1 เร็วกว่าได้ (5D-B: 50 ครั้ง = 25 วิ)", Config.getClubSoloKillSeconds(1, 1), 25)
+	check("ห้อง 2–9: 334 ครั้ง = 167 วิ", Config.getClubSoloKillSeconds(4, 4), 167)
+	local tier9 = Config.getClubSoloKillSeconds(9, 9)
+	local tier10 = Config.getClubSoloKillSeconds(10, 9)
+	check(`ขั้น 10 ตีห้อง 9 เร็วกว่าขั้น 9 ชัดเจน ({tier10} วิ vs {tier9} วิ)`, tier10 * 2 <= tier9, true)
+	check("ขั้น 10 ตีห้อง 9 = 112 ครั้ง = 56 วิ", tier10, 56)
+	check("ขั้น N ตีห้อง N+1 ไม่ทันกลางวัน (ต้องซื้อขั้นถัดไป)", Config.getClubSoloKillSeconds(3, 4) > day, true)
+
+	print("── 5D: เวลาหลบบอสฟาด (ง้าง 1 วิ + วิ่งกลับ 4 studs ที่ 32 · ทุก 5 วิ) ──")
+	near("สัดส่วนเวลาตีจริง = 1 − (1 + 4/32) ÷ 5 = 0.775", Config.getBossDodgeUptime(), 0.775, 1e-9)
+	near("ห้อง 1 (ขั้น 1): 25 → 32.3 วิ", Config.getClubSoloKillSecondsWithDodge(1, 1), 25 / 0.775, 1e-9)
+	near("ห้อง 2–9 (ขั้น N): 167 → 215.5 วิ", Config.getClubSoloKillSecondsWithDodge(6, 6), 167 / 0.775, 1e-9)
+	near("ขั้น 10 ตีห้อง 9: 56 → 72.3 วิ", Config.getClubSoloKillSecondsWithDodge(10, 9), 56 / 0.775, 1e-9)
+	check("หักหลบแล้วช้ากว่าเวลาดิบเสมอ", Config.getClubSoloKillSecondsWithDodge(4, 4) > Config.getClubSoloKillSeconds(4, 4), true)
+
+	print("── 5C: ราคา = รายได้ 5 นาทีของผู้เล่นอ้างอิงด่าน N · ขั้น 10 = รายได้ 3 ชม. ของด่าน 9 ──")
+	local expectedPrice = { 0, 17000, 170000, 1800000, 18000000, 180000000, 1800000000, 18000000000, 180000000000, 6500000000000 }
+	for tier = 1, W.MAX_LEVEL do
+		check(`ขั้น {tier} ราคา {expectedPrice[tier]}`, Config.getClubPrice(tier), expectedPrice[tier])
+	end
+	check("ขั้น 1 ฟรี", Config.getClubPrice(1), 0)
+	near("ขั้น 4 ≈ รายได้ 5 นาทีของด่าน 4 (ปัดเลขนัยสำคัญ 2 ตัว)",
+	     Config.getClubPrice(4) / (Config.getReferenceIncomePerHour(4) * 5 / 60), 1, 0.05)
+	near("ขั้น 10 ≈ รายได้ 180 นาทีของด่าน 9",
+	     Config.getClubPrice(10) / (Config.getReferenceIncomePerHour(9) * 180 / 60), 1, 0.05)
+	check("ขั้น 10 แพงกว่าขั้น 9 มาก (≥ 30 เท่า)", Config.getClubPrice(10) >= Config.getClubPrice(9) * 30, true)
+	check("getWeaponUpgradeCost(ขั้น N) = ราคาขั้น N+1 (ชื่อเดิม)", Config.getWeaponUpgradeCost(4), Config.getClubPrice(5))
+	check("เต็มเพดานแล้วไม่มีราคาอัปต่อ", Config.getWeaponUpgradeCost(10), nil)
+	near("getReferenceStageIncome ยังเท่าเดิม (แยก perHour ออกมาแล้วผลไม่เปลี่ยน · ด่าน 1 = 1 ชม.)",
+	     Config.getReferenceStageIncome(1), Config.getReferenceIncomePerHour(1), 1e-6)
+
+	print("── 5C: ค่าเก่านอกช่วง clamp ไม่ crash ──")
+	check("0 → 1", Config.clampClubTier(0), 1)
+	check("-5 → 1", Config.clampClubTier(-5), 1)
+	check("15 → 10", Config.clampClubTier(15), 10)
+	check("3.7 → 3", Config.clampClubTier(3.7), 3)
+	check("nil → ขั้นเริ่มต้น", Config.clampClubTier(nil), W.START_TIER)
+	check("string → ขั้นเริ่มต้น", Config.clampClubTier("9"), W.START_TIER)
+	check("NaN → ขั้นเริ่มต้น", Config.clampClubTier(0 / 0), W.START_TIER)
+	check("ดาเมจของค่าเกินเพดาน = ขั้น 10", Config.getClubDamage(99), Config.getClubDamage(10))
+	check("ดาเมจของค่าแปลก = ขั้น 1", Config.getClubDamage(-3), Config.getClubDamage(1))
+
+	print("── 5C: ซื้อได้ทีละขั้นเท่านั้น (planClubPurchase ไม่รับเลขขั้น) ──")
+	local okBuy, reason, nextTier, price = Config.planClubPurchase(1, 17000)
+	check("ขั้น 1 + เงินพอดี → ซื้อขั้น 2 ได้", okBuy and nextTier == 2 and price == 17000 and reason == nil, true)
+	okBuy, reason, nextTier = Config.planClubPurchase(1, 1e15)
+	check("เงินล้นมือก็ได้แค่ขั้นถัดไป (ข้ามขั้นไม่ได้)", okBuy and nextTier == 2, true)
+	okBuy, reason = Config.planClubPurchase(1, 16999)
+	check("เงินขาด 1 → ไม่ได้ · เงินไม่พอ", not okBuy and reason == "เงินไม่พอ", true)
+	okBuy, reason = Config.planClubPurchase(10, 1e18)
+	check("ขั้น 10 แล้ว → ซื้อต่อไม่ได้", not okBuy and reason == "มีกระบองขั้นสูงสุดแล้ว", true)
+	okBuy, reason = Config.planClubPurchase(42, 1e18)
+	check("ค่าเซฟเกินเพดาน (clamp เป็น 10) → ซื้อต่อไม่ได้ ไม่ crash", not okBuy and reason == "มีกระบองขั้นสูงสุดแล้ว", true)
+	okBuy, _, nextTier = Config.planClubPurchase(-7, 1e6)
+	check("ค่าเซฟติดลบ (clamp เป็น 1) → ขั้นถัดไป = 2", okBuy and nextTier == 2, true)
+	okBuy = Config.planClubPurchase(1, 0 / 0)
+	check("เงินเป็น NaN → ไม่ได้", okBuy, false)
+	check("ข้อความสำเร็จ", Config.formatClubBoughtMessage(3), "ได้กระบองขั้น 3")
+	check("ClubVisuals ครบ 10 ขั้น", #Config.ClubVisuals, 10)
+	check("ขั้น 1 = กระบองไม้", Config.getClubVisual(1).name, "กระบองไม้")
 
 	print("── อัตราผลิต ──")
 	check("ยังไม่อัป = ×1", Config.getProductionMultiplier(0), 1)
@@ -219,11 +310,48 @@ return function(t, Config)
 	local prod = Config.getDeveloperProduct("legendary_egg")
 	check("มี product ไข่ตำนาน", prod ~= nil, true)
 	check("ให้ไข่ตำนาน", prod.grantEggId, "egg_legendary")
-	check("ยังปิดอยู่ (ยังไม่สร้างจริง)", prod.enabled, false)
-	check("productId ยังเป็น 0", prod.productId, 0)
+	check("เปิดขายแล้ว (UI-5)", prod.enabled, true)
+	check("productId ไม่ใช่ 0 แล้ว (UI-5 · placeholder)", prod.productId > 0, true)
 	check("ไม่เก็บราคา Robux ใน Config", (prod :: any).robuxPrice, nil)
-	check("หา product ที่ปิดอยู่ไม่เจอ", Config.findProductByRobloxId(0), nil)
+	check("หา product ด้วย productId จริงเจอ", Config.findProductByRobloxId(prod.productId), prod)
 	check("productId ที่ไม่มีจริงคืน nil", Config.findProductByRobloxId(999999), nil)
+
+	print("── UI-5: RobuxProducts (ทะลุเพดาน damage/speed + เร่งฟักไข่) ──")
+	local dmgProd = Config.getRobuxProduct("robux_damage_step")
+	local spdProd = Config.getRobuxProduct("robux_speed_step")
+	local rushProd = Config.getRobuxProduct("robux_hatch_rush")
+	check("มี product damage_bonus", dmgProd ~= nil and dmgProd.kind == "damage_bonus", true)
+	check("มี product speed_bonus", spdProd ~= nil and spdProd.kind == "speed_bonus", true)
+	check("มี product hatch_rush", rushProd ~= nil and rushProd.kind == "hatch_rush", true)
+	check("ทั้งสามเปิดขาย", dmgProd.enabled and spdProd.enabled and rushProd.enabled, true)
+	check("productId ไม่ชนกันเอง", dmgProd.productId ~= spdProd.productId and spdProd.productId ~= rushProd.productId, true)
+	check("productId ไม่ชนกับ legendary_egg", dmgProd.productId ~= prod.productId, true)
+	check("หา robux product ด้วย productId จริงเจอ", Config.findRobuxProductByRobloxId(dmgProd.productId), dmgProd)
+	check("productId ปลอมคืน nil", Config.findRobuxProductByRobloxId(999999), nil)
+
+	print("── UI-5: getRobuxDamageMultiplier — ไม่มีเพดาน ──")
+	check("0 ขั้น = ×1 (ไม่กระทบผู้เล่นที่ไม่จ่าย)", Config.getRobuxDamageMultiplier(0), 1)
+	check("nil = ×1 เหมือน 0", Config.getRobuxDamageMultiplier(nil :: any), 1)
+	local perStep = Config.Balance.RobuxBoost.DAMAGE_MULTIPLIER_PER_STEP
+	check("1 ขั้น = ตัวคูณต่อขั้น", Config.getRobuxDamageMultiplier(1), perStep)
+	check("ทะลุเพดานปกติได้จริง (ขั้นเยอะ ๆ เกิน MAX_LEVEL ของแทร็กเงินในเกม)",
+		Config.getRobuxDamageMultiplier(200) > Config.getArmyDamageMultiplier(Config.Balance.DamageUpgrade.MAX_LEVEL), true)
+
+	print("── UI-5: computeBattlePower รับ robuxDamageSteps เสริม (ไม่กระทบ call เดิม) ──")
+	local basePower = Config.computeBattlePower(1000, "wukong", nil, 0)
+	check("ไม่ส่ง robuxDamageSteps เลย = เหมือนเดิมเป๊ะ", Config.computeBattlePower(1000, "wukong", nil, 0, nil), basePower)
+	check("ส่ง 0 = เหมือนเดิมเป๊ะ", Config.computeBattlePower(1000, "wukong", nil, 0, 0), basePower)
+	check("ส่ง steps > 0 = แรงขึ้นจริง", Config.computeBattlePower(1000, "wukong", nil, 0, 5) > basePower, true)
+
+	print("── UI-5: getEffectiveWalkSpeed — ทะลุเพดานแทร็กปกติได้ แต่ไม่ทะลุกำแพงที่สร้างไว้จริง ──")
+	local normalMax = Config.getMaxWalkSpeed()
+	check("0 ขั้น = เท่าปกติเป๊ะ", Config.getEffectiveWalkSpeed(Config.Balance.SpeedUpgrade.MAX_LEVEL, 0), normalMax)
+	check("ซื้อ Robux speed ทะลุเพดานปกติได้จริง",
+		Config.getEffectiveWalkSpeed(Config.Balance.SpeedUpgrade.MAX_LEVEL, 3) > normalMax, true)
+	check("ซื้อเยอะแค่ไหนก็ไม่ทะลุ hard cap (กำแพงที่สร้างไว้จริงรับได้)",
+		Config.getEffectiveWalkSpeed(Config.Balance.SpeedUpgrade.MAX_LEVEL, 999999) <= Config.getRobuxSpeedHardCap(), true)
+	check("hard cap ไม่มีทางเกิน SPEED_CEILING", Config.getRobuxSpeedHardCap() <= Config.Balance.SpeedUpgrade.SPEED_CEILING, true)
+	check("hard cap ต้องมากกว่าเพดานแทร็กปกติ (ไม่งั้นซื้อไปก็ไม่มีผล)", Config.getRobuxSpeedHardCap() > normalMax, true)
 
 	print("── ตารางสุ่มน้ำหนักแยกตามด่าน ──")
 	check("ด่าน 1 มีตาราง", Config.Balance.StageWeightTiers[1] ~= nil, true)
@@ -356,12 +484,18 @@ return function(t, Config)
 	check("ทุกด่านอยู่ในช่วง 30-70% ของรายได้", shareOk, true)
 	print(string.format("   ราคากินรายได้ %.0f%% ถึง %.0f%%", minShare * 100, maxShare * 100))
 
+	-- ⚠️ 5C (ผู้ใช้ยืนยัน): นับกระบองขั้น st เป็นรายจ่ายของด่าน st · แต่รายได้ด่าน st ในโมเดล (getReferenceStageIncome)
+	-- **รวมเงินบอสห้อง st ไว้แล้ว** ทั้งที่คนเพิ่งพังกำแพง st แล้วติดล็อกยังตีห้อง st ไม่ได้ → เทสต์นี้**มองแง่ดีกว่าตอนติดล็อก**
+	-- (ตอนติดล็อกรายได้ใกล้ด่าน st−1 · ~13–17% ของด่าน st) — สถานการณ์ติดล็อกจริงวัดแยกที่ "ยามติดล็อก" ข้างล่าง
 	local worstSurplus, bestSurplus = 999, 0
 	for st = 2, 9 do
 		local need = Config.getStageDamageUpgradeTotal(st)
 			+ (Config.getPenUpgradeCost(st) or 0)
 			+ (Config.getProductionUpgradeCost(st - 1) or 0)
-			+ (Config.getWeaponUpgradeCost(st) or 0)
+			-- ⚠️ 5C: กระบองที่ต้องซื้อระหว่างด่าน st = **ขั้น st** (ตีบอสห้อง st · ราคาอิงรายได้ด่าน st)
+			-- เดิมอ่าน getWeaponUpgradeCost(st) = ราคาอัป st → st+1 (ล่วงหน้า 1 ขั้น) ซึ่งตอนราคาเป็น ×10 คงที่ไม่ต่างนัก
+			-- แต่ราคาใหม่อิงรายได้รายด่าน → อ่านแบบเดิม = คิดราคาขั้นของด่านถัดไป (แพงกว่า 10 เท่า) ลงบัญชีด่านนี้ (ส่วนเกิน 0.78)
+			+ Config.getClubPrice(st)
 		local surplus = Config.getReferenceStageIncome(st) / need
 		if surplus < worstSurplus then worstSurplus = surplus end
 		if surplus > bestSurplus then bestSurplus = surplus end
@@ -369,6 +503,42 @@ return function(t, Config)
 	check("ส่วนเกินไม่เกิน 3 เท่าแล้ว (เดิม 299 เท่า)", bestSurplus <= 3, true)
 	check("แต่ยังเหลือพอซื้ออาวุธ (ไม่ต่ำกว่า 1.5 เท่า)", worstSurplus >= 1.5, true)
 	print(string.format("   ส่วนเกิน %.2fx ถึง %.2fx", worstSurplus, bestSurplus))
+
+	print("── 5C ยามติดล็อก: พังกำแพง N แล้วติดล็อกบอสห้อง N (เงิน 0 · มีกระบองขั้น N−1 · วงจรจริง อยู่คนเดียว) ──")
+	do
+		local W = Config.Balance.Weapon
+		local cycle = Config.Balance.BossCycle
+		local worstMinutes = 0
+		for stage = 2, Config.Balance.Stage.COUNT do
+			-- สมมติฐาน "มีขั้น N−1" ต้องจริง: ขั้น N−1 ตีห้อง N−1 คนเดียวตายทันในรอบเดียว (ได้เงินบอสห้องนั้นทุกคืน)
+			-- 5D: ใช้เวลาที่หักการหลบบอสฟาดแล้ว (ผู้ใช้สั่ง)
+			check(`ด่าน {stage}: กระบองขั้น {stage - 1} ตีห้อง {stage - 1} ทันกลางวัน หักหลบแล้ว (ฐานของรายได้ตอนติดล็อก)`,
+				Config.getClubSoloKillSecondsWithDodge(stage - 1, stage - 1) <= cycle.DAY_SECONDS, true)
+			local minutes = Config.getLockedClubBuyMinutes(stage)
+			if minutes > worstMinutes then worstMinutes = minutes end
+			check(`ด่าน {stage}: หาเงินซื้อกระบองขั้น {stage} ตอนติดล็อก {string.format("%.1f", minutes)} นาที ≤ {W.LOCKED_BUY_MAX_MINUTES}`,
+				minutes <= W.LOCKED_BUY_MAX_MINUTES, true)
+		end
+		print(string.format("   ช้าสุด %.1f นาที (เพดาน %d)", worstMinutes, W.LOCKED_BUY_MAX_MINUTES))
+		-- รายได้ตอนติดล็อก = คอกด่าน N + บอสห้อง N−1 เต็มก้อนคืนละตัว (ไม่มีบอสห้อง N · ไม่มีเงินฆ่าทหาร)
+		near("รายได้ติดล็อกด่าน 2 = คอกด่าน 2 + บอสห้อง 1 เต็มก้อน × 6 ตัว/ชม.",
+			Config.getLockedIncomePerHour(2),
+			Config.getPenCapacity(2) * Config.getCoinsPerMinute(Config.Balance.BalanceCheck.REFERENCE_WEIGHT[2], 2) * 60
+				+ (3600 / Config.getBossCycleSeconds()) * Config.getBossKillReward(1), 1e-6)
+		check("รายได้ติดล็อกต่ำกว่ารายได้ด่าน N ในโมเดลทุกด่าน (โมเดลรวมบอสห้อง N ไว้)", (function()
+			for stage = 2, Config.Balance.Stage.COUNT do
+				if Config.getLockedIncomePerHour(stage) >= Config.getReferenceIncomePerHour(stage) then return false end
+			end
+			return true
+		end)(), true)
+
+		-- มือใหม่: มีแค่กระบองขั้น 1 (ฟรี) แล้วพังกำแพงด่าน 2 ขณะบอสห้อง 2 อยู่ → ต้องตีเองคนเดียวตายทันกลางวัน
+		-- 5D: หักเวลาหลบบอสฟาดแล้ว (ผู้ใช้สั่ง) · ก่อนทางเลือก B (ดาเมจขั้น 1 = 1) ได้ 645 วิ ตก → ยกเป็น 2 เหลือ ~323 วิ
+		local rookie = Config.getClubSoloKillSecondsWithDodge(1, 2)
+		check(`กระบองขั้น 1 ตีบอสห้อง 2 คนเดียว (หักหลบแล้ว) {string.format("%.1f", rookie)} วิ ≤ กลางวัน {cycle.DAY_SECONDS} วิ (มือใหม่ไม่ติดล็อกด่าน 2)`,
+			rookie <= cycle.DAY_SECONDS, true)
+		check("  เวลาดิบ (ก่อนหลบ) = 500 ครั้ง × 0.5 = 250 วิ", Config.getClubSoloKillSeconds(1, 2), 250)
+	end
 
 	print("── computeBattlePower ──")
 	local base = Config.computePower(10000, "wukong")
@@ -726,12 +896,15 @@ return function(t, Config)
 
 	print("── ยามเวลาฟาร์ม ──")
 	-- ⚠️ อย่า hardcode จำนวนผู้เล่น — ผูกกับ Config เพื่อให้เทสต์ตามไปเองเวลาปรับ
-	local expectedEggs = (3600 / Config.Balance.Boss.RESPAWN_SECONDS)
-		* Config.Balance.Boss.EGGS_PER_SPAWN
+	-- 5B: Balance.Boss ลบแล้ว — โมเดลสมดุลอ่าน BossCycle.MODEL_* (ตัวเลขเดิม 5 นาที · 5 ฟอง) ไม่ใช่วงจรจริง
+	-- (เปลี่ยนเป็นวงจรจริง = จูนสมดุล ผู้ใช้ตัดสิน — ดูคอมเมนต์ที่ตัวค่าใน Config)
+	local expectedEggs = (3600 / Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS)
+		* Config.Balance.BossCycle.MODEL_EGGS_PER_SPAWN
 		/ Config.Balance.BalanceCheck.PLAYERS_PER_SERVER
 	check("ไข่/ชม./คน ตรงสูตร บอสวาง ÷ จำนวนผู้เล่น",
 		math.abs(Config.getEggsPerHour() - expectedEggs) < 1e-9, true)
-	check("ที่ 6 คน ได้ 10 ฟอง/ชม./คน", math.abs(Config.getEggsPerHour() - 10) < 1e-9, true)
+	check("ที่ 6 คน ได้ 10 ฟอง/ชม./คน (โมเดลสมดุล — ตัวเลขเดิม)", math.abs(Config.getEggsPerHour() - 10) < 1e-9, true)
+	check("Balance.Boss ชุดเก่าถูกลบแล้ว (ไม่มีใครอ่านได้)", Config.Balance.Boss, nil) -- legacy-boss: ok (ตรวจว่าหายจริง)
 	local farmOk = true
 	for st = 2, 9 do
 		local ratio = Config.getReferenceFarmHours(st) / Config.getReferenceClearHours(st)
@@ -838,14 +1011,25 @@ return function(t, Config)
 	check("แผงร้านค้าอยู่ซ้ายลานคอก", shopRight < Config.getPenYardLeftX(), true)
 	check("เลนรบอยู่ขวาลานคอก", Config.getLaneStartX() >= Config.getPenYardRightX(), true)
 	check("แผงร้านมีมากกว่าหนึ่งแผง", map.Shop.StallCount >= 2, true)
-	local stallGap = true
-	for i = 1, map.Shop.StallCount do
-		-- แผงต้องขนาบทางเดิน ไม่ใช่ตั้งขวางตรงกลาง
-		if math.abs(Config.getShopStallCenter(i).Z) < map.Pen.RowGap / 2 then
-			stallGap = false
-		end
-	end
-	check("แผงร้านไม่ตั้งขวางทางเดินกลาง", stallGap, true)
+	-- ⚠️ UI-2 (ผลทดสอบ Studio): แผงวางติดกันกลางผนังด้านหลัง เว้นช่องเดินระหว่างแผง
+	-- (เดิมบังคับให้ขนาบทางเดินกลางไปคนละฝั่ง — ผู้ใช้เปลี่ยนแล้ว)
+	local s1, s2 = Config.getShopStallCenter(1), Config.getShopStallCenter(2)
+	check("แผงร้านสมมาตรรอบกลางผนังหลัง (Z = 0)", math.abs(s1.Z + s2.Z) < 1e-6, true)
+	check("ร้านขายแม่ (แผง 1) อยู่ฝั่ง −Z · ซื้ออาวุธ (แผง 2) ฝั่ง +Z", s1.Z < 0 and s2.Z > 0, true)
+	local walkGap = math.abs(s2.Z - s1.Z) - map.Shop.StallSize.Y
+	check("ช่องเดินระหว่างแผง = Shop.StallGap", math.abs(walkGap - map.Shop.StallGap) < 1e-6, true)
+	check("ช่องเดินกว้างไม่น้อยกว่าประตูคอก", walkGap >= map.Pen.GateWidth, true)
+	check("แผงอยู่ในแนวทางเดินกลาง (กลางผนังหลัง)", math.abs(s1.Z) + map.Shop.StallSize.Y / 2 < map.Pen.RowGap / 2, true)
+	check("แผงไม่บังลานคอก (อยู่ซ้ายลานคอก)", s1.X + map.Shop.StallSize.X / 2 < Config.getPenYardLeftX(), true)
+
+	-- ⚠️ UI-2: กำแพงข้างเลนเริ่มเสมอกำแพงขอบแมพฝั่งตะวันออก ไม่ยื่นเข้าลาน · ต้นเลน/ระยะการรบไม่เปลี่ยน
+	-- ⚠️ UI-fix รอบ 1: เปลี่ยนจากผิวด้านใน (`- Thickness/2`) เป็นผิวด้านนอก (`+ Thickness/2`) — ผิวด้านใน
+	-- ทำให้กำแพงข้างเลนซ้อนทับกำแพงขอบแมพเต็มความหนา (5 studs) = z-fighting ตรงมุมปากเลน
+	local wallStart = Config.getLaneWallStartX()
+	check("กำแพงข้างเลนเริ่ม = ผิวด้านนอกกำแพงขอบแมพฝั่งตะวันออก (ไม่ซ้อนทับ)",
+		wallStart, Config.getEastBoundaryX() + map.Boundary.Thickness / 2)
+	check("กำแพงข้างเลนไม่ยื่นเข้าลาน (เริ่มหลังต้นเลน)", wallStart >= Config.getLaneStartX(), true)
+	check("ต้นเลนยังอยู่ที่ขอบลานคอก (ระยะการรบไม่เปลี่ยน)", Config.getLaneStartX(), Config.getPenYardRightX())
 
 	-- คอกทุกแปลงต้องไม่ทับกัน และอยู่คนละฝั่งของทางเดินตามจำนวนแถว
 	local overlap, rowsSeen = false, {}
@@ -901,13 +1085,13 @@ return function(t, Config)
 	end
 	check("รังบอสอยู่ในช่วงด่านตัวเองทุกด่าน", nestInRange, true)
 	check("รังบอสอยู่หลังกำแพงทุกด่านที่มีกำแพง", nestBehindWall, true)
-	check("จุดวางไข่ในรัง = จำนวนไข่ที่บอสวาง", Config.Balance.Boss.EGGS_PER_SPAWN, 5)
+	check("ไข่ที่บอสวางต่อคืน = 6 ฟอง (5B)", Config.Balance.BossCycle.EGGS_PER_NIGHT, 6)
 
-	-- จุดวางไข่ต้องอยู่ในรัง ไม่หลุดขอบ
+	-- จุดวางไข่ต้องอยู่ในรัง ไม่หลุดขอบ (5B: มุมห้อง หลังบอส — ตรวจครบทุกห้องเผื่อรอบ "บอสทุกห้อง")
 	local spotsInside = true
 	for st = 1, Config.Balance.Stage.COUNT do
 		local center = Config.getBossNestCenter(st)
-		for i = 1, Config.Balance.Boss.EGGS_PER_SPAWN do
+		for i = 1, Config.Balance.BossCycle.EGGS_PER_NIGHT do
 			local spot = Config.getBossEggSpot(st, i)
 			if math.abs(spot.X - center.X) > map.BossRoom.Size.X / 2
 				or math.abs(spot.Z - center.Z) > map.BossRoom.Size.Y / 2 then
@@ -965,6 +1149,41 @@ return function(t, Config)
 	check("ความเร็วเดินเป็น 0 → ล้ม", mapGuardCatches(
 		function() map.Wander.Speed = 0 end,
 		function() map.Wander.Speed = savedWanderSpeed end), true)
+	-- ══ แท่นอัญเชิญ (UI-3) ══ แทนแท่นปล่อยเดิม — ภาพ + จุดกดเท่านั้น ไม่แตะต้นเลน/ระยะการรบ
+	local pedestal = map.SummonPedestal
+	local pedestalCenter = Config.getSummonPedestalCenter()
+	-- 5B-fix (ผู้ใช้สั่ง): ย้ายเข้าไปในเลน = สนามรบ หลังช่องประตู (เดิม X 148 ในลาน)
+	check("แท่นอัญเชิญอยู่ที่ X 177 = ผิวหลังช่องประตู 162.5 + 7.5 + รัศมี 7", pedestalCenter.X, 177)
+	check("แท่นอัญเชิญอยู่กลางเลน (Z 0)", pedestalCenter.Z, 0)
+	check("แท่นเริ่มที่ต้นเลนหรือหลังจากนั้น (ไม่ล้ำลานคอก)",
+		pedestalCenter.X - pedestal.Diameter / 2 >= Config.getLaneStartX(), true)
+	check("แท่นเริ่มหลังช่องประตู (X 162.5) = อยู่ในเลน สนามรบ", pedestalCenter.X - pedestal.Diameter / 2 >= Config.getLaneWallStartX(), true)
+	check("แท่นจบก่อนห้องบอสด่าน 1", pedestalCenter.X + pedestal.Diameter / 2 < Config.getBossNestCenter(1).X - map.BossRoom.Size.X / 2, true)
+	check("ข้างแท่นเหลือทางเดินกว้างกว่าประตูคอก", map.Lane.Width / 2 - pedestal.Diameter / 2 >= map.Pen.GateWidth, true)
+	check("กด E ค้างครึ่งวินาที", pedestal.PromptHoldSeconds, 0.5)
+	local damageSpotP = Config.getDamageSignSpot()
+	local pedestalGap = math.sqrt((damageSpotP.X - pedestalCenter.X) ^ 2 + (damageSpotP.Z - pedestalCenter.Z) ^ 2)
+	check("ระยะกด E แท่นกับป้ายดาเมจไม่ทับกัน", pedestalGap > pedestal.PromptDistance + map.MapSign.PromptDistance, true)
+	check("ต้นเลนไม่ขยับ (ยังเป็นขอบลานคอก)", Config.getLaneStartX(), Config.getPenYardRightX())
+	check("ไม่มีแท่นปล่อยสี่เหลี่ยมเดิมเหลือใน Config", map.Lane.ReleasePadSize, nil)
+	local savedInset = pedestal.EntranceGap
+	local savedDiameter = pedestal.Diameter
+	local savedPedestalPrompt = pedestal.PromptDistance
+	local savedPedestalClose = pedestal.CloseDistance
+	check("แท่นล้ำออกมาทับช่องประตู/ลาน → ล้ม", mapGuardCatches(
+		function() pedestal.EntranceGap = -10 end, function() pedestal.EntranceGap = savedInset end), true)
+	check("แท่นล้ำเข้าห้องบอสด่าน 1 → ล้ม", mapGuardCatches(
+		function() pedestal.EntranceGap = 60 end, function() pedestal.EntranceGap = savedInset end), true)
+	check("แท่นกว้างจนบังทางเข้าเลน → ล้ม", mapGuardCatches(
+		function() pedestal.Diameter = map.Lane.Width end, function() pedestal.Diameter = savedDiameter end), true)
+	check("ระยะกด E แท่นทับป้ายดาเมจ → ล้ม", mapGuardCatches(
+		function() pedestal.PromptDistance = 35; pedestal.CloseDistance = 40 end,
+		function() pedestal.PromptDistance = savedPedestalPrompt; pedestal.CloseDistance = savedPedestalClose end), true)
+	check("ระยะปิดหน้าต่างสั้นกว่าระยะกด → ล้ม", mapGuardCatches(
+		function() pedestal.CloseDistance = pedestal.PromptDistance end,
+		function() pedestal.CloseDistance = savedPedestalClose end), true)
+	check("ชื่อโมเดลแท่นที่ client หา", Config.SUMMON_PEDESTAL_NAME, "SummonPedestal")
+
 	check("คืนค่าแมพเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
 
 	--------------------------------------------------------------------------
@@ -1328,9 +1547,10 @@ return function(t, Config)
 	-- นั่งปนกันอยู่ที่ Config ชั้นเดียวกัน ไม่มีอะไรบอกว่าอันไหนเป็นอันไหน
 	print("── Config.Balance: ลูกบิดสมดุลอยู่ที่เดียว ──")
 
+	-- 5B: "Boss" ลบแล้ว (ค่าที่ยังใช้ย้ายไป BossCycle) → แทนที่ด้วย "BossCycle" ให้ยังนับ 17 กลุ่มแรกเท่าเดิม
 	local BALANCE_GROUPS = {
 		"StageWeightTiers", "Weight", "Production", "Damage", "NewPlayer",
-		"Economy", "Pen", "Bag", "Hatchery", "Stages", "Stage", "Boss",
+		"Economy", "Pen", "Bag", "Hatchery", "Stages", "Stage", "BossCycle",
 		"DamageUpgrade", "SpeedUpgrade", "Combat", "BalanceCheck", "Weapon",
 	}
 
@@ -1348,6 +1568,16 @@ return function(t, Config)
 	check("ทุกกลุ่มสมดุลอยู่ใน Config.Balance", table.concat(missingFromBalance, ","), "")
 	check("ไม่มีกลุ่มสมดุลเหลือที่ Config ชั้นบนสุด", table.concat(leakedToTop, ","), "")
 	check("นับได้ 17 กลุ่ม", #BALANCE_GROUPS, 17)
+	check("กลุ่ม Boss ชุดเก่าไม่อยู่ทั้งใน Balance และชั้นบนสุด (5B)",
+		(Config.Balance :: any).Boss == nil and (Config :: any).Boss == nil, true)
+	do
+		-- ยามต้องจับคนที่เติม Balance.Boss กลับเข้าไป
+		local balance: any = Config.Balance
+		balance.Boss = { RESPAWN_SECONDS = 300 }
+		check("เติม Balance.Boss กลับ → validate ไม่ผ่าน", pcall(Config.validate), false) -- legacy-boss: ok (ข้อความเทสต์)
+		balance.Boss = nil
+		check("  ลบออกแล้ว validate ผ่านเหมือนเดิม", pcall(Config.validate), true)
+	end
 
 	-- ของที่ **ต้องไม่** ถูกย้ายเข้า Balance — id · schema · รูปทรงแมพ · ชื่อ remote
 	for _, name in { "MapDimensions", "RemoteNames", "DataStore", "Stack", "Uid", "World",
@@ -1499,6 +1729,65 @@ return function(t, Config)
 	check("ลบคลาส SS ออกจาก ClassHatchMultiplier → ยามจับได้", balanceGuardCatches(
 		function() classMultTable.SS = nil end,
 		function() classMultTable.SS = savedSS end), true)
+	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
+
+	print("── ข้อความขายแม่เป็นชุด (UI-2) ──")
+	check("formatCoins 1234567", Config.formatCoins(1234567), "1,234,567")
+	check("formatCoins 950", Config.formatCoins(950), "950")
+	check("formatCoins 1000", Config.formatCoins(1000), "1,000")
+	check("ขายครบ ไม่มีข้าม", Config.formatSellBatchMessage(4, 12345, 0), "ขายแม่ 4 ตัว ได้ ฿12,345")
+	check("ขายได้บางตัว บอกจำนวนที่ข้าม", Config.formatSellBatchMessage(2, 180, 3),
+		"ขายแม่ 2 ตัว ได้ ฿180 · ข้าม 3 ตัว (ล็อก / ไม่อยู่ในกระเป๋า / ซ้ำ)")
+	check("ขายไม่ได้สักตัว", Config.formatSellBatchMessage(0, 0, 2),
+		"ขายไม่ได้สักตัว · ข้าม 2 ตัว (ล็อก / ไม่อยู่ในกระเป๋า / ซ้ำ)")
+	check("remote ขายเป็นชุดมีชื่อ", Config.RemoteNames.SELL_MOTHERS_BATCH_REQUEST, "SellMothersBatchRequest")
+	check("remote ขายทีละตัวยังอยู่", Config.RemoteNames.SELL_MOTHER_REQUEST, "SellMotherRequest")
+
+	print("── ส่งแม่ไปรบเป็นชุด (UI-3): ข้อความ + ตรวจรูปร่างรายการ uid ──")
+	check("ส่งครบ ไม่มีข้าม", Config.formatSendBatchMessage(3, 5, 0), "ส่งแม่ 3 ตัวไปรบ (roster 5/10)")
+	check("ส่งได้บางตัว บอกจำนวนที่ข้าม", Config.formatSendBatchMessage(5, 10, 5),
+		"ส่งแม่ 5 ตัวไปรบ (roster 10/10) · ข้าม 5 ตัว (ล็อก / ไม่อยู่ในกระเป๋า / roster เต็ม / ซ้ำ)")
+	check("ส่งไม่ได้สักตัว", Config.formatSendBatchMessage(0, 10, 2),
+		"ส่งแม่ไปรบไม่ได้สักตัว (roster 10/10) · ข้าม 2 ตัว (ล็อก / ไม่อยู่ในกระเป๋า / roster เต็ม / ซ้ำ)")
+	check("remote ส่งเป็นชุดมีชื่อ", Config.RemoteNames.SEND_MOTHERS_TO_BATTLE_BATCH_REQUEST, "SendMothersToBattleBatchRequest")
+	check("remote ส่งทีละตัวยังอยู่", Config.RemoteNames.SEND_MOTHER_TO_BATTLE_REQUEST, "SendMotherToBattleRequest")
+	do
+		local list, err = Config.parseUidList({ "1-1", "1-2" }, 10)
+		check("parseUidList array ปกติ", list and table.concat(list, ","), "1-1,1-2")
+		check("  ไม่มี error", err, nil)
+		check("parseUidList ไม่ใช่ตาราง", select(2, Config.parseUidList("x", 10)), "not_array")
+		check("parseUidList ว่าง", select(2, Config.parseUidList({}, 10)), "empty")
+		check("parseUidList สมาชิกไม่ใช่ string", select(2, Config.parseUidList({ 1 }, 10)), "not_string")
+		check("parseUidList เกินเพดาน", select(2, Config.parseUidList({ "a", "b", "c" }, 2)), "too_many")
+		check("parseUidList มีรู", select(2, Config.parseUidList({ [1] = "a", [3] = "b" }, 10)), "not_array")
+		check("parseUidList key ไม่ใช่ตัวเลข", select(2, Config.parseUidList({ "a", x = "b" }, 10)), "not_array")
+	end
+
+	print("── ดัชนี (UI-4): ลำดับคลาส/ตัวละคร ──")
+	check("schema v5 (UI-5)", Config.SCHEMA_VERSION, 5)
+	check("คลาสเรียงธรรมดา → หายากสุด", table.concat(Config.getIndexClasses(), ","), "C,B,A,S,SS")
+	local indexCounts = {}
+	local indexTotal = 0
+	for _, classId in Config.getIndexClasses() do
+		local list = Config.getIndexCharacters(classId)
+		table.insert(indexCounts, `{classId}{#list}`)
+		indexTotal += #list
+	end
+	check("จำนวนตัวละครต่อคลาส C4 B3 A2 S2 SS1", table.concat(indexCounts, " "), "C4 B3 A2 S2 SS1")
+	check("รวม 12 ตัว = ทุกตัวละคร", indexTotal, 12)
+	check("ในกลุ่มเรียงตามลำดับใน Config (C: ลิง หมู ม้า ปลา)", table.concat(Config.getIndexCharacters("C"), ","), "monkey,pig,horse,fish")
+	check("B: ตือโป๊ยก่าย ซัวเจ๋ง ม้าขาวมังกร", table.concat(Config.getIndexCharacters("B"), ","), "bajie,wujing,dragon_horse")
+	local order = Config.CharacterOrder
+	local savedLast = order[#order]
+	check("CharacterOrder ขาดตัวละคร → ยามจับได้", balanceGuardCatches(
+		function() table.remove(order) end,
+		function() table.insert(order, savedLast) end), true)
+	check("CharacterOrder มีตัวซ้ำ → ยามจับได้", balanceGuardCatches(
+		function() table.insert(order, "monkey") end,
+		function() table.remove(order) end), true)
+	check("CharacterOrder มีชื่อแปลก → ยามจับได้", balanceGuardCatches(
+		function() table.insert(order, "ghost_char") end,
+		function() table.remove(order) end), true)
 	check("คืนค่าเดิมแล้ว validate ผ่าน", (pcall(Config.validate)), true)
 
 	print("── ป้ายบนแมพ (UI-2) ──")

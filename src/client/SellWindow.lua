@@ -2,7 +2,8 @@
 -- egg-army-game :: หน้าต่างร้านขายแม่ — UI-2 (เปิดจากจุดกด E ที่แผงร้านหลังแมพ · MapSigns.lua)
 --
 -- ขายได้เฉพาะ**แม่ในกระเป๋า** — กติกาเดิมของ EggService.sellMother (แม่ในคอกต้องถอดออกก่อน)
--- ติ๊กได้หลายตัว → "ขายที่เลือก" → กล่องยืนยันครั้งเดียว (จำนวน + ราคารวม) → ยิง remote ขายเดิมทีละ uid
+-- ติ๊กได้หลายตัว → "ขายที่เลือก" → กล่องยืนยันครั้งเดียว (จำนวน + ราคารวม) → ยิง SellMothersBatchRequest ครั้งเดียว
+--   (server ข้ามตัวที่ขายไม่ได้ · sync ครั้งเดียว · ข้อความสรุปครั้งเดียว — EggService.sellMothersBatch)
 -- ⚠️ ราคาอ่านจาก sync (mother.sellPrice = Config.getMotherSellPrice ฝั่ง server) — client ไม่คิดราคาเอง
 -- ⚠️ แม่ที่ล็อก: การ์ดสีเทา + 🔒 ติ๊กไม่ได้ · server ตรวจล็อกซ้ำเองอยู่แล้ว
 -- ⚠️ virtual grid แบบเดียวกับ BagWindow — กระเป๋าจุ 100 ตัว ห้ามสร้าง ViewportFrame ทุกใบพร้อมกัน
@@ -12,7 +13,8 @@ local UiKit = require(script.Parent:WaitForChild("UiKit"))
 local SellWindow = {}
 
 export type Actions = {
-	sellMother: (uid: string) -> (),
+	-- ขายเป็นชุด: uid ตามลำดับในลิสต์ ไม่ซ้ำ ไม่เกินจำนวนแม่ในกระเป๋า (server ตรวจซ้ำทั้งหมด)
+	sellMothers: (uids: { string }) -> (),
 	notify: (text: string, ok: boolean) -> (),
 }
 
@@ -42,7 +44,8 @@ local CARD_LOCKED_COLOR = Color3.fromRGB(70, 70, 70)
 local SELECTED_COLOR = Color3.fromRGB(90, 220, 90)
 local LOCK_COLOR = Color3.fromRGB(120, 110, 170)
 local PRICE_COLOR = Color3.fromRGB(255, 220, 90)
-local SELL_COLOR = Color3.fromRGB(220, 120, 40)
+-- ⚠️ UI-fix รอบ 1: มาตรฐานสีทั้งเกม — ปุ่มขาย/การกระทำขาย = โทนแดง (ปุ่มซื้อ = โทนเขียว เช่น RobuxShopWindow)
+local SELL_COLOR = Color3.fromRGB(215, 60, 60)
 local SELECT_ALL_COLOR = Color3.fromRGB(60, 150, 230)
 local CANCEL_COLOR = Color3.fromRGB(90, 90, 90)
 
@@ -385,13 +388,13 @@ local function onSell()
 	refreshConfirm()
 end
 
--- ⚠️ ยิงเฉพาะ uid ที่ติ๊กอยู่ตอนกดยืนยัน (ตัวที่ล็อก/หายไปแล้วถูกตัดออกตั้งแต่ตอน sync)
+-- ⚠️ ยิงเฉพาะ uid ที่ติ๊กอยู่ตอนกดยืนยัน (ตัวที่ล็อก/หายไปแล้วถูกตัดออกตั้งแต่ตอน sync) · ครั้งเดียวทั้งชุด
 local function onConfirm()
-	local _, _, uids = SellWindow.getSelection()
+	local count, _, uids = SellWindow.getSelection()
 	confirm.Visible = false
 	table.clear(selected)
-	for _, uid in uids do
-		actions.sellMother(uid)
+	if count > 0 then
+		actions.sellMothers(uids)
 	end
 	layoutGrid()
 	refreshFooter()

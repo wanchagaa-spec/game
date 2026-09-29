@@ -30,6 +30,7 @@ local DEATH_EFFECT_COLOR = Color3.fromRGB(210, 70, 70)
 
 local FLOAT_DURATION = 0.9 -- วินาที ก่อนเลขลอยจางหายหมด
 local FLOAT_RISE = 4 -- studs ที่เลขลอยขึ้นตลอดช่วง FLOAT_DURATION
+local FLOAT_SIZE = Vector2.new(10, 2.75) -- studs (กว้าง · สูง) ของเลขลอย — ติดโลก ไม่ใช่พิกเซลบนจอ
 local BURST_LIFETIME = 0.6 -- วินาทีก่อน anchor ของ burst ถูกทำลาย (เผื่อเวลาให้อนุภาคจางหมดจริง)
 
 --------------------------------------------------------------------------------
@@ -64,9 +65,10 @@ function CombatEffects.floatingText(position: Vector3, text: string, color: Colo
 
 	local baseOffset = Vector3.new(math.random() * 2 - 1, 2, math.random() * 2 - 1)
 
+	-- ⚠️ ขนาดเป็น **studs ในโลก** (เดิม fromOffset(160, 44) = คงที่บนจอ → ยิ่งถอยออกไกลยิ่งดูใหญ่ · ผลทดสอบ Studio)
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "FloatingDamage"
-	gui.Size = UDim2.fromOffset(160, 44)
+	gui.Size = UDim2.fromScale(FLOAT_SIZE.X, FLOAT_SIZE.Y)
 	gui.StudsOffsetWorldSpace = baseOffset
 	gui.AlwaysOnTop = true
 	gui.MaxDistance = 250

@@ -79,15 +79,29 @@ local placeEggRequest: RemoteEvent
 local moveMotherRequest: RemoteEvent
 local upgradePenRequest: RemoteEvent
 local sellMotherRequest: RemoteEvent
+local sellMothersBatchRequest: RemoteEvent
 local sendMotherToBattleRequest: RemoteEvent
+local sendMothersToBattleBatchRequest: RemoteEvent
 local autoFillPenRequest: RemoteEvent
 local buyDamageUpgradeRequest: RemoteEvent
 local buySpeedUpgradeRequest: RemoteEvent
+local buyClubTierRequest: RemoteEvent
 local eggHatched: RemoteEvent
 local farmStateSync: RemoteEvent
 local actionResult: RemoteEvent
 local stageClearedNotify: RemoteEvent
 local toggleMotherLockRequest: RemoteEvent
+
+-- Phase 5A: ผู้เล่นติดล็อกอัญเชิญเพราะบอสไหม — BossService เป็นเจ้าของสถานะ (Main.server.lua ต่อสายผ่าน
+-- setBossLockProvider) · inject แทน require ตรง ๆ ให้ harness ใน tools/ ที่โหลดไฟล์นี้ไม่ต้องรู้จัก BossService
+-- ค่าเริ่มต้น = ไม่มีใครถูกล็อก (ก่อนต่อสาย / ในเทสต์)
+local isBossLocked: (userId: number) -> boolean = function(_userId)
+	return false
+end
+
+function EggService.setBossLockProvider(provider: (userId: number) -> boolean)
+	isBossLocked = provider
+end
 
 -- ⚠️ ส่งผลลัพธ์ (สำเร็จ/ล้มเหลว + เหตุผล) ของคำขอกลับไปหาผู้เล่นคนที่ยิงคำขอมาเท่านั้น
 -- ก่อนหน้านี้ผลลัพธ์ไปโผล่แค่ print ใน server console เท่านั้น ผู้เล่นไม่เห็นอะไรเลย
@@ -144,9 +158,22 @@ end
 -- แจกไข่ (server เท่านั้น)
 --------------------------------------------------------------------------------
 
+-- ⚠️ ทางเดียวที่ไข่ (ที่มีน้ำหนักแล้ว) เข้ากระเป๋า — grantEgg (สุ่มน้ำหนักเอง) กับไข่บอส 5B (น้ำหนักสุ่มไว้ตั้งแต่บอสเกิด)
+-- ใช้ตัวเดียวกัน: PlayerData.addHeldEgg → sync → log · เต็ม = คืน false "ถือไข่เต็มแล้ว" เหมือนกันทุกทาง
+local function addEggToBag(player: Player, data: Data, eggId: string, weight: number): (boolean, string?)
+	local egg = PlayerData.addHeldEgg(data.heldEggs, eggId, weight)
+	if not egg then
+		return false, "ถือไข่เต็มแล้ว"
+	end
+
+	EggService.sync(player)
+
+	print(`[EggService] {player.Name} ได้ {egg.eggId} #{egg.id} น้ำหนัก {Config.formatWeight(egg.weight)}`)
+	return true, nil
+end
+
 -- ⚠️ ห้ามให้ client เรียกถึงได้ และห้ามรับน้ำหนักมาจาก client
--- Phase 5 บอสจะเรียกตัวนี้ตอนผู้เล่นแย่งไข่สำเร็จ
--- ระหว่างที่ยังไม่มีบอส ใช้เป็นคำสั่งเทสต์ใน command bar ฝั่ง server
+-- ใช้กับไข่รางวัลผ่านด่าน · ไข่เริ่มต้น · ไข่ตำนาน · คำสั่งเทสต์ (ไข่บอส 5B ใช้ grantBossEgg — น้ำหนักมาก่อนแล้ว)
 function EggService.grantEgg(player: Player, eggId: string): (boolean, string?)
 	local data = dataOf(player)
 	if not data then
@@ -158,15 +185,26 @@ function EggService.grantEgg(player: Player, eggId: string): (boolean, string?)
 		return false, `สร้างไข่ "{eggId}" ไม่ได้ (ไม่มีอยู่ หรือถูกปิดไปแล้ว)`
 	end
 
-	local egg = PlayerData.addHeldEgg(data.heldEggs, rolledId, weight)
-	if not egg then
-		return false, "ถือไข่เต็มแล้ว"
+	return addEggToBag(player, data, rolledId, weight)
+end
+
+-- 5B: ไข่บอสที่ผู้เล่นถือกลับถึงเซฟโซน — **น้ำหนักสุ่มไว้แล้วตอนบอสเกิด** (BossService · Config.rollMotherWeightForEgg ตัวเดิม)
+-- ห้ามสุ่มใหม่ (ผู้เล่นเห็นขนาดไข่ตั้งแต่ไข่อยู่ในห้อง) · เข้ากระเป๋าทางเดียวกับ grantEgg
+-- 5B-2: eggId = ไข่ของห้องที่หยิบมา (Config.getBossEggId(ห้อง) = egg_stageN) — ตัวนี้ไม่ต้องรู้ว่ามาจากห้องไหน
+-- ⚠️ BossService เรียกเท่านั้น (inject ผ่าน Main.server.lua) · น้ำหนักมาจากสถานะของ server ไม่ใช่จาก client
+function EggService.grantBossEgg(player: Player, eggId: string, weight: number): (boolean, string?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น"
 	end
-
-	EggService.sync(player)
-
-	print(`[EggService] {player.Name} ได้ {egg.eggId} #{egg.id} น้ำหนัก {Config.formatWeight(egg.weight)}`)
-	return true, nil
+	local eggType = Config.getEgg(eggId)
+	if not eggType or not eggType.enabled then
+		return false, `ไข่ "{eggId}" ไม่มีอยู่ หรือถูกปิดไปแล้ว`
+	end
+	if type(weight) ~= "number" or weight < 1 or weight % 1 ~= 0 then
+		return false, "น้ำหนักไข่ต้องเป็นจำนวนเต็มบวก"
+	end
+	return addEggToBag(player, data, eggType.id, weight)
 end
 
 --------------------------------------------------------------------------------
@@ -192,12 +230,35 @@ local function describeMother(mother: Mother, wallProgress: number)
 	}
 end
 
+-- กองลูก 1 กอง (stack key + จำนวน) ในรูปพร้อมโชว์
+local function describeStack(key: string, count: number, damageLevel: number, robuxDamageBonus: number)
+	local charId, weight, statuses = Config.parseStackKey(key)
+	local character = if charId then Config.getCharacter(charId) else nil
+	-- UI-3: พลังต่อตัว — สูตรเดียวกับที่ CombatService.releaseFromQueue ใช้ตีจริง (รวมสถานะ + damageLevel
+	-- + โบนัส Robux ที่ทะลุเพดาน — UI-5)
+	-- ⚠️ คิดที่ server (client ห้ามคิดเอง) · key เพี้ยน = nil (ไม่น่าเกิด — key มาจาก makeStackKey เท่านั้น)
+	local power = if charId and weight
+		then Config.computeBattlePower(Config.getChildWeight(weight, statuses), charId, statuses, damageLevel, robuxDamageBonus)
+		else nil
+	return {
+		key = key,
+		charId = charId,
+		charName = if character then character.name else charId,
+		class = if character then character.class else "?",
+		weight = weight,
+		weightText = if weight then Config.formatWeight(Config.getChildWeight(weight)) else "?",
+		statuses = statuses,
+		count = count,
+		power = power,
+	}
+end
+
 -- ⚠️ กระเป๋าไข่จุได้ถึง 10,000 ฟอง — **ห้ามส่งทั้งหมดทุกครั้งที่ sync**
 -- sync วิ่งทุก SYNC_INTERVAL วินาที ส่งหมื่นฟองทุกวินาทีคือถล่มแบนด์วิดท์ของตัวเอง
 -- ส่งเท่าที่ UI แสดงจริง + จำนวนรวม ที่เหลือรอจนกว่า UI จะทำ virtualize (Phase 5.5)
 local HELD_EGGS_PER_SYNC = 50
 
-local function buildSyncPayload(data: Data)
+local function buildSyncPayload(data: Data, bossLocked: boolean?)
 	local now = os.time()
 
 	local heldItems = data.heldEggs.items
@@ -261,23 +322,35 @@ local function buildSyncPayload(data: Data)
 	-- ต่างจากกระเป๋าไข่ (10,000 ฟอง) ที่ต้อง virtualize เพราะเป็นคนละขนาดกัน
 	local children = {}
 	for key, count in data.children do
-		local charId, weight, statuses = Config.parseStackKey(key)
-		local character = if charId then Config.getCharacter(charId) else nil
-		table.insert(children, {
-			key = key,
-			charName = if character then character.name else charId,
-			class = if character then character.class else "?",
-			weight = weight,
-			weightText = if weight then Config.formatWeight(Config.getChildWeight(weight)) else "?",
-			statuses = statuses,
-			count = count,
-		})
+		table.insert(children, describeStack(key, count, data.damageLevel, data.robuxDamageBonus))
+	end
+
+	local discoveredList: { string } = {}
+	for charId, value in data.discovered do
+		if value == true then
+			table.insert(discoveredList, charId)
+		end
+	end
+	table.sort(discoveredList)
+
+	-- UI-3: กองที่ติ๊กไว้ใน releaseOrder แต่ตอนนี้หมด (ปล่อยออกไปหมดแล้ว) **และแม่ในคอกยังผลิตเติมอยู่**
+	-- → หน้าต่างอัญเชิญโชว์เป็นการ์ด "0 ตัว · รอผลิต" ที่ยังติ๊กอยู่ตามลำดับเดิม ไม่หายไปเฉย ๆ
+	-- (กองที่หมดและไม่มีแม่ผลิตเติมแล้ว — ขาย/ย้าย/ตาย — ไม่ส่ง · ติ๊กชุดใหม่แล้วหลุดจากลำดับเอง)
+	local producing: { [string]: boolean } = {}
+	for _, mother in data.mothersInPen do
+		producing[Config.makeStackKey(mother.charId, mother.weight, mother.statuses)] = true
+	end
+	local waitingStacks = {}
+	for _, key in data.releaseOrder do
+		if producing[key] and not data.children[key] then
+			table.insert(waitingStacks, describeStack(key, 0, data.damageLevel, data.robuxDamageBonus))
+		end
 	end
 
 	-- ⚠️ Phase 3A: ฟิลด์การรบ (stageProgress/summonEnabled/releaseOrder/...) มาจาก
 	-- CombatService.buildSyncFields() ล้วน ๆ ไม่คำนวณซ้ำที่นี่ — แค่ merge เข้า payload เดียวกัน
 	-- ให้ 3B ใช้ต่อได้โดยไม่ต้องมี RemoteEvent แยก
-	local combat = CombatService.buildSyncFields(data)
+	local combat = CombatService.buildSyncFields(data, bossLocked)
 
 	-- ⚠️ เพดานที่ซื้อได้ผูกกับ wallProgress (off-by-one: ด่าน 1 = 8 ขั้น ไม่ใช่ 0 — ดู
 	-- docs/data-schema.md §8.6) ต้องเช็คเพดานนี้ก่อนถามราคา ไม่งั้น damageUpgradeCost จะไม่ nil
@@ -305,13 +378,26 @@ local function buildSyncPayload(data: Data)
 		wallProgress = data.wallProgress,
 		damageLevel = data.damageLevel,
 		maxDamageLevel = maxDamageLevel,
-		damageMultiplier = Config.getArmyDamageMultiplier(data.damageLevel),
+		-- ⚠️ UI-5: ตัวคูณ/ความเร็วที่แสดง = ค่าจริงที่ใช้รบ (ปกติ + โบนัส Robux รวมแล้ว) ไม่ใช่แค่ส่วนที่ซื้อด้วยเงินในเกม
+		-- ป้าย UI-2 เดิมจึงเห็นค่าจริงถูกต้องโดยอัตโนมัติโดยไม่ต้องแก้โค้ดฝั่งนั้นเลย
+		damageMultiplier = Config.getArmyDamageMultiplier(data.damageLevel) * Config.getRobuxDamageMultiplier(data.robuxDamageBonus),
 		damageUpgradeCost = damageUpgradeCost, -- nil = เต็มเพดานของด่านนี้แล้ว
 		speedLevel = data.speedLevel,
 		maxSpeedLevel = Config.Balance.SpeedUpgrade.MAX_LEVEL,
-		walkSpeed = Config.getWalkSpeed(data.speedLevel),
+		walkSpeed = Config.getEffectiveWalkSpeed(data.speedLevel, data.robuxSpeedBonus),
 		speedUpgradeCost = Config.getSpeedUpgradeCost(data.speedLevel), -- nil = เต็มเพดานแล้ว
+		-- UI-5: ร้าน Robux — จำนวนขั้นที่ซื้อไปแล้ว (ตัวคูณ/โบนัสจริงคำนวณรวมไว้ในสองฟิลด์ข้างบนแล้ว)
+		robuxDamageBonus = data.robuxDamageBonus,
+		robuxSpeedBonus = data.robuxSpeedBonus,
+		robuxSpeedHardCap = Config.getRobuxSpeedHardCap(), -- client เช็คว่า "ซื้อต่อไปก็ไม่มีผลแล้ว"
+		-- 5C: ขั้นกระบองปัจจุบัน (clamp แล้ว — ค่าเซฟแปลก ๆ ไม่หลุดถึง client) · ดาเมจ/ราคา/ชื่อ client อ่านจาก Config เอง
+		clubTier = Config.clampClubTier(data.weaponLevel),
+		clubMaxTier = Config.Balance.Weapon.MAX_LEVEL,
 		children = children,
+		waitingStacks = waitingStacks, -- UI-3: กองที่ติ๊กไว้แต่หมดชั่วคราว (count 0 · แม่ในคอกผลิตเติมอยู่)
+		-- UI-4: ตัวละครที่เคยได้ (ดัชนี) — array ของ charId เรียงแล้ว (ข้อมูลเล็ก ≤ จำนวนตัวละคร)
+		-- ⚠️ ส่งทั้งที่ไม่มีใน Config แล้วก็ได้ — client ข้ามเอง · "ตอนนี้มี N ตัว" client นับจากคอก+กระเป๋า+roster
+		discovered = discoveredList,
 		-- ⚠️ ข้อ D: จำนวนแม่ที่ฟักเสร็จแล้วแต่ยังค้างในสวนฟักเพราะคอก+กระเป๋าเต็มพร้อมกัน
 		-- client ใช้ค่านี้โชว์ข้อความ "กระเป๋าแม่เต็ม ขายแม่บางตัวเพื่อรับแม่ที่ฟักเสร็จแล้ว" (ยังไม่ทำ UI เฟสนี้)
 		stuckHatchCount = stuckHatchCount,
@@ -320,8 +406,13 @@ local function buildSyncPayload(data: Data)
 		summonEnabled = combat.summonEnabled,
 		combatAutoPaused = combat.combatAutoPaused,
 		releaseOrder = combat.releaseOrder,
-		-- Phase 3C-1: แม่ในสนามรบ { uid, charId, weight, statuses } (เพดาน = Config.Balance.Combat.MAX_BATTLE_MOTHERS)
+		-- Phase 3C-1: แม่ในสนามรบ { uid, charId, charName, class, weight, weightText, statuses }
+		-- (เพดาน = Config.Balance.Combat.MAX_BATTLE_MOTHERS)
 		battleRoster = combat.battleRoster,
+		sendStageBlockReason = combat.sendStageBlockReason, -- UI-3: nil = ส่งแม่ไปรบได้
+		-- Phase 5A: ล็อกอัญเชิญเพราะบอส — nil = เปิดอัญเชิญได้ · หน้าต่างอัญเชิญปิดปุ่มส่ง + โชว์ข้อความนี้
+		summonBlockReason = combat.summonBlockReason,
+		bossLocked = combat.bossLocked,
 	}
 end
 
@@ -330,7 +421,7 @@ function EggService.sync(player: Player)
 	if not data then
 		return
 	end
-	farmStateSync:FireClient(player, buildSyncPayload(data))
+	farmStateSync:FireClient(player, buildSyncPayload(data, isBossLocked(player.UserId)))
 end
 
 --------------------------------------------------------------------------------
@@ -381,23 +472,17 @@ local function hatch(player: Player, data: Data, slotIndex: number, slot: HatchS
 	data.hatching[slotIndex] = false
 	PenService.hideEgg(player, slotIndex)
 
-	local mother: Mother = {
-		uid = Config.makeUid(player.UserId, data.nextUid),
-		charId = charId,
-		weight = slot.weight, -- ← น้ำหนักเดิมของไข่ เป๊ะ
-		statuses = {},
-		-- ⚠️ ใช้ slot.hatchAt ไม่ใช่ os.time() — เวลาที่ "ควรฟักเสร็จจริง" ไม่ใช่เวลาที่โค้ดมาเช็คเจอ
-		-- ต่างกันได้ถึง 8 ชั่วโมงตอนผู้เล่นล็อกอินกลับมาแล้วเช็คไข่ที่ค้างจากตอนออฟไลน์
-		-- (docs/data-schema.md §5.3) ถ้าใช้ os.time() แม่ตัวนี้จะไม่ได้เครดิตผลิตย้อนหลังเลย
-		-- ทั้งที่ควรได้ตั้งแต่วินาทีที่ไข่ครบเวลาจริง ไม่ใช่วินาทีที่ผู้เล่นเข้าเกม
-		--
-		-- ⚠️ ข้อ D: ถ้าแม่ตัวนี้เพิ่งค้างมาก่อน (เต็มตอนฟักเสร็จรอบแรก) ก็ยังใช้ hatchAt เดิมนี้
-		-- ไม่ใช่เวลาที่วางสำเร็จจริง — เพดานออฟไลน์ 8 ชม. ของ ProductionService ครอบไว้อยู่แล้ว
-		-- จึงไม่มีทางได้เครดิตเกินจริงแม้จะค้างอยู่นานกว่านั้น
-		obtainedAt = slot.hatchAt,
-		locked = false,
-	}
-	data.nextUid += 1
+	-- ⚠️ สร้างผ่านจุดกลาง PlayerData.createMother เท่านั้น (uid + บันทึกดัชนี · UI-4)
+	-- น้ำหนัก = น้ำหนักเดิมของไข่เป๊ะ
+	-- ⚠️ obtainedAt ใช้ slot.hatchAt ไม่ใช่ os.time() — เวลาที่ "ควรฟักเสร็จจริง" ไม่ใช่เวลาที่โค้ดมาเช็คเจอ
+	-- ต่างกันได้ถึง 8 ชั่วโมงตอนผู้เล่นล็อกอินกลับมาแล้วเช็คไข่ที่ค้างจากตอนออฟไลน์
+	-- (docs/data-schema.md §5.3) ถ้าใช้ os.time() แม่ตัวนี้จะไม่ได้เครดิตผลิตย้อนหลังเลย
+	-- ทั้งที่ควรได้ตั้งแต่วินาทีที่ไข่ครบเวลาจริง ไม่ใช่วินาทีที่ผู้เล่นเข้าเกม
+	--
+	-- ⚠️ ข้อ D: ถ้าแม่ตัวนี้เพิ่งค้างมาก่อน (เต็มตอนฟักเสร็จรอบแรก) ก็ยังใช้ hatchAt เดิมนี้
+	-- ไม่ใช่เวลาที่วางสำเร็จจริง — เพดานออฟไลน์ 8 ชม. ของ ProductionService ครอบไว้อยู่แล้ว
+	-- จึงไม่มีทางได้เครดิตเกินจริงแม้จะค้างอยู่นานกว่านั้น
+	local mother: Mother = PlayerData.createMother(data, player.UserId, charId, slot.weight, slot.hatchAt)
 
 	local placedIn: string
 	if not penFull then
@@ -794,12 +879,11 @@ end
 
 -- ⚠️ ขายได้เฉพาะแม่ใน mothersInBag เท่านั้น (เหมือนกฎเดิม "ส่งรบได้แค่จากกระเป๋า")
 -- กันขายพลาดตัวที่กำลังผลิตอยู่ในคอกโดยไม่ได้ตั้งใจ — อยากขายแม่ในคอกต้องย้ายออกมาก่อน
-function EggService.sellMother(player: Player, rawUid: unknown): (boolean, string?)
-	local data = dataOf(player)
-	if not data then
-		return false, "ยังไม่มีข้อมูลผู้เล่น"
-	end
-
+--
+-- ⚠️ แกนของการขาย 1 ตัว — ใช้ร่วมกันทั้งขายทีละตัว (sellMother) และขายเป็นชุด (sellMothersBatch)
+-- **ไม่ sync และไม่ย้ายแม่ที่ค้างในสวนฟัก** — ผู้เรียกทำเองหลังขายเสร็จ (ชุดละครั้งเดียว)
+-- คืน (ok, reason?, ราคาที่ได้?)
+local function sellOneMother(player: Player, data: Data, rawUid: unknown): (boolean, string?, number?)
 	if type(rawUid) ~= "string" then
 		return false, "uid ไม่ใช่ string"
 	end
@@ -829,13 +913,100 @@ function EggService.sellMother(player: Player, rawUid: unknown): (boolean, strin
 	data.currency.coins += price
 	data.stats.totalCoinsEarned += price
 
+	print(`[EggService] {player.Name} ขายแม่ {mother.uid} ({Config.formatWeight(mother.weight)}) ได้ {price} coins`)
+	return true, nil, price
+end
+
+function EggService.sellMother(player: Player, rawUid: unknown): (boolean, string?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น"
+	end
+
+	local ok, reason = sellOneMother(player, data, rawUid)
+	if not ok then
+		return false, reason
+	end
+
 	-- ⚠️ ขายแล้วเปิดที่ว่างในกระเป๋า ลองย้ายแม่ที่ค้างในสวนฟักมาเข้าทันที (ข้อ D)
 	processReadyHatchSlots(player, data, os.time())
 
 	EggService.sync(player)
-
-	print(`[EggService] {player.Name} ขายแม่ {mother.uid} ({Config.formatWeight(mother.weight)}) ได้ {price} coins`)
 	return true, nil
+end
+
+export type SellBatchSummary = {
+	sold: number,
+	skipped: number,
+	coins: number,
+}
+
+-- อ่านรายการ uid ที่จะขาย · คืน (รายการ, nil) หรือ (nil, เหตุผลที่ปฏิเสธทั้งชุด)
+-- ⚠️ ตรวจรูปร่างด้วย Config.parseUidList ตัวเดียวกับส่งแม่ไปรบเป็นชุด (UI-3) — ที่นี่แค่แปลงรหัสเป็นข้อความ
+local function readSellUids(raw: unknown, limit: number): ({ string }?, string?)
+	local list, listError = Config.parseUidList(raw, limit)
+	if list then
+		return list, nil
+	end
+	if listError == "not_string" then
+		return nil, "uid ในรายการต้องเป็น string"
+	elseif listError == "too_many" then
+		return nil, `ขายได้ครั้งละไม่เกิน {limit} ตัว (ความจุกระเป๋า)`
+	elseif listError == "empty" then
+		return nil, "ยังไม่ได้เลือกแม่ที่จะขาย"
+	end
+	return nil, "รายการแม่ที่จะขายต้องเป็น array"
+end
+
+-- ขายแม่เป็นชุด (UI-2 · SellMothersBatchRequest) — ร้านขายแม่ยิงครั้งเดียวแทนทีละตัว
+-- ⚠️ ตรวจรูปร่างทั้งชุดก่อน (readSellUids) ไม่ผ่าน = ปฏิเสธทั้งชุด ไม่ขายสักตัว
+--   เพดาน = ความจุกระเป๋า — ขายได้เฉพาะแม่ในกระเป๋า ส่งมาเกินนั้นไม่ใช่คำขอจาก UI จริง
+-- ⚠️ แต่ละตัวผ่าน sellOneMother ตัวเดียวกับขายทีละตัว (ราคา · ล็อก · เฉพาะกระเป๋า เหมือนเดิมทุกอย่าง)
+--   ตัวที่ขายไม่ได้ (ล็อก / ไม่ใช่ของตัวเอง / อยู่ในคอก / uid ซ้ำในชุด) ข้าม แล้วขายตัวอื่นต่อ
+-- sync + ย้ายแม่ที่ค้างในสวนฟักครั้งเดียวหลังจบชุด
+-- คืน (ok, reason?, summary?) · summary = nil เฉพาะตอนปฏิเสธทั้งชุด
+function EggService.sellMothersBatch(player: Player, rawUids: unknown): (boolean, string?, SellBatchSummary?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น", nil
+	end
+
+	local uids, rejectReason = readSellUids(rawUids, Config.Balance.Bag.CAPACITY)
+	if not uids then
+		return false, rejectReason, nil
+	end
+
+	local summary: SellBatchSummary = { sold = 0, skipped = 0, coins = 0 }
+	local seen: { [string]: boolean } = {}
+	for _, uid in uids do
+		-- ⚠️ uid ซ้ำในชุด = ข้าม (ตัวแรกขายไปแล้ว ตัวที่สองต้องไม่ได้เงินซ้ำ)
+		if seen[uid] then
+			summary.skipped += 1
+		else
+			seen[uid] = true
+			local ok, _, price = sellOneMother(player, data, uid)
+			if ok then
+				summary.sold += 1
+				summary.coins += price or 0
+			else
+				summary.skipped += 1
+			end
+		end
+	end
+
+	if summary.sold > 0 then
+		-- ⚠️ ขายแล้วเปิดที่ว่างในกระเป๋า ลองย้ายแม่ที่ค้างในสวนฟักมาเข้าทันที (ข้อ D)
+		processReadyHatchSlots(player, data, os.time())
+	end
+	EggService.sync(player)
+
+	print(
+		`[EggService] {player.Name} ขายแม่เป็นชุด: ขาย {summary.sold} · ข้าม {summary.skipped} · ได้ {summary.coins} coins`
+	)
+	if summary.sold == 0 then
+		return false, "ไม่มีแม่ตัวไหนขายได้", summary
+	end
+	return true, nil, summary
 end
 
 --------------------------------------------------------------------------------
@@ -884,7 +1055,7 @@ function EggService.sendMotherToBattle(player: Player, rawUid: unknown): (boolea
 		return false, "ยังไม่มีข้อมูลผู้เล่น"
 	end
 
-	local ok, message = CombatService.handleSendMotherToBattle(data, rawUid)
+	local ok, message = CombatService.handleSendMotherToBattle(data, rawUid, isBossLocked(player.UserId))
 	if ok then
 		-- ส่งไปรบแล้วกระเป๋าว่างขึ้นหนึ่งช่อง — รับแม่ที่ค้างในสวนฟักเข้ามาทันที (ข้อ D เหมือนตอนขาย)
 		processReadyHatchSlots(player, data, os.time())
@@ -892,6 +1063,32 @@ function EggService.sendMotherToBattle(player: Player, rawUid: unknown): (boolea
 		print(`[EggService] {player.Name} ส่งแม่ {rawUid} ไปรบ · roster {#data.battleRoster}`)
 	end
 	return ok, message
+end
+
+-- ส่งแม่ไปรบเป็นชุด (UI-3 · แท่นอัญเชิญ) — ตรรกะ/การตรวจทั้งหมดอยู่ที่ CombatService.handleSendMothersToBattleBatch
+-- (ใช้แกนส่งทีละตัวตัวเดิม) · ที่นี่ต่อสายกับผู้เล่น + ย้ายแม่ที่ค้างในสวนฟัก + sync ครั้งเดียวท้ายชุด
+function EggService.sendMothersToBattleBatch(
+	player: Player,
+	rawUids: unknown
+): (boolean, string?, CombatService.SendBatchSummary?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น", nil
+	end
+
+	local ok, reason, summary = CombatService.handleSendMothersToBattleBatch(data, rawUids, isBossLocked(player.UserId))
+	if not summary then
+		return false, reason, nil -- ปฏิเสธทั้งชุด ไม่มีอะไรเปลี่ยน ไม่ต้อง sync
+	end
+	if summary.sent > 0 then
+		-- ส่งไปรบแล้วกระเป๋าว่างขึ้น — รับแม่ที่ค้างในสวนฟักเข้ามาทันที (ข้อ D เหมือนตอนขาย)
+		processReadyHatchSlots(player, data, os.time())
+	end
+	EggService.sync(player)
+	print(
+		`[EggService] {player.Name} ส่งแม่ไปรบเป็นชุด: ส่ง {summary.sent} · ข้าม {summary.skipped} · roster {summary.rosterCount}`
+	)
+	return ok, reason, summary
 end
 
 -- รางวัลผ่านด่าน (Phase 4A) — CombatService.tick ตัดสินแล้วว่าได้ (ติดธงไปแล้ว ให้ซ้ำไม่ได้)
@@ -931,7 +1128,8 @@ function EggService.applyWalkSpeed(player: Player)
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
-		humanoid.WalkSpeed = Config.getWalkSpeed(data.speedLevel)
+		-- UI-5: รวมโบนัส Robux เข้ากับความเร็วปกติเสมอ (แทร็ก SpeedUpgrade เดิมไม่ถูกแก้เลย)
+		humanoid.WalkSpeed = Config.getEffectiveWalkSpeed(data.speedLevel, data.robuxSpeedBonus)
 	end
 end
 
@@ -996,6 +1194,142 @@ function EggService.buySpeedUpgrade(player: Player): (boolean, string?)
 	return true, nil
 end
 
+-- 5C: ร้านกระบอง — ซื้อได้แค่ขั้นถัดไป (ไม่มีพารามิเตอร์จาก client) · ตรวจ/หักเงิน/เพิ่มขั้นในก้อนเดียว (PlayerData.buyNextClubTier)
+-- ⚠️ ไม่แตะ data.weaponLevel นอกจากที่นี่ + debugSetWeaponTier + debugResetAll · BossService อ่านอย่างเดียว
+--   (ประกอบกระบองในมือใหม่เองภายใน 1 tick เมื่อเห็นขั้นเปลี่ยน — ไม่ต้องเรียกข้ามโมดูล)
+function EggService.buyClubTier(player: Player): (boolean, string?, number?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น", nil
+	end
+	local ok, reason, tier, price = PlayerData.buyNextClubTier(data)
+	if not ok then
+		return false, reason, nil
+	end
+	EggService.sync(player)
+	print(`[EggService] {player.Name} ซื้อกระบองขั้น {tier}/{Config.Balance.Weapon.MAX_LEVEL} (จ่าย {price} coins)`)
+	return true, nil, tier
+end
+
+--------------------------------------------------------------------------------
+-- ร้าน Robux (UI-5)
+--------------------------------------------------------------------------------
+
+-- เร่งไข่ที่กำลังฟักอยู่ **ทุกฟอง** ให้ครบเวลาทันที — ใช้ตรรกะฟักเดิม (processReadyHatchSlots/hatch)
+-- ทั้งหมด ไม่เขียนใหม่ (แม่ยังวางไม่ได้ถ้าคอก+กระเป๋าเต็มพร้อมกัน = ข้อ D เดิมเป๊ะ ไม่ใช่เคสพิเศษ)
+-- ⚠️ คืน (true, nil, จำนวนที่เร่ง) เสมอตราบใดที่มีข้อมูลผู้เล่น แม้ rushed = 0 (ไม่มีไข่ให้เร่งตอนนั้นพอดี)
+-- — **ไม่ใช่ความล้มเหลว** เพราะ Robux ถูกใช้ไปแล้ว การ retry ไปก็ไม่มีไข่งอกขึ้นมาเองให้เร่ง
+function EggService.rushAllHatching(player: Player): (boolean, string?, number?)
+	local data = dataOf(player)
+	if not data then
+		return false, "ยังไม่มีข้อมูลผู้เล่น", nil
+	end
+
+	local now = os.time()
+	local rushed = PlayerData.rushAllHatchSlots(data, now)
+	processReadyHatchSlots(player, data, now)
+	EggService.sync(player)
+
+	return true, nil, rushed
+end
+
+-- เพิ่มขั้นโบนัส damage จาก Robux — แยกจาก buyDamageUpgrade (เงินในเกม) โดยสิ้นเชิง ไม่แตะ damageLevel
+function EggService.grantRobuxDamageBonus(player: Player, steps: number): boolean
+	local data = dataOf(player)
+	if not data then
+		return false
+	end
+	PlayerData.addRobuxDamageSteps(data, steps)
+	EggService.sync(player)
+	return true
+end
+
+-- เพิ่มขั้นโบนัส speed จาก Robux — แยกจาก buySpeedUpgrade (เงินในเกม) โดยสิ้นเชิง ไม่แตะ speedLevel
+function EggService.grantRobuxSpeedBonus(player: Player, steps: number): boolean
+	local data = dataOf(player)
+	if not data then
+		return false
+	end
+	PlayerData.addRobuxSpeedSteps(data, steps)
+	-- ⚠️ ต้องมีผลทันที เหมือน buySpeedUpgrade — ผู้เล่นกดซื้อแล้วคาดว่าจะวิ่งเร็วขึ้นเลย
+	EggService.applyWalkSpeed(player)
+	EggService.sync(player)
+	return true
+end
+
+-- ⚠️ จุดเดียวที่ผูกกับ MarketplaceService.ProcessReceipt (Main.server.lua เป็นคนต่อสาย)
+-- กฎเหล็ก (docs/data-schema.md §8.7):
+--   1. idempotent ด้วย PurchaseId — Roblox เรียกซ้ำได้เสมอไม่ว่าจะสำเร็จแค่ไหน ต้องคืน
+--      PurchaseGranted ทันทีถ้าเคยให้ของจากใบเสร็จนี้ไปแล้ว โดยไม่ให้ของซ้ำ
+--   2. ให้ของก่อน แล้วค่อยเซฟ แล้วค่อยคืน PurchaseGranted — **ห้ามคืนก่อนเซฟสำเร็จ**
+--      (เซฟไม่ผ่านแล้วเซิร์ฟดับ = ของที่เพิ่งให้หายไปจริง ทั้งที่ Roblox คิดว่าจบแล้วไม่ retry อีก)
+--   3. ให้ของไม่สำเร็จไม่ว่าเหตุผลอะไร (ผู้เล่นออกไปแล้ว/ข้อมูลยังไม่โหลด/กระเป๋าเต็มจริง ๆ)
+--      → คืน NotProcessedYet เสมอ ไม่ error ไม่ throw — Roblox จะเรียกซ้ำเอง (อาจข้ามเซิร์ฟเวอร์)
+--
+-- ⚠️ คืน **string ธรรมดา** ("PurchaseGranted" / "NotProcessedYet") ไม่ใช่ Enum.ProductPurchaseDecision
+-- ตรง ๆ — กัน EggService.lua ต้องรู้จัก global `Enum` ของ Roblox (ไฟล์นี้จงใจแตะ Roblox API ให้น้อย
+-- ที่สุด เหมือน CombatService ที่กันไว้ที่ .start() เท่านั้น — ทดสอบนอก Studio ได้มากขึ้น)
+-- Main.server.lua เป็นคนแปลงเป็น Enum จริงตรงจุดที่ผูกกับ MarketplaceService.ProcessReceipt
+function EggService.processReceipt(receiptInfo: { [string]: any }): string
+	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+	if not player then
+		-- ผู้เล่นออกจากเซิร์ฟไปแล้วระหว่างซื้อ (หรือกำลังจะเข้า) — Roblox จะ retry เองตอนเข้าเซิร์ฟถัดไป
+		return "NotProcessedYet"
+	end
+
+	local data = dataOf(player)
+	if not data then
+		-- ข้อมูลยังโหลดไม่เสร็จ (เพิ่งเข้าเกม) — รอรอบถัดไป
+		return "NotProcessedYet"
+	end
+
+	local purchaseId = tostring(receiptInfo.PurchaseId)
+	if PlayerData.hasProcessedPurchase(data, purchaseId) then
+		return "PurchaseGranted"
+	end
+
+	local productId = receiptInfo.ProductId
+	local eggProduct = Config.findProductByRobloxId(productId)
+	local robuxProduct = Config.findRobuxProductByRobloxId(productId)
+
+	local granted = false
+	local grantLabel = "?"
+
+	if eggProduct then
+		grantLabel = eggProduct.name
+		granted = (EggService.grantEgg(player, eggProduct.grantEggId))
+	elseif robuxProduct then
+		grantLabel = robuxProduct.name
+		if robuxProduct.kind == "damage_bonus" then
+			granted = EggService.grantRobuxDamageBonus(player, robuxProduct.amount)
+		elseif robuxProduct.kind == "speed_bonus" then
+			granted = EggService.grantRobuxSpeedBonus(player, robuxProduct.amount)
+		elseif robuxProduct.kind == "hatch_rush" then
+			granted = (EggService.rushAllHatching(player))
+		end
+	else
+		-- productId ไม่รู้จัก (ปิด enabled ไปแล้ว/ตั้งผิด) — ไม่คืน Granted เดี๋ยวของหาย เผื่อเป็นแค่ชั่วคราว
+		warn(`[EggService] ProcessReceipt: ไม่รู้จัก productId {productId} (PurchaseId {purchaseId})`)
+		return "NotProcessedYet"
+	end
+
+	if not granted then
+		return "NotProcessedYet"
+	end
+
+	PlayerData.markPurchaseProcessed(data, purchaseId)
+
+	-- ⚠️ ห้ามคืน PurchaseGranted ก่อนจุดนี้ — ดูกฎข้อ 2 ข้างบน
+	local saved, saveErr = DataService.saveAsync(player.UserId, false)
+	if not saved then
+		warn(`[EggService] ProcessReceipt: ให้ "{grantLabel}" แล้วแต่เซฟไม่สำเร็จ ({saveErr}) — รอ retry`)
+		return "NotProcessedYet"
+	end
+
+	print(`[EggService] {player.Name} ซื้อ "{grantLabel}" สำเร็จ (PurchaseId {purchaseId})`)
+	return "PurchaseGranted"
+end
+
 --------------------------------------------------------------------------------
 -- DEBUG เท่านั้น — ไม่มี UI เรียกผ่าน command bar ฝั่ง server
 -- ⚠️ require จาก Command Bar ได้โมดูลอีกชุดที่ไม่มีข้อมูลผู้เล่น → เรียกผ่านสะพานใน Main.server.lua แทน:
@@ -1009,6 +1343,7 @@ end
 --     EggService.debugGrantEggWithWeight(game.Players.<ชื่อ>, "egg_stage5", 100000000)
 --     EggService.debugSetWallProgress(game.Players.<ชื่อ>, 7)
 --     EggService.debugSetCurrency(game.Players.<ชื่อ>, 1000000)
+--     EggService.debugSetWeaponTier(game.Players.<ชื่อ>, 5)   -- 5C: ตั้งขั้นกระบอง 1–10 (ไม่หักเงิน)
 --     EggService.debugSnapshot(game.Players.<ชื่อ>)
 --     EggService.debugWipeSavedData(game.Players.<ชื่อ>, "<ชื่อ>")  -- 🔴 ลบถาวร ดูคำเตือนด้านล่าง
 -- 📄 รายละเอียด + ตัวอย่างใช้ทดสอบครบทุก tier น้ำหนัก อยู่ใน docs/debug-commands.md
@@ -1123,6 +1458,7 @@ function EggService.debugResetAll(player: Player)
 	table.clear(data.mothersInBag)
 	table.clear(data.battleRoster) -- แม่ในสนามรบก็เป็นแม่ รีเซ็ตทั้งหมด = ล้างด้วย
 	table.clear(data.heldEggs.items)
+	table.clear(data.discovered) -- ดัชนี (UI-4) — รีเซ็ตแล้วทดสอบ "ได้ตัวใหม่ครั้งแรก" ซ้ำได้
 
 	-- ⚠️ ล้าง stageProgress ทุกด่านกลับเป็น false (รูปแบบเดียวกับ PlayerData.createNew()) แล้วดัน
 	-- wallProgress กลับไปที่ค่าเริ่มต้นของผู้เล่นใหม่ — ไม่ใช่ 1 ดิบ ๆ เพราะ Config.Balance.NewPlayer
@@ -1138,6 +1474,9 @@ function EggService.debugResetAll(player: Player)
 		data.stageClearBonusGranted[stage] = false
 	end
 	data.wallProgress = Config.Balance.NewPlayer.wallProgress
+	-- 5C: กระบองกลับเป็นขั้นเริ่มต้น (ขั้น 1 ฟรี) — ทดสอบร้านกระบองซ้ำได้ · กระบองในมือเปลี่ยนเองใน 1 tick (BossService)
+	local weaponBefore = data.weaponLevel
+	data.weaponLevel = Config.Balance.Weapon.START_TIER
 
 	-- ⚠️ แม่ในคอกก็มีโมเดลเดินอยู่จริง ต้อง refreshMothers ให้คอกว่างตามข้อมูล
 	PenService.refreshMothers(player, data.mothersInPen)
@@ -1149,6 +1488,7 @@ function EggService.debugResetAll(player: Player)
 			.. `ไข่ที่กำลังฟัก {hatchingRemoved} ฟอง · `
 			.. `stageProgress ที่ล้าง {stageProgressCleared}/{Config.Balance.Stage.COUNT} ด่าน · `
 			.. `wallProgress {wallProgressBefore} → {data.wallProgress} · `
+			.. `กระบอง {weaponBefore} → {data.weaponLevel} · `
 			.. debugSaveNow(player)
 	)
 end
@@ -1254,15 +1594,8 @@ function EggService.debugGrantMother(
 		return false, "กระเป๋าเต็มแล้ว"
 	end
 
-	local mother: Mother = {
-		uid = Config.makeUid(player.UserId, data.nextUid),
-		charId = resolvedCharId,
-		weight = flooredWeight,
-		statuses = {},
-		obtainedAt = os.time(),
-		locked = false,
-	}
-	data.nextUid += 1
+	-- ⚠️ ผ่านจุดกลางเดียวกับฟักไข่ (uid + บันทึกดัชนี · UI-4)
+	local mother: Mother = PlayerData.createMother(data, player.UserId, resolvedCharId, flooredWeight, os.time())
 
 	if destination == "pen" then
 		mother.lastProducedAt = os.time()
@@ -1418,6 +1751,48 @@ function EggService.debugSetCurrency(player: Player, coins: number)
 	print(`[EggService] debugSetCurrency: {player.Name} เงิน {before} → {clamped} coins · ` .. debugSaveNow(player))
 end
 
+-- 5C: ตั้งขั้นกระบองตรง ๆ (ไม่หักเงิน) — ทดสอบดาเมจ/หน้าตากระบองแต่ละขั้น · รับ 1..MAX_LEVEL จำนวนเต็มเท่านั้น
+-- คืนข้อความผลลัพธ์ (ค่าแปลก = ปฏิเสธ ไม่แตะข้อมูล) · กระบองในมือเปลี่ยนเองใน 1 tick (BossService เทียบขั้นทุก tick)
+function EggService.debugSetWeaponTier(player: Player, rawTier: any): string
+	local data = dataOf(player)
+	if not data then
+		return `debugSetWeaponTier: {player.Name} ยังไม่มีข้อมูลผู้เล่น`
+	end
+	local maxTier = Config.Balance.Weapon.MAX_LEVEL
+	if type(rawTier) ~= "number" or rawTier % 1 ~= 0 or rawTier < 1 or rawTier > maxTier then
+		local message = `debugSetWeaponTier: ขั้นต้องเป็นจำนวนเต็ม 1–{maxTier} (ได้ {tostring(rawTier)}) — ไม่แตะข้อมูล`
+		warn(`[EggService] {message}`)
+		return message
+	end
+	local before = data.weaponLevel
+	data.weaponLevel = rawTier
+	EggService.sync(player)
+	local message = `debugSetWeaponTier: {player.Name} กระบอง {before} → {rawTier} `
+		.. `({Config.getClubVisual(rawTier).name} · ดาเมจ {Config.getClubDamage(rawTier)}/ครั้ง) · `
+		.. debugSaveNow(player)
+	print(`[EggService] {message}`)
+	return message
+end
+
+-- ⚠️ UI-5: จำลอง MarketplaceService.ProcessReceipt โดยไม่ต้องมี Robux จริง/publish จริง
+-- ใช้ทดสอบ idempotency ตรง ๆ: เรียกซ้ำด้วย purchaseId เดิม → ครั้งที่สองต้องไม่ให้ของซ้ำ (docs/data-schema.md §8.7)
+-- productKey = "legendary_egg" | "robux_damage_step" | "robux_speed_step" | "robux_hatch_rush"
+-- คืน string ของ Enum.ProductPurchaseDecision ที่ processReceipt ตัดสินใจจริง (เรียกฟังก์ชันเดียวกับที่
+-- MarketplaceService.ProcessReceipt ผูกไว้เป๊ะ ไม่ใช่โค้ดทดสอบแยกชุด)
+function EggService.debugSimulateReceipt(player: Player, productKey: string, purchaseId: string): string
+	local product = Config.getDeveloperProduct(productKey) or Config.getRobuxProduct(productKey)
+	if not product then
+		return `ไม่รู้จัก product "{productKey}"`
+	end
+
+	local decision = EggService.processReceipt({
+		PlayerId = player.UserId,
+		ProductId = product.productId,
+		PurchaseId = purchaseId,
+	})
+	return tostring(decision)
+end
+
 -- พิมพ์ข้อมูลสำคัญทั้งหมดของผู้เล่นแบบอ่านง่าย — ⚠️ read-only ไม่แก้อะไรเลย จึงไม่เซฟ
 -- (เซฟข้อมูลที่ไม่เปลี่ยนแปลงคือเขียน DataStore ทิ้งเปล่า ๆ) ใช้หา uid จริงของแม่เพื่อทดสอบ
 -- SellMotherRequest/MoveMotherRequest ต่อผ่าน command bar
@@ -1564,10 +1939,13 @@ function EggService.start()
 	moveMotherRequest = Remotes.waitFor(Config.RemoteNames.MOVE_MOTHER_REQUEST)
 	upgradePenRequest = Remotes.waitFor(Config.RemoteNames.UPGRADE_PEN_REQUEST)
 	sellMotherRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHER_REQUEST)
+	sellMothersBatchRequest = Remotes.waitFor(Config.RemoteNames.SELL_MOTHERS_BATCH_REQUEST)
 	sendMotherToBattleRequest = Remotes.waitFor(Config.RemoteNames.SEND_MOTHER_TO_BATTLE_REQUEST)
+	sendMothersToBattleBatchRequest = Remotes.waitFor(Config.RemoteNames.SEND_MOTHERS_TO_BATTLE_BATCH_REQUEST)
 	autoFillPenRequest = Remotes.waitFor(Config.RemoteNames.AUTO_FILL_PEN_REQUEST)
 	buyDamageUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_DAMAGE_UPGRADE_REQUEST)
 	buySpeedUpgradeRequest = Remotes.waitFor(Config.RemoteNames.BUY_SPEED_UPGRADE_REQUEST)
+	buyClubTierRequest = Remotes.waitFor(Config.RemoteNames.BUY_CLUB_TIER_REQUEST)
 	eggHatched = Remotes.waitFor(Config.RemoteNames.EGG_HATCHED)
 	farmStateSync = Remotes.waitFor(Config.RemoteNames.FARM_STATE_SYNC)
 	actionResult = Remotes.waitFor(Config.RemoteNames.ACTION_RESULT)
@@ -1621,6 +1999,17 @@ function EggService.start()
 		end
 	end)
 
+	-- UI-2: ร้านขายแม่ขายเป็นชุด — ข้อความสรุปครั้งเดียวต่อชุด (ไม่ใช่ทีละตัว)
+	sellMothersBatchRequest.OnServerEvent:Connect(function(player, rawUids)
+		local ok, reason, summary = EggService.sellMothersBatch(player, rawUids)
+		if summary then
+			reportResult(player, ok, Config.formatSellBatchMessage(summary.sold, summary.coins, summary.skipped))
+		else
+			print(`[EggService] ปฏิเสธคำขอขายแม่เป็นชุดของ {player.Name}: {reason}`)
+			reportResult(player, false, reason or "ขายแม่ไม่สำเร็จ")
+		end
+	end)
+
 	toggleMotherLockRequest.OnServerEvent:Connect(function(player, rawUid)
 		local ok, reason, locked = EggService.toggleMotherLock(player, rawUid)
 		if not ok then
@@ -1639,6 +2028,17 @@ function EggService.start()
 			print(`[EggService] ปฏิเสธคำขอส่งแม่ไปรบของ {player.Name}: {message}`)
 		end
 		reportResult(player, ok, message)
+	end)
+
+	-- UI-3: แท่นอัญเชิญส่งแม่เป็นชุด — ข้อความสรุปครั้งเดียวต่อชุด (ไม่ใช่ทีละตัว)
+	sendMothersToBattleBatchRequest.OnServerEvent:Connect(function(player, rawUids)
+		local ok, reason, summary = EggService.sendMothersToBattleBatch(player, rawUids)
+		if summary then
+			reportResult(player, ok, Config.formatSendBatchMessage(summary.sent, summary.rosterCount, summary.skipped))
+		else
+			print(`[EggService] ปฏิเสธคำขอส่งแม่ไปรบเป็นชุดของ {player.Name}: {reason}`)
+			reportResult(player, false, reason or "ส่งแม่ไปรบไม่สำเร็จ")
+		end
 	end)
 
 	autoFillPenRequest.OnServerEvent:Connect(function(player)
@@ -1680,6 +2080,17 @@ function EggService.start()
 			local data = dataOf(player)
 			local level = if data then data.speedLevel else nil
 			reportResult(player, true, `ซื้อความเร็วสำเร็จ → ขั้น {level}`)
+		end
+	end)
+
+	-- 5C: ร้านกระบอง — ไม่รับพารามิเตอร์ใด ๆ จาก client (ค่าที่ส่งมาถูกทิ้ง) · ซื้อได้แค่ขั้นถัดไป
+	buyClubTierRequest.OnServerEvent:Connect(function(player)
+		local ok, reason, tier = EggService.buyClubTier(player)
+		if not ok or tier == nil then
+			print(`[EggService] ปฏิเสธคำขอซื้อกระบองของ {player.Name}: {reason}`)
+			reportResult(player, false, reason or "ซื้อกระบองไม่สำเร็จ")
+		else
+			reportResult(player, true, Config.formatClubBoughtMessage(tier))
 		end
 	end)
 

@@ -76,6 +76,14 @@ local function capturingPrint(...)
 \tprint(line) -- ยังโชว์ log จริงด้วย เผื่อไล่ดูตอนดีบัก
 end
 
+-- UI-5: EggService.processReceipt เรียก Players:GetPlayerByUserId จริง (เดิม Players ไม่เคยถูกใช้
+-- จริงจนกว่าจะถึงตอนนี้ — คนละ instance กับของ Roblox แต่ต้องมีเมธอดนี้ให้เรียกได้) freshPlayer()
+-- ใน CHECK เป็นคนลงทะเบียนผู้เล่นที่สร้างเข้า __registry ให้เอง
+local FakePlayers = { __registry = {} }
+function FakePlayers:GetPlayerByUserId(userId)
+\treturn self.__registry[userId]
+end
+
 local __env = {
 \tConfig = Config,
 \tPlayerData = PlayerData,
@@ -84,7 +92,7 @@ local __env = {
 \tPenService = FakePenService,
 \tProductionService = FakeProductionService,
 \tCombatService = CombatService,
-\tPlayers = {},
+\tPlayers = FakePlayers,
 \tRandom = FakeRandom,
 \twarn = capturingPrint,
 \tprint = capturingPrint,
@@ -165,6 +173,7 @@ local function freshPlayer(tag)
 \tfunction player:Kick(message)
 \t\tself.__kicked = message
 \tend
+\t__env.Players.__registry[userId] = player -- UI-5: ให้ Players:GetPlayerByUserId หาเจอ
 \tlocal okAdd = EggService.onPlayerAdded(player)
 \tassert(okAdd, `เซ็ตอัพเทสต์ผิด — onPlayerAdded ของ {tag} ล้ม`)
 \treturn player, DataService.getCached(userId)
@@ -338,6 +347,36 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- 2b) Phase 5B: grantBossEgg — ไข่บอสที่ถือกลับถึงเซฟโซน (น้ำหนักสุ่มไว้ตั้งแต่บอสเกิด) · ทางเพิ่มไข่เดิม
+--------------------------------------------------------------------------------
+
+print("\\n━━ grantBossEgg (5B): น้ำหนักเดิมเป๊ะ · ทางเดียวกับ grantEgg · กันค่าแปลก ━━")
+do
+\tlocal player, data = freshPlayer("BossEgg1")
+\ttable.clear(data.heldEggs.items)
+\t-- 5B-2: ไข่บอสห้อง N = Config.getBossEggId(N) — ลองห้อง 7 (egg_stage7) ให้เห็นว่าไม่ผูกกับไข่ด่าน 1
+\tlocal ok = EggService.grantBossEgg(player, Config.getBossEggId(7), 152300)
+\tcheck("เข้ากระเป๋าสำเร็จ", ok, true)
+\tcheck("  ได้ 1 ฟอง", #data.heldEggs.items, 1)
+\tcheck("  น้ำหนักตรงเป๊ะ (ไม่สุ่มใหม่)", data.heldEggs.items[1] and data.heldEggs.items[1].weight, 152300)
+\tcheck("  ชนิดไข่ตรง (ไข่ห้อง 7 = egg_stage7)", data.heldEggs.items[1] and data.heldEggs.items[1].eggId, "egg_stage7")
+\tfor _, bad in { 0, -5, 100.5, "100" } do
+\t\tlocal badOk = EggService.grantBossEgg(player, "egg_stage1", bad)
+\t\tcheck(`น้ำหนักแปลก ({tostring(bad)}) → ปฏิเสธ`, badOk, false)
+\tend
+\tcheck("ไข่ที่ปิดแล้ว → ปฏิเสธ", (EggService.grantBossEgg(player, "egg_common", 1000)), false)
+\tcheck("ไข่ที่ไม่มีจริง → ปฏิเสธ", (EggService.grantBossEgg(player, "egg_ไม่มีจริง", 1000)), false)
+\tcheck("  กระเป๋ายังมี 1 ฟอง", #data.heldEggs.items, 1)
+\tfor i = 1, Config.Balance.Hatchery.BAG_CAPACITY do
+\t\ttable.insert(data.heldEggs.items, { id = 1000 + i, eggId = "egg_stage1", weight = 100 })
+\tend
+\tdata.heldEggs.nextEggId = 1000 + Config.Balance.Hatchery.BAG_CAPACITY + 1
+\tlocal fullOk, fullReason = EggService.grantBossEgg(player, "egg_stage1", 5000)
+\tcheck("กระเป๋าเต็ม → false (เหมือนเต็มปกติ)", fullOk, false)
+\tcheck("  เหตุผลเดียวกับ grantEgg", fullReason, "ถือไข่เต็มแล้ว")
+end
+
+--------------------------------------------------------------------------------
 -- 3) debugSetWallProgress
 --------------------------------------------------------------------------------
 
@@ -491,6 +530,146 @@ do
 \tcheck("บอกเหตุผลว่าไม่มีข้อมูลในแคช",
 \t\tstring.find(reason or "", "หน่วยความจำ", 1, true) ~= nil, true)
 \tcheck("ไม่ถูกเตะ", fakePlayer.__kicked == nil, true)
+end
+
+print("\\n━━ debugSimulateReceipt (UI-5): ProcessReceipt จำลอง — idempotency + ให้ของถูกชนิด ━━")
+do
+\tlocal player, data = freshPlayer("Buyer1")
+
+\t-- ไข่ตำนาน: ซื้อครั้งแรก → ได้ของ + PurchaseGranted
+\ttable.clear(data.heldEggs.items)
+\tlocal decision1 = EggService.debugSimulateReceipt(player, "legendary_egg", "receipt-egg-1")
+\tcheck("ซื้อไข่ตำนานครั้งแรก → PurchaseGranted", decision1, "PurchaseGranted")
+\tcheck("ได้ไข่ 1 ฟองในกระเป๋า", #data.heldEggs.items, 1)
+\tcheck("  เป็นไข่ตำนานจริง", data.heldEggs.items[1].eggId, "egg_legendary")
+
+\t-- เรียกซ้ำด้วย purchaseId เดิม (จำลอง Roblox retry ใบเสร็จเดิม) → ต้องไม่ได้ไข่เพิ่ม
+\tlocal decision1Again = EggService.debugSimulateReceipt(player, "legendary_egg", "receipt-egg-1")
+\tcheck("ยิงซ้ำด้วย purchaseId เดิม → ยัง PurchaseGranted", decision1Again, "PurchaseGranted")
+\tcheck("  แต่ไม่ได้ไข่เพิ่ม (idempotent จริง)", #data.heldEggs.items, 1)
+
+\t-- purchaseId ใหม่ → ให้ของอีกครั้งได้ตามปกติ
+\tEggService.debugSimulateReceipt(player, "legendary_egg", "receipt-egg-2")
+\tcheck("purchaseId ใหม่ → ได้ไข่เพิ่มฟองที่สอง", #data.heldEggs.items, 2)
+
+\t-- ทะลุเพดานดาเมจ/ความเร็ว — เพิ่มขั้นสะสม ไม่แตะ damageLevel/speedLevel (แทร็กเงินในเกม)
+\tdata.robuxDamageBonus = 0
+\tdata.robuxSpeedBonus = 0
+\tdata.damageLevel = 0
+\tdata.speedLevel = 0
+\tEggService.debugSimulateReceipt(player, "robux_damage_step", "receipt-dmg-1")
+\tcheck("ซื้อทะลุเพดานดาเมจ → robuxDamageBonus +1", data.robuxDamageBonus, 1)
+\tcheck("  ไม่แตะ damageLevel (แทร็กเงินในเกม)", data.damageLevel, 0)
+\tEggService.debugSimulateReceipt(player, "robux_speed_step", "receipt-spd-1")
+\tcheck("ซื้อทะลุเพดานความเร็ว → robuxSpeedBonus +1", data.robuxSpeedBonus, 1)
+\tcheck("  ไม่แตะ speedLevel (แทร็กเงินในเกม)", data.speedLevel, 0)
+\t-- ซ้ำ purchaseId เดิม → ไม่เพิ่มซ้ำ
+\tEggService.debugSimulateReceipt(player, "robux_damage_step", "receipt-dmg-1")
+\tcheck("ยิงซ้ำ purchaseId เดิม → ไม่เพิ่มขั้นซ้ำ", data.robuxDamageBonus, 1)
+
+\t-- เร่งฟักไข่ทั้งหมด — วางไข่ 2 ฟองในสวนฟักไว้ก่อน (ครบเวลาอีก 999999 วิ)
+\tlocal farFuture = os.time() + 999999
+\tdata.hatching[1] = { eggId = "egg_stage1", weight = 100, charId = "monkey", startedAt = os.time(), hatchAt = farFuture }
+\tdata.hatching[2] = { eggId = "egg_stage1", weight = 200, charId = "monkey", startedAt = os.time(), hatchAt = farFuture }
+\tlocal penBefore = #data.mothersInPen + #data.mothersInBag
+\tEggService.debugSimulateReceipt(player, "robux_hatch_rush", "receipt-rush-1")
+\tcheck("เร่งฟักไข่ทั้งหมด → ทั้งสองช่องฟักเสร็จทันที (false)", data.hatching[1] == false and data.hatching[2] == false, true)
+\tcheck("  ได้แม่เพิ่ม 2 ตัว (คอก+กระเป๋ารวมกัน)", #data.mothersInPen + #data.mothersInBag - penBefore, 2)
+
+\t-- ไม่มีไข่กำลังฟักเลย → ยังคืน PurchaseGranted (ให้ของสำเร็จแล้ว แค่ "เร่ง 0 ฟอง" ไม่ใช่ error)
+\tlocal decisionEmptyRush = EggService.debugSimulateReceipt(player, "robux_hatch_rush", "receipt-rush-2")
+\tcheck("ไม่มีไข่ให้เร่ง → ยัง PurchaseGranted (ไม่ error)", decisionEmptyRush, "PurchaseGranted")
+
+\t-- ผู้เล่นไม่ได้ออนไลน์อยู่ (ไม่มีในแคช) → NotProcessedYet เสมอ ไม่ error
+\tlocal offlinePlayer = { UserId = 888888888, Name = "Offline" }
+\tlocal decisionOffline = EggService.debugSimulateReceipt(offlinePlayer, "legendary_egg", "receipt-offline-1")
+\tcheck("ผู้เล่นออฟไลน์ → NotProcessedYet", decisionOffline, "NotProcessedYet")
+
+\t-- productKey ที่ไม่รู้จัก → ข้อความเตือน ไม่ error ไม่ throw
+\tlocal decisionUnknown = EggService.debugSimulateReceipt(player, "not_a_real_product", "receipt-x")
+\tcheck("productKey ไม่รู้จัก → ข้อความเตือน ไม่ throw", string.find(decisionUnknown, "ไม่รู้จัก", 1, true) ~= nil, true)
+
+\t-- processedPurchaseIds เก็บครบทุกใบเสร็จที่ให้ของสำเร็จจริง (ไม่ซ้ำ)
+\tlocal ids = {}
+\tfor _, id in data.processedPurchaseIds do
+\t\tids[id] = true
+\tend
+\tcheck("processedPurchaseIds เก็บทุกใบเสร็จที่ให้ของสำเร็จ",
+\t\tids["receipt-egg-1"] and ids["receipt-egg-2"] and ids["receipt-dmg-1"] and ids["receipt-spd-1"]
+\t\t\tand ids["receipt-rush-1"] and ids["receipt-rush-2"], true)
+end
+
+print("\\n━━ 5C ร้านกระบอง: ซื้อผ่าน remote จริง · ทีละขั้น · เงินไม่พอ · เพดาน 10 · กดรัวไม่ซื้อเกิน ━━")
+do
+\tlocal player, data = freshPlayer("Club1")
+\tlocal buyHandler = capturedHandlers[Config.RemoteNames.BUY_CLUB_TIER_REQUEST]
+\tcheck("remote BuyClubTierRequest ถูกผูก handler", buyHandler ~= nil, true)
+\tcheck("ผู้เล่นใหม่ได้กระบองขั้น 1", data.weaponLevel, 1)
+
+\t-- เงินไม่พอ → ไม่ได้ ไม่หักเงิน
+\tdata.currency.coins = Config.getClubPrice(2) - 1
+\tbuyHandler(player)
+\tcheck("เงินขาด 1 → ยังขั้น 1", data.weaponLevel, 1)
+\tcheck("  ไม่หักเงิน", data.currency.coins, Config.getClubPrice(2) - 1)
+
+\t-- เงินพอดี → ได้ขั้น 2 เงินเหลือ 0 · client ส่งเลขขั้นมาก็ไม่มีผล (ข้ามขั้นไม่ได้)
+\tdata.currency.coins = Config.getClubPrice(2)
+\tbuyHandler(player, 9)
+\tcheck("เงินพอดี → ขั้น 2 (ส่งเลข 9 มาก็ได้แค่ขั้นถัดไป)", data.weaponLevel, 2)
+\tcheck("  เงินเหลือ 0 พอดี", data.currency.coins, 0)
+
+\t-- กดรัว 50 ครั้งด้วยเงินพอซื้อแค่ขั้น 3 + 4 → ได้แค่ 2 ขั้น · เงินไม่ติดลบ
+\tlocal budget = Config.getClubPrice(3) + Config.getClubPrice(4) + 5
+\tdata.currency.coins = budget
+\tfor _ = 1, 50 do
+\t\tbuyHandler(player)
+\tend
+\tcheck("กดรัว 50 ครั้ง → ได้แค่ขั้นที่เงินพอ (ขั้น 4)", data.weaponLevel, 4)
+\tcheck("  เงินเหลือ 5 ไม่ติดลบ", data.currency.coins, 5)
+
+\t-- เงินล้นมือ กดรัว → ไปถึงขั้น 10 แล้วหยุด (ไม่เกินเพดาน)
+\tdata.currency.coins = 1e16
+\tfor _ = 1, 30 do
+\t\tbuyHandler(player)
+\tend
+\tcheck("เงินล้นมือ กดรัว → หยุดที่ขั้น 10", data.weaponLevel, Config.Balance.Weapon.MAX_LEVEL)
+\tlocal spent = 0
+\tfor tier = 5, Config.Balance.Weapon.MAX_LEVEL do
+\t\tspent += Config.getClubPrice(tier)
+\tend
+\tcheck("  หักเงินเท่าราคาขั้น 5–10 พอดี (ไม่หักซ้ำหลังเต็ม)", data.currency.coins, 1e16 - spent)
+\tlocal ok, reason = EggService.buyClubTier(player)
+\tcheck("ขั้น 10 แล้วซื้อต่อ → ปฏิเสธ", ok, false)
+\tcheck("  เหตุผล", reason, "มีกระบองขั้นสูงสุดแล้ว")
+\tcheck("ข้อความสำเร็จ", Config.formatClubBoughtMessage(4), "ได้กระบองขั้น 4")
+
+\t-- ค่าเซฟนอกช่วง → clamp ไม่ crash
+\tdata.weaponLevel = 0
+\tdata.currency.coins = Config.getClubPrice(2)
+\tlocal okLow = EggService.buyClubTier(player)
+\tcheck("weaponLevel เก่า = 0 (clamp เป็น 1) → ซื้อได้ขั้น 2", okLow and data.weaponLevel == 2, true)
+\tdata.weaponLevel = 57
+\tlocal okHigh, reasonHigh = EggService.buyClubTier(player)
+\tcheck("weaponLevel เก่า = 57 (clamp เป็น 10) → ซื้อต่อไม่ได้ ไม่ crash", okHigh == false and reasonHigh == "มีกระบองขั้นสูงสุดแล้ว", true)
+end
+
+print("\\n━━ 5C debugSetWeaponTier + debugResetAll กลับขั้น 1 ━━")
+do
+\tlocal player, data = freshPlayer("Club2")
+\tlocal message = EggService.debugSetWeaponTier(player, 7)
+\tcheck("ตั้งขั้น 7", data.weaponLevel, 7)
+\tcheck("  คืนข้อความบอกดาเมจ", string.find(message, tostring(Config.getClubDamage(7)), 1, true) ~= nil, true)
+\tlocal coinsBefore = data.currency.coins
+\tEggService.debugSetWeaponTier(player, 3)
+\tcheck("ตั้งลดลงได้ (ขั้น 3)", data.weaponLevel, 3)
+\tcheck("  ไม่หักเงิน", data.currency.coins, coinsBefore)
+\tfor _, bad in { 0, 11, 2.5, "5", -1 } do
+\t\tEggService.debugSetWeaponTier(player, bad)
+\tend
+\tcheck("ค่าแปลก (0 · 11 · 2.5 · \\"5\\" · -1) → ปฏิเสธ ไม่แตะข้อมูล", data.weaponLevel, 3)
+\tEggService.debugSetWeaponTier(player, 9)
+\tEggService.debugResetAll(player)
+\tcheck("debugResetAll → กระบองกลับขั้น 1", data.weaponLevel, Config.Balance.Weapon.START_TIER)
 end
 
 print(string.format("\\n=== ผ่าน %d / ตก %d ===", passCount, failCount))

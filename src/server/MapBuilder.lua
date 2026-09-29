@@ -17,12 +17,13 @@
 --
 -- ══ สิ่งที่ไฟล์นี้สร้าง (server · ทุกคนเห็นเหมือนกัน) ══
 --   ลานหญ้า + คอก 6 แปลงพร้อมรั้วไม้เตี้ย · แผงร้านค้า · เลนรบพร้อมกำแพงสองข้าง
---   ห้องบอส 1 ห้องต่อด่าน พร้อมจุดวางไข่ · กำแพงใสกันตกขอบแมพ
+--   ห้องบอส 1 ห้องต่อด่าน · กำแพงหินกันตกขอบแมพ
+--   ลานบอสกลาง (Phase 5A/5B) — กำแพงกั้นกลางคืน (ปิดช่องทางเข้าเลน) · ตัวบอส + ไข่ 6 ฟองที่มุมห้องด่าน 1
+--     (สร้างแค่ "ของ" · สถานะ/ขนาดไข่/ซ่อนโชว์ = BossService)
 --   ป้ายอัปเกรดบนแมพ (UI-2) — **ตัวป้ายเปล่า ๆ** ข้อความ + จุดกด E ติดฝั่ง client (src/client/MapSigns.lua)
 --
 -- ══ สิ่งที่ไฟล์นี้ **ไม่** สร้าง ══
 --   กำแพงกั้นด่าน · ทหารฝ่ายรับ · กองทัพผู้เล่น → **วาดฝั่ง client**
---   บอกับไข่ในรัง → ของจริงบน server แต่เป็นงาน Phase 5 (ตรงนี้ทำแค่ที่วาง)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -44,15 +45,18 @@ local COLORS = {
 	fence = Color3.fromRGB(146, 104, 62),
 	lane = Color3.fromRGB(176, 158, 126),
 	laneWall = Color3.fromRGB(122, 116, 106),
-	releasePad = Color3.fromRGB(88, 148, 214),
+	pedestalBase = Color3.fromRGB(92, 96, 110), -- หินเทาอมฟ้า
+	pedestalGlow = Color3.fromRGB(120, 200, 255), -- แกนเรืองแสง + แสง + อนุภาค
 	bossFloor = Color3.fromRGB(150, 122, 94),
-	bossEgg = Color3.fromRGB(230, 218, 190),
 	stall = Color3.fromRGB(158, 112, 76),
 	stallRoof = Color3.fromRGB(190, 92, 78),
 	marker = Color3.fromRGB(86, 74, 58),
 	spawn = Color3.fromRGB(230, 200, 120),
 	sign = Color3.fromRGB(196, 158, 112),
 	boundary = Color3.fromRGB(118, 112, 104), -- หินเทาอมน้ำตาล ให้ธีมใกล้เคียง WALL_COLOR ใน WallRenderer.lua
+	-- ⚠️ UI-fix รอบ 1: สีตกแต่งผิวกำแพงขอบแมพ (ดู decorateBoundaryWall) — หน้าตาล้วน ๆ ไม่กระทบขนาด/การชน
+	boundaryDamp = Color3.fromRGB(80, 76, 70), -- แถบคราบชื้นเข้มด้านล่างกำแพง
+	moss = Color3.fromRGB(90, 118, 62), -- หย่อมมอส/เถาวัลย์
 }
 
 local FLOOR_THICKNESS = 2
@@ -91,10 +95,16 @@ local function makeFloor(name: string, sizeX: number, sizeZ: number, centerX: nu
 	return part
 end
 
-local function makeLabel(text: string, width: number, adornee: BasePart, heightOffset: number): TextLabel
+-- ป้ายตัวหนังสือลอย (BillboardGui) — ⚠️ ขนาดเป็น **studs ในโลก** (UDim2 ส่วน Scale ของ BillboardGui = studs)
+-- ไม่ใช่พิกเซล: เดิม fromOffset(กว้าง, 44) = ขนาดคงที่บนจอ → ยิ่งเดินออกไกล ป้ายยิ่งดูใหญ่เทียบกับโลก
+-- (ผลทดสอบ Studio: "ยิ่งวิ่งออกไกลยิ่งขยาย") · ตอนนี้ใกล้ = ใหญ่ ไกล = เล็ก เหมือนของจริงในฉาก
+-- 5B-2 รอบแก้ป้าย (ผู้ใช้เลือก): ลบป้ายลอย "คอก N" · "แท่นอัญเชิญ" · "ด่าน N" · "รังบอสด่าน N" แล้ว — เหลือแค่ป้ายร้าน
+local LABEL_HEIGHT_STUDS = 2.4
+
+local function makeLabel(text: string, widthStuds: number, adornee: BasePart, heightOffset: number): TextLabel
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "Label"
-	gui.Size = UDim2.fromOffset(width, 44)
+	gui.Size = UDim2.fromScale(widthStuds, LABEL_HEIGHT_STUDS)
 	gui.StudsOffsetWorldSpace = Vector3.new(0, heightOffset, 0)
 	gui.MaxDistance = 500
 	gui.Adornee = adornee
@@ -122,20 +132,21 @@ export type PenPlot = {
 	model: Model,
 	base: Part,
 	center: Vector3,
-	label: TextLabel,
+	-- บรรทัดชื่อเจ้าของบนป้ายไม้ (หน้า + หลัง) — PenService เขียนผ่าน MapBuilder.setPenOwnerName
+	ownerLabels: { TextLabel },
 }
 
+-- ⚠️ 5B: ไม่มี eggSpots แล้ว — แผ่นวางไข่ 5 จุดวงกลมของดีไซน์ "บอสด่านละตัว" ลบแล้ว
+-- ไข่บอสทุกห้องอยู่ที่ BossArena.BossEggs (buildBossArena · 5B-2) · จุดวางจาก Config.getBossEggSpot(ห้อง, i)
 export type BossRoom = {
 	stage: number,
 	model: Model,
 	center: Vector3,
-	eggSpots: { Part },
 }
 
 local root: Folder? = nil
 local penPlots: { PenPlot } = {}
 local bossRooms: { BossRoom } = {}
-local releasePad: Part? = nil
 local spawnPads: { SpawnLocation } = {}
 local built = false
 
@@ -230,7 +241,41 @@ end
 -- ป้ายชื่อคอก — **ปักข้างประตู ไม่ใช่กลางประตู** (กันเดินชน)
 -- ปักบนหญ้าด้านนอกคอก ใกล้ประตู · ยกสูงให้อ่านได้จากมุมกล้องผู้เล่นทั่วไป
 -- ⚠️ ตำแหน่งมาจาก Config.getPenNameSignSpot — ป้ายอัปเกรดข้างประตู (UI-2) เว้นระยะจากจุดนี้
-local function buildPenSign(plot: Model, index: number): TextLabel
+-- ตัวหนังสือบนป้ายไม้คอก — **เขียนลงผิวป้าย (SurfaceGui) ไม่ใช่ป้ายลอย**
+-- ขนาดผูกกับแผ่นไม้ (PixelsPerStud) จึงเล็กลงตามระยะเหมือนของจริง · สีน้ำตาลเข้มเหมือนตัวอักษรสลักบนไม้
+local PEN_SIGN_PIXELS_PER_STUD = 50
+local PEN_SIGN_TEXT_COLOR = Color3.fromRGB(62, 38, 18)
+
+-- ใส่ตัวหนังสือลงหน้าเดียวของป้าย · คืนบรรทัดชื่อเจ้าของ (บรรทัดล่าง) ให้ PenService อัปเดต
+local function writePenSignFace(board: Part, face: Enum.NormalId, index: number): TextLabel
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = `Text{face.Name}`
+	gui.Face = face
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = PEN_SIGN_PIXELS_PER_STUD
+	gui.LightInfluence = 1
+	gui.Parent = board
+
+	local function line(name: string, text: string, y: number, height: number): TextLabel
+		local label = Instance.new("TextLabel")
+		label.Name = name
+		label.AnchorPoint = Vector2.new(0.5, 0)
+		label.Position = UDim2.fromScale(0.5, y)
+		label.Size = UDim2.fromScale(0.92, height)
+		label.BackgroundTransparency = 1
+		label.TextColor3 = PEN_SIGN_TEXT_COLOR
+		label.TextScaled = true
+		label.Font = Enum.Font.SourceSansBold
+		label.Text = text
+		label.Parent = gui
+		return label
+	end
+
+	line("PenNumber", `คอก {index}`, 0.06, 0.36)
+	return line("Owner", "ว่าง", 0.44, 0.5)
+end
+
+local function buildPenSign(plot: Model, index: number): { TextLabel }
 	local spot = Config.getPenNameSignSpot(index)
 	local signX, signZ = spot.X, spot.Z
 
@@ -253,8 +298,12 @@ local function buildPenSign(plot: Model, index: number): TextLabel
 	board.Material = Enum.Material.WoodPlanks
 	board.CanCollide = false
 	board.CastShadow = false
-
-	return makeLabel(`คอก {index}`, 220, board, MAP.Pen.SignSize.Y)
+	-- ⚠️ 5B-2 รอบแก้ป้าย (ผู้ใช้เลือก): ตัวหนังสือลอย "คอก N" เหนือป้ายลบแล้ว → **เขียนลงบนป้ายไม้แทน**
+	--   "คอก N" + ชื่อเจ้าของ (ว่าง = "ว่าง") · ทั้งสองหน้า อ่านได้จากทางเดินและจากในคอก
+	return {
+		writePenSignFace(board, Enum.NormalId.Front, index),
+		writePenSignFace(board, Enum.NormalId.Back, index),
+	}
 end
 
 function MapBuilder.buildPlaza(parent: Folder)
@@ -282,6 +331,13 @@ function MapBuilder.buildPlaza(parent: Folder)
 	local eastWingCenterZ = (laneHalf + halfDepth) / 2
 	makeFloor("EastWingUpper", eastWingSizeX, eastWingSizeZ, eastWingCenterX, eastWingCenterZ, COLORS.grass, plaza)
 	makeFloor("EastWingLower", eastWingSizeX, eastWingSizeZ, eastWingCenterX, -eastWingCenterZ, COLORS.grass, plaza)
+
+	-- ══ 5B: หญ้าปากเลน ══ ช่วงต้นเลน (X 140) → แนวกำแพงหิน (Config.getLaneFloorStartX · X 157.5) ตรงช่อง Z ของเลน
+	-- เดิมพื้นเลนสีน้ำตาลเริ่มที่ต้นเลน → ยื่นออกมาบนหญ้าในลาน (ภาพที่ผู้ใช้ส่งมา) · ตอนนี้ขอบน้ำตาลเสมอช่องประตูพอดี
+	-- ⚠️ ต่อชนพอดี ไม่ทับ: GrassFloor จบที่ getPlazaMaxX · ปีก East* อยู่คนละช่วง Z · LaneFloor เริ่มที่ขอบนี้ (ไม่มีระนาบซ้อน)
+	-- แท่นอัญเชิญ (X 141–155) จึงตั้งอยู่บนหญ้าผืนนี้ — ตำแหน่งแท่นไม่เปลี่ยน
+	local mouthEndX = Config.getLaneFloorStartX()
+	makeFloor("LaneMouthGrass", mouthEndX - maxX, MAP.Lane.Width, (maxX + mouthEndX) / 2, 0, COLORS.grass, plaza)
 
 	-- ⚠️ **ไม่มี Part ของทางเดินกลางแล้ว** — ลบทิ้งตอนไล่บั๊กภาพกระพริบ
 	-- มันเคยเป็นแถบเทาที่อ่านเป็น "ถนน" แล้วถูกเปลี่ยนเป็นหญ้าให้กลืนกับพื้น
@@ -313,9 +369,9 @@ function MapBuilder.buildPlaza(parent: Folder)
 		model.PrimaryPart = base
 
 		buildFence(model, index, center, sizeX, sizeZ)
-		local label = buildPenSign(model, index)
+		local ownerLabels = buildPenSign(model, index)
 
-		penPlots[index] = { index = index, model = model, base = base, center = center, label = label }
+		penPlots[index] = { index = index, model = model, base = base, center = center, ownerLabels = ownerLabels }
 	end
 end
 
@@ -356,10 +412,13 @@ function MapBuilder.buildShop(parent: Folder)
 		-- ⚠️ UI-2: แผง SellStallIndex = ร้านขายแม่ (เดิม "ขายของ · ซื้อไข่" — เงินในเกมซื้อไข่ไม่ได้ จึงเปลี่ยนป้าย)
 		-- client ติดจุดกด E ที่ Counter ของแผงนี้ (src/client/MapSigns.lua) → Persistent ให้หาเจอเสมอ
 		local isSellShop = index == MAP.MapSign.SellStallIndex
-		if isSellShop then
+		-- 5C: แผง WeaponStallIndex = ร้านกระบอง (ป้าย "ซื้ออาวุธ" เดิม) — client ติดจุดกด E ที่ Counter เหมือนร้านขายแม่
+		local isWeaponShop = index == MAP.MapSign.WeaponStallIndex
+		if isSellShop or isWeaponShop then
 			model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
 		end
-		makeLabel(if isSellShop then "ร้านขายแม่" else "ซื้ออาวุธ", 220, counter, h * 0.4 + 3)
+		-- ป้ายลอยเดียวที่เหลือในแมพ (ผู้ใช้เลือกเก็บ) · กว้างเท่าแผง ขนาดติดโลก
+		makeLabel(if isSellShop then "ร้านขายแม่" else "ซื้ออาวุธ", MAP.Shop.StallSize.X, counter, h * 0.4 + 3)
 	end
 
 	-- ⚠️ **ไม่มีแท่นวาปแล้ว** (เอาออกรอบซื้อความเร็ว)
@@ -367,7 +426,7 @@ function MapBuilder.buildShop(parent: Folder)
 	-- และไม่มีแท่นวาปไปรังบอสด้วย — วาปไปรังได้เมื่อไหร่ การแย่งไข่ก็หมดความหมาย
 	--
 	-- ⚠️ UI-2: อัปเกรด (ดาเมจ · ความเร็ว · คอก) ย้ายจากปุ่มติดตัวไปเป็น**ป้ายบนแมพ กด E** (buildMapSigns)
-	-- แผงร้านเหลือ ร้านขายแม่ (แผง SellStallIndex) · ซื้ออาวุธ (Phase 5)
+	-- แผงร้านเหลือ ร้านขายแม่ (แผง SellStallIndex) · ร้านกระบอง "ซื้ออาวุธ" (แผง WeaponStallIndex · Phase 5C)
 end
 
 --------------------------------------------------------------------------------
@@ -459,12 +518,88 @@ local function laneWallJog(parent: Folder, name: string, x: number, fromZ: numbe
 	part.CanCollide = true
 end
 
+-- ══ แท่นอัญเชิญ (UI-3) ══ จานหินกลมเรืองแสงกลางปากเลน · ทหาร (ภาพ) โผล่ที่กึ่งกลางแท่นแล้วเดินเข้าเลน
+-- ⚠️ ภาพล้วน — การรบไม่อ่านพิกัดแท่น (Config.getSummonPedestalCenter) · CanCollide = false เดินทับได้ ไม่บังทางเข้าเลน
+-- ⚠️ Persistent: client ติดจุดกด E (UiKit.prompt · กดค้าง) ที่ชิ้นแกน ถ้าเปิด StreamingEnabled แล้วแท่นถูก
+--   stream ออก จุดกดจะหายตามไปด้วย (เหตุผลเดียวกับป้ายบนแมพ)
+-- Part ทรงกระบอกของ Roblox วางแกนตาม X → หมุน 90° รอบแกน Z ให้แกนตั้งขึ้น (ขนาด = สูง × กว้าง × กว้าง)
+local function makeDisc(name: string, diameter: number, height: number, bottomY: number, color: Color3, parent: Instance): Part
+	local center = Config.getSummonPedestalCenter()
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Shape = Enum.PartType.Cylinder
+	part.Size = Vector3.new(height, diameter, diameter)
+	part.CFrame = CFrame.new(center.X, bottomY + height / 2, center.Z) * CFrame.Angles(0, 0, math.rad(90))
+	part.Color = color
+	part.Anchored = true
+	part.CanCollide = false
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Parent = parent
+	return part
+end
+
+local function buildSummonPedestal(parent: Instance)
+	local spec = MAP.SummonPedestal
+	local center = Config.getSummonPedestalCenter()
+
+	local model = Instance.new("Model")
+	model.Name = Config.SUMMON_PEDESTAL_NAME
+	model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
+	model.Parent = parent
+
+	local base = makeDisc("Base", spec.Diameter, spec.BaseHeight, 0, COLORS.pedestalBase, model)
+	base.Material = Enum.Material.Slate
+
+	local core = makeDisc(
+		Config.SUMMON_PEDESTAL_CORE,
+		spec.CoreDiameter,
+		spec.CoreHeight,
+		spec.BaseHeight,
+		COLORS.pedestalGlow,
+		model
+	)
+	core.Material = Enum.Material.Neon
+
+	local light = Instance.new("PointLight")
+	light.Color = COLORS.pedestalGlow
+	light.Range = spec.LightRange
+	light.Brightness = 2
+	light.Parent = core
+
+	-- อนุภาคลอยขึ้นช้า ๆ — ติดกับแผ่นใสไม่หมุน (ด้านบน = ขึ้นฟ้าจริง) แทนแกนที่หมุนไปแล้ว
+	local aura = makePart(
+		"Aura",
+		Vector3.new(spec.CoreDiameter * 0.8, 0.1, spec.CoreDiameter * 0.8),
+		Vector3.new(center.X, spec.BaseHeight + spec.CoreHeight, center.Z),
+		COLORS.pedestalGlow,
+		model
+	)
+	aura.Transparency = 1
+	aura.CanCollide = false
+	aura.CanQuery = false
+	aura.CanTouch = false
+
+	local particles = Instance.new("ParticleEmitter")
+	particles.Name = "Rise"
+	particles.EmissionDirection = Enum.NormalId.Top
+	particles.Color = ColorSequence.new(COLORS.pedestalGlow)
+	particles.LightEmission = 1
+	particles.Rate = 8
+	particles.Lifetime = NumberRange.new(2, 3)
+	particles.Speed = NumberRange.new(1.5, 2.5)
+	particles.SpreadAngle = Vector2.new(8, 8)
+	particles.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.35), NumberSequenceKeypoint.new(1, 0) })
+	particles.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1) })
+	particles.Parent = aura
+	-- ⚠️ 5B-2 รอบแก้ป้าย (ผู้ใช้เลือก): เอาตัวหนังสือลอย "แท่นอัญเชิญ" ออกแล้ว — จุดกด E ("อัญเชิญ"/"ปิดอัญเชิญ") ยังอยู่ (MapSigns)
+end
+
 function MapBuilder.buildBattleLane(parent: Folder)
 	local lane = Instance.new("Folder")
 	lane.Name = "BattleLane"
 	lane.Parent = parent
 
-	local startX = Config.getLaneStartX()
 	local endX = Config.getLaneEndX()
 
 	-- ══ พื้นเลน ══ **สร้างเป็นช่วง ๆ เว้นตรงห้องบอส**
@@ -477,8 +612,11 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	-- ขยับความสูงแปลว่ามีขั้นให้สะดุด และของที่วางบนพื้นจะลอยหรือจม
 	-- ห้องบอสกว้างกว่าเลนอยู่แล้ว (80 > 60) ช่วงที่เว้นไว้จึงถูกพื้นห้องบอสคลุมเต็มพอดี
 	-- ⚠️ ชื่อ floorCursor ไม่ใช่ cursor เฉย ๆ เพราะตัวสร้างกำแพงข้างล่างมี cursor ของตัวเอง
+	-- ⚠️ 5B: พื้นเลน (สีน้ำตาล) **เริ่มที่แนวกำแพงหินขอบแมพ/ช่องประตู** (Config.getLaneFloorStartX · X 157.5) ไม่ใช่ต้นเลน
+	--   เดิมเริ่มที่ getLaneStartX (X 140) → ยื่นออกมาบนหญ้าในลาน 17.5 studs (ภาพที่ผู้ใช้ส่งมา) · ช่วงนั้นเป็นหญ้าแล้ว
+	--   (buildPlaza · "LaneMouthGrass") · ⚠️ แค่ Part พื้น — ต้นเลน/แท่นอัญเชิญ/ทางเดินทหาร/ระยะการรบยังอ่าน getLaneStartX
 	local roomHalfSpan = MAP.BossRoom.Size.X / 2
-	local floorCursor = startX
+	local floorCursor = Config.getLaneFloorStartX()
 
 	local function laneSegment(fromX: number, toX: number, index: number)
 		if toX - fromX <= 0 then
@@ -503,9 +641,14 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	local roomHalfZ = MAP.BossRoom.Size.Y / 2
 	local roomHalfX = MAP.BossRoom.Size.X / 2
 
+	-- ⚠️ UI-2: กำแพงข้างเริ่มเสมอกำแพงขอบแมพฝั่งตะวันออก (Config.getLaneWallStartX) ไม่ใช่ต้นเลน —
+	-- เดิมยื่นเข้าลานเกินแนวกำแพงขอบแมพทั้งสองฝั่งปากเลน · พื้นเลน/จุดปล่อยทหารยังเริ่มที่ต้นเลนเหมือนเดิม
+	-- ⚠️ UI-fix รอบ 1: getLaneWallStartX() ขยับจากผิวด้านใน → ผิวด้านนอกของกำแพงขอบแมพแล้ว
+	-- (กันซ้อนทับกำแพงขอบแมพเต็มความหนา = z-fighting ตรงมุมปากเลน — ดูคอมเมนต์ที่ตัวฟังก์ชันใน Config.lua)
+	local wallStartX = Config.getLaneWallStartX()
 	for _, sign in { 1, -1 } do
 		local side = if sign == 1 then "North" else "South"
-		local cursor = startX
+		local cursor = wallStartX
 
 		for stage = 1, Config.Balance.Stage.COUNT do
 			local room = Config.getBossNestCenter(stage)
@@ -541,33 +684,29 @@ function MapBuilder.buildBattleLane(parent: Folder)
 	)
 	cap.Material = Enum.Material.Slate
 
-	-- ⚠️ แท่นปล่อยทหารอยู่ที่ต้นเลน — ทหารโผล่ที่นี่เลย ไม่ต้องเดินมาจากคอก
-	local pad = makePart(
-		"ReleasePad",
-		MAP.Lane.ReleasePadSize,
-		Vector3.new(startX + MAP.Lane.ReleasePadSize.X / 2, 0, 0),
-		COLORS.releasePad,
-		lane
-	)
-	pad.CanCollide = false
-	makeLabel("จุดปล่อยทหาร", 240, pad, 5)
-	releasePad = pad
+	-- ⚠️ UI-3: แท่นอัญเชิญแทนแท่นปล่อยทหารสี่เหลี่ยมเดิม (buildSummonPedestal) · ทหาร (ภาพ) ยังโผล่ที่ปากเลนจุดเดิม
+	buildSummonPedestal(parent)
 
 	-- เส้นบอกรอยต่อด่าน — ⚠️ **เครื่องหมายเฉย ๆ ไม่ใช่กำแพง** กำแพงจริงวาดฝั่ง client
+	-- ⚠️ 5B-2 รอบแก้ป้าย (ผลทดสอบ Studio · ผู้ใช้สั่ง): เอาเส้นหน้าทางเข้าออก + เอาตัวหนังสือลอย "ด่าน N" ออกทุกด่าน
+	--   วางเฉพาะเส้นที่อยู่**บนพื้นเลน** (ต้นด่าน ≥ Config.getLaneFloorStartX) — ด่าน 1 เริ่มที่ต้นเลน X 140
+	--   ซึ่งอยู่บนหญ้าหน้าช่องประตู (ก่อนพื้นเลน X 157.5) = เส้นที่ผู้ใช้เห็นขวางหน้าทางเข้า · ด่าน 2–9 อยู่ใต้กำแพงด่านตามเดิม
 	local markers = Instance.new("Folder")
 	markers.Name = "StageMarkers"
 	markers.Parent = lane
 
 	for stage = 1, Config.Balance.Stage.COUNT do
-		local marker = makePart(
-			`StageMarker{stage}`,
-			Vector3.new(1.5, 0.3, MAP.Lane.Width),
-			Vector3.new(Config.getStageStartX(stage), 0, 0),
-			COLORS.marker,
-			markers
-		)
-		marker.CanCollide = false
-		makeLabel(`ด่าน {stage}`, 160, marker, 6)
+		local markerX = Config.getStageStartX(stage)
+		if markerX >= Config.getLaneFloorStartX() then
+			local marker = makePart(
+				`StageMarker{stage}`,
+				Vector3.new(1.5, 0.3, MAP.Lane.Width),
+				Vector3.new(markerX, 0, 0),
+				COLORS.marker,
+				markers
+			)
+			marker.CanCollide = false
+		end
 	end
 end
 
@@ -599,24 +738,165 @@ function MapBuilder.buildBossRooms(parent: Folder)
 		base.Material = Enum.Material.Ground
 		model.PrimaryPart = base
 
-		-- ด่าน 1 ไม่มีกำแพงกั้น → เดินเข้าได้ตั้งแต่เข้าเกมครั้งแรก
-		local gated = if Config.getWallX(stage) then "หลังกำแพง" else "เข้าได้เลย"
-		makeLabel(`รังบอสด่าน {stage} · {gated}`, 280, base, 10)
+		-- ⚠️ 5B-2 รอบแก้ป้าย (ผู้ใช้เลือก): เอาตัวหนังสือลอย "รังบอสด่าน N · เข้าได้เลย/หลังกำแพง" ออกแล้ว
 
-		local spots: { Part } = {}
-		for i = 1, Config.Balance.Boss.EGGS_PER_SPAWN do
-			local spot = makePart(
-				`EggSpot{i}`,
-				MAP.BossRoom.EggPadSize,
-				Config.getBossEggSpot(stage, i),
-				COLORS.bossEgg,
-				model
-			)
-			spot.CanCollide = false
-			spots[i] = spot
+		-- ⚠️ 5B: ไม่วางแผ่นจุดไข่แล้ว (เดิม 5 จุดวงกลมตาม Balance.Boss.EGGS_PER_SPAWN ที่ลบแล้ว)
+		-- 5B-2: บอส + ไข่จริงของทุกห้องอยู่มุมห้อง — buildBossArena (ตรงนี้แค่พื้นห้อง + ป้าย)
+		bossRooms[stage] = { stage = stage, model = model, center = center }
+	end
+end
+
+--------------------------------------------------------------------------------
+-- โซน 4b — บอสทุกห้อง (Phase 5A → 5B-2) + กำแพงกั้นกลางคืน
+--------------------------------------------------------------------------------
+-- ⚠️ 5B-2: บอส 1 ตัว + ไข่ 6 ฟอง **ต่อห้อง ครบ 9 ห้อง** (เดิม 5A/5B = บอสกลางตัวเดียวที่ห้องด่าน 1)
+--   ห้อง N = หลังกำแพงด่าน N · เข้าได้เฉพาะคนที่พังกำแพงถึง (กำแพงวาดฝั่ง client · server ตรวจสิทธิ์เองอีกชั้น)
+-- ที่นี่สร้าง "ของ" อย่างเดียว · เปิด/ปิดกำแพงกั้น · ซ่อน/โชว์บอส · อัปเดตแถบ HP · ขนาด/สถานะไข่ = BossService
+-- กำแพงกั้น **ชิ้นเดียวของ server** ชนได้เฉพาะกลางคืน (BossService ตั้ง CanCollide) — ทหารไม่โดนเพราะทหารเป็นภาพ
+--   ฝั่ง client (Anchored + CanCollide = false ขยับด้วย PivotTo) และการรบคิดเป็นตัวเลข ไม่มีอะไรในเลนที่ใช้ฟิสิกส์
+--   นอกจากตัวผู้เล่น → ใช้ CanCollide ธรรมดาก็ "กันเฉพาะผู้เล่น" แล้ว ไม่ต้องมี CollisionGroup
+-- ⚠️ 5B: กำแพงกั้นย้ายไป**ปิดช่องทางเข้าเลนพอดี** (ช่องประตูกำแพงหินขอบแมพ) · สีขาวทึบ · บอส + ไข่ 6 ฟองอยู่มุมห้อง
+--   5B-2: กำแพงกั้นยังเป็นชิ้นเดียวที่ปากเลน (ผู้ใช้ยืนยัน) · มุมบอสแต่ละห้องสลับฟันปลาตาม BossRoom.CornerSide
+-- ⚠️ Persistent: client ติดตัวเลขนับถอยหลังไว้ที่ผิวกำแพงกั้น + จุดกด E ที่ไข่ (เหตุผลเดียวกับแท่นอัญเชิญ/ป้ายบนแมพ)
+local BOSS_HP_BAR_SIZE = Vector2.new(16, 2.8) -- studs (กว้าง · สูง) ของแถบ HP บอส — ติดโลก ไม่ใช่พิกเซลบนจอ
+
+local BOSS_ARENA_COLORS = {
+	barrier = Color3.fromRGB(245, 245, 245), -- 5B: ขาวทึบ (เดิมแดง ForceField โปร่ง)
+	bossBody = Color3.fromRGB(92, 58, 120),
+	bossHead = Color3.fromRGB(120, 76, 150),
+	bossEye = Color3.fromRGB(255, 220, 90),
+	hpBack = Color3.fromRGB(30, 30, 30),
+	hpFill = Color3.fromRGB(215, 60, 60),
+	egg = Color3.fromRGB(236, 226, 196), -- ไข่บอส (สีเดียวกันทุกฟอง — ขนาดบอกน้ำหนัก)
+}
+
+-- ไข่บอส 1 ฟองของห้อง room — ทรงกลม (ขนาดเท่ากันทุกแกน) · เริ่มแบบซ่อน (Status = "none")
+-- ⚠️ อยู่ตลอด ไม่ถอดออกจากโลก — BossService ซ่อน/โชว์ด้วย Transparency + Attribute Status แทน
+--   (ถอดออกแล้วใส่กลับ = client ได้ instance ใหม่ จุดกด E ที่ติดไว้ฝั่ง client หายไปด้วย)
+-- ⚠️ 5B-fix (ผู้ใช้สั่ง "ให้ผู้เล่นลุ้น"): **ไม่มีป้ายน้ำหนัก และไม่ส่งน้ำหนักให้ client** — ดูได้แค่ขนาดไข่ (บอก tier คร่าว ๆ)
+--   น้ำหนักจริงเห็นตอนเก็บเข้ากระเป๋าแล้วเท่านั้น
+local function buildBossEgg(folder: Folder, room: number, index: number)
+	local spot = Config.getBossEggSpot(room, index)
+	local size = MAP.Blockout.EggSize
+	local egg = Instance.new("Part")
+	egg.Name = Config.getBossEggPartName(room, index)
+	egg.Shape = Enum.PartType.Ball
+	egg.Size = size
+	egg.Position = Vector3.new(spot.X, Config.getBallRadius(size), spot.Z)
+	egg.Color = BOSS_ARENA_COLORS.egg
+	egg.Material = Enum.Material.SmoothPlastic
+	egg.Anchored = true
+	egg.CanCollide = false
+	egg.CanTouch = false
+	egg.CastShadow = false
+	egg.Transparency = 1
+	egg:SetAttribute("Room", room)
+	egg:SetAttribute("Index", index)
+	egg:SetAttribute("Status", "none")
+	egg.Parent = folder
+end
+
+-- ตัวบอสห้อง room (blockout กล่อง ไม่ใช้ Humanoid) — BossService ถอดออกจากโลกตอนไม่มีชีวิต
+-- 5B: ยืนมุมห้อง (Config.getBossCornerCenter) ไม่ใช่กึ่งกลางห้อง · 5B-2: ชื่อ Config.getBossModelName(ห้อง)
+local function buildBoss(model: Model, room: number)
+	local arenaDim = MAP.BossArena
+	local boss = Instance.new("Model")
+	boss.Name = Config.getBossModelName(room)
+	boss.Parent = model
+	local center = Config.getBossCornerCenter(room)
+	local size = arenaDim.BossSize
+	local bodyHeight = size.Y * 0.7
+	local body = makePart("Body", Vector3.new(size.X, bodyHeight, size.Z), center, BOSS_ARENA_COLORS.bossBody, boss)
+	body.Material = Enum.Material.Slate
+	local headSize = size.Y - bodyHeight
+	local head = makePart(
+		"Head",
+		Vector3.new(size.X * 0.7, headSize, size.Z * 0.7),
+		Vector3.new(center.X, bodyHeight, center.Z),
+		BOSS_ARENA_COLORS.bossHead,
+		boss
+	)
+	head.Material = Enum.Material.Slate
+	-- ตา 2 ข้างหันไปทางกำแพงกั้น (−X) ให้รู้ว่าบอสหันหน้าไปทางไหน
+	for _, side in { -1, 1 } do
+		local eye = makePart(
+			"Eye",
+			Vector3.new(0.4, headSize * 0.25, headSize * 0.25),
+			Vector3.new(center.X - size.X * 0.35 - 0.2, bodyHeight + headSize * 0.45, center.Z + side * size.Z * 0.18),
+			BOSS_ARENA_COLORS.bossEye,
+			boss
+		)
+		eye.Material = Enum.Material.Neon
+		eye.CanCollide = false
+	end
+	boss.PrimaryPart = body
+
+	-- แถบ HP เหนือหัว — ของ server ทุกคนเห็นค่าเดียวกัน (BossService อัปเดต HpFill/HpText)
+	-- ⚠️ ขนาดเป็น **studs ในโลก** (เดิม fromOffset(260, 46) = คงที่บนจอ → ยิ่งถอยออกไกลยิ่งดูใหญ่เทียบกับบอส ·
+	--   ผลทดสอบ Studio) · กว้างกว่าตัวบอส (10) นิดหน่อย
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "HpBar"
+	gui.Size = UDim2.fromScale(BOSS_HP_BAR_SIZE.X, BOSS_HP_BAR_SIZE.Y)
+	gui.StudsOffsetWorldSpace = Vector3.new(0, headSize + 3, 0)
+	gui.MaxDistance = 300
+	gui.Adornee = head
+	gui.Parent = head
+	local back = Instance.new("Frame")
+	back.Name = "HpBack"
+	back.Size = UDim2.fromScale(1, 0.45)
+	back.Position = UDim2.fromScale(0, 0.55)
+	back.BackgroundColor3 = BOSS_ARENA_COLORS.hpBack
+	back.BorderSizePixel = 0
+	back.Parent = gui
+	local fill = Instance.new("Frame")
+	fill.Name = "HpFill"
+	fill.Size = UDim2.fromScale(1, 1)
+	fill.BackgroundColor3 = BOSS_ARENA_COLORS.hpFill
+	fill.BorderSizePixel = 0
+	fill.Parent = back
+	local text = Instance.new("TextLabel")
+	text.Name = "HpText"
+	text.Size = UDim2.fromScale(1, 0.55)
+	text.BackgroundTransparency = 1
+	text.Text = `บอสห้อง {room}`
+	text.TextScaled = true
+	text.Font = Enum.Font.GothamBold
+	text.TextColor3 = Color3.fromRGB(255, 255, 255)
+	text.TextStrokeTransparency = 0.3
+	text.Parent = gui
+end
+
+function MapBuilder.buildBossArena(parent: Folder)
+	local model = Instance.new("Model")
+	model.Name = Config.BOSS_ARENA_NAME
+	model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
+	model.Parent = parent
+
+	-- กำแพงกั้นกลางคืน — เริ่มแบบกลางวัน (มองไม่เห็น · ไม่ชน) BossService สลับเองตาม phase
+	-- 5B: ปิดช่องประตูกำแพงหินขอบแมพพอดี (X/หนา/สูงเท่ากำแพงหิน · กว้างเท่าช่อง) · ขาวทึบตอนกลางคืน
+	local barrierSize = Config.getBossBarrierSize()
+	local barrier = makePart(
+		Config.BOSS_BARRIER_NAME,
+		barrierSize,
+		Vector3.new(Config.getBossBarrierX(), 0, 0),
+		BOSS_ARENA_COLORS.barrier,
+		model
+	)
+	barrier.Material = Enum.Material.SmoothPlastic
+	barrier.Transparency = 1
+	barrier.CanCollide = false
+	barrier.CanQuery = false
+	barrier.CastShadow = false
+
+	-- ไข่บอส 6 ฟองต่อห้อง หลังบอส มุมเดียวกัน (5B · 5B-2: ครบทุกห้องในโฟลเดอร์เดียว)
+	local eggs = Instance.new("Folder")
+	eggs.Name = Config.BOSS_EGG_FOLDER
+	eggs.Parent = model
+	for room = 1, Config.Balance.Stage.COUNT do
+		for index = 1, Config.Balance.BossCycle.EGGS_PER_NIGHT do
+			buildBossEgg(eggs, room, index)
 		end
-
-		bossRooms[stage] = { stage = stage, model = model, center = center, eggSpots = spots }
+		buildBoss(model, room)
 	end
 end
 
@@ -628,6 +908,55 @@ end
 -- **ไม่ใช้วิธี "ตกแล้วเกิดใหม่"** เพราะน่ารำคาญตอนกำลังฟาร์ม → กั้นไว้ตั้งแต่แรก
 -- ⚠️ กั้นเฉพาะรอบ **ลานคอก** เพราะเลนรบมีกำแพงทึบสองข้างอยู่แล้ว
 -- และต้องเว้นช่องฝั่งที่ต่อกับเลน ไม่งั้นเดินออกไปรบไม่ได้
+
+-- ⚠️ UI-fix รอบ 1: ตกแต่งผิวกำแพงหินขอบแมพให้มีมิติ (หน้าตาล้วน ๆ ไม่แตะขนาด/ตำแหน่ง/CanCollide ของกำแพงจริงเลย)
+-- เลือกวิธี "Part แปะเยื้องผิว" แทน SurfaceAppearance/Decal/Texture เพราะสามวิธีนั้นต้องมี asset รูปภาพ
+-- ที่อัปโหลดขึ้น Roblox ไว้แล้ว (เหมือนข้อจำกัดเดียวกับโมเดล mesh ในคอก — repo นี้ยังไม่มี asset แบบนั้น
+-- และสร้างจากสคริปต์ตรง ๆ ไม่ได้) ส่วน `Material = Rock` ที่กำแพงใช้อยู่แล้วมีลายผิวขรุขระแบบ built-in
+-- ของ Roblox ให้ฟรีโดยไม่ต้องมี asset — ของที่เพิ่มตรงนี้คือมิติ/สีที่ engine material เดียวให้ไม่ได้
+-- · แถบคราบชื้นเข้มด้านล่าง + หย่อมมอส/เถาวัลย์ 3 จุดต่อผืน เยื้องออกจากผิวจริง `DECOR_EPSILON`
+--   กัน z-fighting (หลักการเดียวกับ getLaneWallStartX ด้านบน) · CanCollide = false ทั้งคู่ (ของประดับ ไม่ใช่กำแพง)
+-- · ตำแหน่งหย่อมมอสคงที่ (ไม่สุ่ม) กันสองผู้เล่นเห็นไม่ตรงกัน แม้เรื่องนี้ไม่กระทบกติกาเกม
+local DECOR_EPSILON = 0.05
+local MOSS_FRACTIONS = { 0.18, 0.47, 0.79 } -- ตำแหน่งตามสัดส่วนความยาวกำแพง ไม่เท่ากันให้ดูเป็นธรรมชาติ
+
+local function decorateBoundaryWall(size: Vector3, position: Vector3, normal: Vector3, folder: Instance)
+	local lengthAlongX = normal.Z ~= 0 -- normal ชี้ตามแกน Z (North/South) → ตัวกำแพงยาวไปตามแกน X
+	local wallLength = if lengthAlongX then size.X else size.Z
+	local wallHeight = size.Y
+	local thickness = if lengthAlongX then size.Z else size.X
+
+	local faceOffset = thickness / 2 + DECOR_EPSILON
+	local faceX = position.X + normal.X * faceOffset
+	local faceZ = position.Z + normal.Z * faceOffset
+
+	-- แถบคราบชื้นเข้ม สูงประมาณ 28% ของกำแพง วิ่งเกือบเต็มความยาว (เว้นขอบเล็กน้อยกันโผล่พ้นมุม)
+	local bandHeight = wallHeight * 0.28
+	local bandSize = if lengthAlongX
+		then Vector3.new(wallLength * 0.94, bandHeight, 0.08)
+		else Vector3.new(0.08, bandHeight, wallLength * 0.94)
+	local band = makePart("WeatherBand", bandSize, Vector3.new(faceX, 0, faceZ), COLORS.boundaryDamp, folder)
+	band.Material = Enum.Material.Rock
+	band.CanCollide = false
+	band.CastShadow = false
+
+	-- หย่อมมอส/เถาวัลย์ กระจายตาม MOSS_FRACTIONS สูงไม่เท่ากันสลับกันไปให้ดูเป็นธรรมชาติ
+	for i, frac in MOSS_FRACTIONS do
+		local along = (frac - 0.5) * wallLength
+		local mossHeight = wallHeight * (0.16 + (i % 2) * 0.08)
+		local mossWidth = wallLength * 0.05
+		local mossSize = if lengthAlongX
+			then Vector3.new(mossWidth, mossHeight, 0.06)
+			else Vector3.new(0.06, mossHeight, mossWidth)
+		local mossX = if lengthAlongX then faceX + along else faceX
+		local mossZ = if lengthAlongX then faceZ else faceZ + along
+		local moss = makePart("Moss", mossSize, Vector3.new(mossX, 0, mossZ), COLORS.moss, folder)
+		moss.Material = Enum.Material.LeafyGrass
+		moss.CanCollide = false
+		moss.CastShadow = false
+	end
+end
+
 function MapBuilder.buildBoundary(parent: Folder)
 	local folder = Instance.new("Folder")
 	folder.Name = "Boundary"
@@ -652,29 +981,33 @@ function MapBuilder.buildBoundary(parent: Folder)
 	-- ไม่กระทบการชน — CanCollide ยังคง true เหมือนเดิม
 	-- ⚠️ CastShadow เดิมปิดไว้เพราะของที่มองไม่เห็นแล้วมีเงาจะดูเป็นบั๊ก (เงาลอยมาจากอากาศ)
 	-- ตอนนี้เป็นกำแพงทึบจริงแล้ว ปล่อยให้ทอดเงาตามปกติ (ค่า default ของ Part) ถึงจะดูเป็นกำแพงหินจริง
-	local function stoneWall(name: string, size: Vector3, position: Vector3)
+	-- innerNormal = ทิศตั้งฉากที่ชี้เข้าหาลาน (ฝั่งที่ผู้เล่นเดินเห็น) — ใช้ตกแต่งผิวด้านที่มีคนมองเท่านั้น
+	local function stoneWall(name: string, size: Vector3, position: Vector3, innerNormal: Vector3)
 		local part = makePart(name, size, position, COLORS.boundary, folder)
 		part.Material = Enum.Material.Rock
 		part.Transparency = 0
 		part.CanCollide = true
+		decorateBoundaryWall(size, position, innerNormal, folder)
 	end
 
 	-- ซ้าย · หน้า · หลัง
-	stoneWall("West", Vector3.new(t, h, halfZ * 2), Vector3.new(minX, 0, 0))
-	stoneWall("North", Vector3.new(maxX - minX, h, t), Vector3.new((minX + maxX) / 2, 0, halfZ))
-	stoneWall("South", Vector3.new(maxX - minX, h, t), Vector3.new((minX + maxX) / 2, 0, -halfZ))
+	stoneWall("West", Vector3.new(t, h, halfZ * 2), Vector3.new(minX, 0, 0), Vector3.new(1, 0, 0))
+	stoneWall("North", Vector3.new(maxX - minX, h, t), Vector3.new((minX + maxX) / 2, 0, halfZ), Vector3.new(0, 0, -1))
+	stoneWall("South", Vector3.new(maxX - minX, h, t), Vector3.new((minX + maxX) / 2, 0, -halfZ), Vector3.new(0, 0, 1))
 
 	-- ฝั่งขวาแบ่งเป็นสองชิ้น เว้นช่องกลางไว้ให้เดินเข้าเลนรบ
 	local gapHalf = laneHalf
 	stoneWall(
 		"EastUpper",
 		Vector3.new(t, h, halfZ - gapHalf),
-		Vector3.new(maxX, 0, (halfZ + gapHalf) / 2)
+		Vector3.new(maxX, 0, (halfZ + gapHalf) / 2),
+		Vector3.new(-1, 0, 0)
 	)
 	stoneWall(
 		"EastLower",
 		Vector3.new(t, h, halfZ - gapHalf),
-		Vector3.new(maxX, 0, -(halfZ + gapHalf) / 2)
+		Vector3.new(maxX, 0, -(halfZ + gapHalf) / 2),
+		Vector3.new(-1, 0, 0)
 	)
 end
 
@@ -774,6 +1107,7 @@ function MapBuilder.build()
 	MapBuilder.buildShop(folder)
 	MapBuilder.buildBattleLane(folder)
 	MapBuilder.buildBossRooms(folder)
+	MapBuilder.buildBossArena(folder)
 	MapBuilder.buildBoundary(folder)
 	MapBuilder.buildMapSigns(folder)
 
@@ -794,12 +1128,19 @@ function MapBuilder.getPenPlot(index: number): PenPlot?
 	return penPlots[index]
 end
 
-function MapBuilder.getBossRoom(stage: number): BossRoom?
-	return bossRooms[stage]
+-- เขียนชื่อเจ้าของลงป้ายไม้คอก (nil = ว่าง) · PenService เรียกตอนจอง/คืนคอก
+function MapBuilder.setPenOwnerName(index: number, ownerName: string?)
+	local plot = penPlots[index]
+	if not plot then
+		return
+	end
+	for _, label in plot.ownerLabels do
+		label.Text = ownerName or "ว่าง"
+	end
 end
 
-function MapBuilder.getReleasePad(): Part?
-	return releasePad
+function MapBuilder.getBossRoom(stage: number): BossRoom?
+	return bossRooms[stage]
 end
 
 -- จุดเกิดของคอกหมายเลข index — Main เอาไปตั้ง player.RespawnLocation

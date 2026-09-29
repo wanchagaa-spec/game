@@ -101,11 +101,24 @@ export type Data = {
 	-- ⚠️ true เฉพาะตอนที่ auto-pause (§7.6) เป็นคนปิด summonEnabled ให้เอง
 	-- ผู้เล่นกดปิดเองไม่ตั้งค่านี้ — ใช้แยกว่าจะโชว์แจ้งเตือน "ตีไม่เข้า" หรือเปล่า (3B)
 	combatAutoPaused: boolean,
-	-- ⚠️ อาเรย์ของ stack key (Config.makeStackKey()) เรียงลำดับที่ผู้เล่นตั้งไว้เอง
-	-- หัวอาเรย์ = ปล่อยก่อน · กองที่หมด (count เป็น 0/ไม่มีใน children) ยังค้างอยู่ในนี้
-	-- ไม่ถูกลบ (เผื่อผลิตเพิ่มมาเติมทีหลัง) · กองใหม่ที่ยังไม่เคยอยู่ในนี้ถูกต่อท้ายอัตโนมัติ
-	-- (CombatService.reconcileReleaseOrder) ห้ามเขียนตรง ๆ ที่อื่นนอกจาก CombatService
+	-- ⚠️ อาเรย์ของ stack key (Config.makeStackKey()) = **กองที่ผู้เล่นติ๊กให้ปล่อย** เรียงตามลำดับติ๊ก
+	-- หัวอาเรย์ = ปล่อยก่อน · กองที่ไม่อยู่ในนี้ไม่ถูกปล่อยเลย (UI-3 — เดิมกองใหม่ถูกต่อท้ายอัตโนมัติ ตัดแล้ว)
+	-- กองที่หมด (count เป็น 0/ไม่มีใน children) ยังค้างอยู่ในนี้ ไม่ถูกลบ (เผื่อผลิตเพิ่มมาเติมทีหลัง)
+	-- ห้ามเขียนตรง ๆ ที่อื่นนอกจาก CombatService.handleSetReleaseOrder
 	releaseOrder: { string },
+	-- ⚠️ ดัชนี (UI-4 · schema v4) — ตัวละครที่ผู้เล่น**เคยได้**อย่างน้อย 1 ตัว { [charId] = true }
+	-- ติดเฉพาะใน PlayerData.createMother (จุดเดียวที่สร้างแม่ใหม่) · **ไม่ลบเมื่อแม่ถูกขาย/ตาย**
+	-- charId ที่ไม่มีใน Config แล้วค้างอยู่ได้ (ดัชนีข้ามไปเอง) ไม่ต้องลบ · ยังไม่แยกตามสถานะ gold/silver
+	discovered: { [string]: boolean },
+	-- ⚠️ UI-5 (schema v5) — โบนัส Robux ที่ทะลุเพดานเงินในเกม เก็บเป็น **จำนวนขั้น** ไม่ใช่ตัวคูณ
+	-- (ตัวคูณคำนวณสดผ่าน Config.getRobuxDamageMultiplier/getEffectiveWalkSpeed เสมอ ไม่แคชค่าคูณ)
+	-- แยกจาก damageLevel/speedLevel (แทร็กเงินในเกม) โดยสิ้นเชิง — ไม่ใช้สูตร/เพดานเดียวกัน
+	robuxDamageBonus: number,
+	robuxSpeedBonus: number,
+	-- ⚠️ กัน ProcessReceipt ให้ของซ้ำตอน Roblox retry เดิม (เช่น เซิร์ฟดับกลางคันหลังให้ของแต่ก่อนเซฟ)
+	-- อาเรย์ FIFO ยาวไม่เกิน Config.DataStore.PROCESSED_PURCHASE_LOG_CAP — เก่าสุดถูกตัดทิ้งก่อน
+	-- (ไม่ใช่ audit log ถาวร แค่กันซ้ำระยะสั้นที่ Roblox อาจ retry) ดู PlayerData.markPurchaseProcessed
+	processedPurchaseIds: { string },
 	stats: { [string]: any },
 	sessionLock: SessionLock?,
 	lastSaveAt: number,
@@ -164,6 +177,10 @@ function PlayerData.createNew(): Data
 		summonEnabled = Config.Balance.Combat.SUMMON_DEFAULT_ON,
 		combatAutoPaused = false,
 		releaseOrder = {},
+		discovered = {},
+		robuxDamageBonus = 0,
+		robuxSpeedBonus = 0,
+		processedPurchaseIds = {},
 
 		stats = {
 			eggsHatched = 0,
@@ -222,6 +239,99 @@ function PlayerData.removeHeldEgg(heldEggs: HeldEggs, id: number): HeldEgg?
 end
 
 --------------------------------------------------------------------------------
+-- สร้างแม่ใหม่ — จุดเดียวในเกม (UI-4)
+--------------------------------------------------------------------------------
+
+-- บันทึกว่าเคยได้ตัวละครนี้แล้ว (ดัชนี) · ⚠️ เพิ่มอย่างเดียว ไม่มีฟังก์ชันลบ
+function PlayerData.markDiscovered(data: Data, charId: string)
+	data.discovered[charId] = true
+end
+
+-- ⚠️ **ทุกทางที่ให้แม่ตัวใหม่ต้องผ่านฟังก์ชันนี้** (ฟักไข่ · debugGrantMother · ไข่ตำนาน/เทรดในอนาคต)
+-- แจก uid global จาก nextUid (เดินหน้าอย่างเดียว ห้าม reuse) + บันทึกดัชนีในที่เดียว
+-- ไม่วางแม่ลงคอก/กระเป๋าให้ — ผู้เรียกเช็คที่ว่างก่อนเรียก (กันเปลือง uid) แล้ววางเอง
+-- tools/check-mother-creation.py ตรวจว่าไม่มีใครแจก uid เองนอกไฟล์นี้
+function PlayerData.createMother(
+	data: Data,
+	ownerUserId: number,
+	charId: string,
+	weight: number,
+	obtainedAt: number
+): Mother
+	local mother: Mother = {
+		uid = Config.makeUid(ownerUserId, data.nextUid),
+		charId = charId,
+		weight = weight,
+		statuses = {},
+		obtainedAt = obtainedAt,
+		locked = false,
+	}
+	data.nextUid += 1
+	PlayerData.markDiscovered(data, charId)
+	return mother
+end
+
+--------------------------------------------------------------------------------
+-- ร้าน Robux (UI-5) — กันให้ของซ้ำ + โบนัสทะลุเพดาน
+--------------------------------------------------------------------------------
+
+-- เคยให้ของจาก PurchaseId นี้ไปแล้วหรือยัง — เรียกก่อนให้ของทุกครั้งใน ProcessReceipt
+function PlayerData.hasProcessedPurchase(data: Data, purchaseId: string): boolean
+	return table.find(data.processedPurchaseIds, purchaseId) ~= nil
+end
+
+-- ⚠️ เรียก**หลัง**ให้ของสำเร็จเท่านั้น (grant ก่อน ค่อยบันทึกว่าให้แล้ว)
+-- FIFO ยาวไม่เกิน Config.DataStore.PROCESSED_PURCHASE_LOG_CAP — ตัดตัวเก่าสุดทิ้งเมื่อเกิน
+function PlayerData.markPurchaseProcessed(data: Data, purchaseId: string)
+	if PlayerData.hasProcessedPurchase(data, purchaseId) then
+		return
+	end
+	table.insert(data.processedPurchaseIds, purchaseId)
+	local cap = Config.DataStore.PROCESSED_PURCHASE_LOG_CAP
+	while #data.processedPurchaseIds > cap do
+		table.remove(data.processedPurchaseIds, 1)
+	end
+end
+
+-- เพิ่มขั้นโบนัส damage/speed จาก Robux — ทั้งคู่เดินหน้าอย่างเดียว ไม่มีเพดาน (การ clamp
+-- ผลจริงทำที่ Config.getRobuxDamageMultiplier / Config.getEffectiveWalkSpeed ตอนใช้งาน ไม่ใช่ตรงนี้)
+function PlayerData.addRobuxDamageSteps(data: Data, steps: number)
+	data.robuxDamageBonus += steps
+end
+
+function PlayerData.addRobuxSpeedSteps(data: Data, steps: number)
+	data.robuxSpeedBonus += steps
+end
+
+-- 5C: ซื้อกระบอง**ขั้นถัดไป**หนึ่งขั้น — ตรวจ (Config.planClubPurchase) + หักเงิน + เพิ่มขั้น ในก้อนเดียวไม่มี yield คั่น
+-- ⚠️ ไม่มีพารามิเตอร์ขั้น (ข้ามขั้นไม่ได้โดยโครงสร้าง) · กดรัวก็ได้ทีละขั้นตามเงินที่มีจริง เงินไม่ติดลบ
+-- ค่า weaponLevel เดิมที่แปลก/นอกช่วง ถูก clamp ก่อนเสมอ แล้วเขียนค่าใหม่ที่ถูกต้องทับ (ไม่แตะ schema — ฟิลด์มีตั้งแต่ v1)
+-- คืน (สำเร็จไหม, เหตุผลถ้าไม่สำเร็จ, ขั้นใหม่, ราคาที่จ่าย)
+function PlayerData.buyNextClubTier(data: Data): (boolean, string?, number?, number?)
+	local ok, reason, nextTier, price = Config.planClubPurchase(data.weaponLevel, data.currency.coins)
+	if not ok or nextTier == nil or price == nil then
+		return false, reason, nil, nil
+	end
+	data.currency.coins -= price
+	data.weaponLevel = nextTier
+	return true, nil, nextTier, price
+end
+
+-- เร่งไข่ที่กำลังฟักอยู่ **ทุกฟอง** ให้ครบเวลาทันที (ตั้ง hatchAt = now) — คืนจำนวนฟองที่เร่งจริง
+-- ⚠️ ฟังก์ชันนี้ **ไม่** สร้างตัวแม่ให้ — แค่ทำให้ nowValue >= hatchAt เป็นจริง แล้วให้ผู้เรียก
+-- (EggService.processReadyHatchSlots) เดินตรรกะฟักเดิมต่อ ไม่เขียน logic ฟักซ้ำที่นี่
+function PlayerData.rushAllHatchSlots(data: Data, now: number): number
+	local rushed = 0
+	for index, slot in data.hatching do
+		if type(slot) == "table" and slot.hatchAt > now then
+			slot.hatchAt = now
+			rushed += 1
+		end
+	end
+	return rushed
+end
+
+--------------------------------------------------------------------------------
 -- session lock
 --------------------------------------------------------------------------------
 
@@ -265,6 +375,43 @@ MIGRATIONS[2] = function(data: Data): Data
 			flags[index] = false
 		end
 		raw.stageClearBonusGranted = flags
+	end
+	return data
+end
+
+-- v3 → v4 (UI-4 · ดัชนี): เพิ่ม discovered แล้วเติมจากแม่ที่มีอยู่ตอนนี้ทุกที่ (คอก + กระเป๋า + battleRoster)
+-- ⚠️ แม่ที่ขาย/ตายไปก่อนอัปเดตไม่ถูกนับ — ผู้ใช้ยอมรับแล้ว (เกมยังไม่เปิดให้เล่น)
+-- idempotent: เพิ่มอย่างเดียว ไม่ลบของเดิม รันซ้ำได้ผลเดิม · ไม่อ่าน Config (charId แปลกก็เก็บไว้เฉย ๆ)
+MIGRATIONS[3] = function(data: Data): Data
+	local raw = data :: any
+	if type(raw.discovered) ~= "table" then
+		raw.discovered = {}
+	end
+	for _, field in { "mothersInPen", "mothersInBag", "battleRoster" } do
+		local list = raw[field]
+		if type(list) == "table" then
+			for _, mother in list do
+				if type(mother) == "table" and type(mother.charId) == "string" then
+					raw.discovered[mother.charId] = true
+				end
+			end
+		end
+	end
+	return data
+end
+
+-- v4 → v5 (UI-5 · ร้าน Robux): เพิ่ม robuxDamageBonus/robuxSpeedBonus (เริ่ม 0 — ยังไม่เคยซื้อ)
+-- และ processedPurchaseIds (เริ่มว่าง — ไม่มีธุรกรรมเก่าให้จำ) · idempotent: เติมเฉพาะที่ยังไม่มี
+MIGRATIONS[4] = function(data: Data): Data
+	local raw = data :: any
+	if type(raw.robuxDamageBonus) ~= "number" then
+		raw.robuxDamageBonus = 0
+	end
+	if type(raw.robuxSpeedBonus) ~= "number" then
+		raw.robuxSpeedBonus = 0
+	end
+	if type(raw.processedPurchaseIds) ~= "table" then
+		raw.processedPurchaseIds = {}
 	end
 	return data
 end
@@ -557,7 +704,20 @@ function PlayerData.buildWorstCase(): Data
 		data.stageClearBonusGranted[index] = true
 	end
 
+	-- ดัชนีเต็มทุกตัวละคร (UI-4)
+	for charId in Config.Characters do
+		data.discovered[charId] = true
+	end
+
 	data.sessionLock = { jobId = string.rep("0", 36), placeId = 9999999999, at = 9999999999 }
+
+	-- UI-5: โบนัส Robux ซื้อสะสมไปเยอะ ๆ (ตัวเลขล้วน ไม่มีเพดาน แต่ขนาด encode คงที่ไม่ว่าจะมากแค่ไหน)
+	-- + processedPurchaseIds เต็ม cap ด้วย PurchaseId ที่ยาวเท่า GUID จริง (36 ตัวอักษร)
+	data.robuxDamageBonus = 999999
+	data.robuxSpeedBonus = 999999
+	for index = 1, Config.DataStore.PROCESSED_PURCHASE_LOG_CAP do
+		table.insert(data.processedPurchaseIds, string.format("00000000-0000-0000-0000-%012d", index))
+	end
 
 	return data
 end

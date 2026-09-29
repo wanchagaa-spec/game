@@ -59,8 +59,8 @@ row("META", "killBossMult", Config.Balance.Economy.KILL_BOSS_MULTIPLIER)
 row("META", "minUpgradeShare", Config.Balance.BalanceCheck.MIN_UPGRADE_SHARE)
 row("META", "maxUpgradeShare", Config.Balance.BalanceCheck.MAX_UPGRADE_SHARE)
 row("META", "eggsPerHour", Config.getEggsPerHour())
-row("META", "bossEggs", Config.Balance.Boss.EGGS_PER_SPAWN)
-row("META", "bossRespawn", Config.Balance.Boss.RESPAWN_SECONDS)
+row("META", "bossEggs", Config.Balance.BossCycle.MODEL_EGGS_PER_SPAWN)
+row("META", "bossRespawn", Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS)
 row("META", "players", Config.Balance.BalanceCheck.PLAYERS_PER_SERVER)
 row("META", "maxFarmRatio", Config.Balance.BalanceCheck.MAX_FARM_TO_CLEAR_RATIO)
 row("META", "eggBagCapacity", Config.Balance.Hatchery.BAG_CAPACITY)
@@ -122,6 +122,19 @@ end
 for lvl = 0, Config.Balance.Production.UPGRADE_MAX_LEVEL do
 	row("PRODUP", lvl, Config.getProductionMultiplier(lvl), Config.getProductionUpgradeCost(lvl) or 0)
 end
+-- 5C: กระบอง — ขั้น · ดาเมจ/ครั้ง · ราคา · นาทีรายได้ของด่านเป้าหมาย · วิ ตีห้องเป้าหมายคนเดียว · วิ ตีห้องถัดไปคนเดียว
+-- 5D: + วิ ตีห้องเป้าหมายคนเดียว**หลังหักเวลาหลบบอสฟาด** (ตัวที่ validate() ใช้เทียบกลางวัน)
+for tier = 1, Config.Balance.Weapon.MAX_LEVEL do
+	local room = Config.getClubTargetRoom(tier)
+	local nextRoom = if tier < Config.Balance.Stage.COUNT then tier + 1 else nil
+	row("CLUB", tier, Config.getClubVisual(tier).name, Config.getClubDamage(tier), Config.getClubPrice(tier),
+		Config.getClubPrice(tier) / Config.getReferenceIncomePerHour(room) * 60,
+		Config.getClubSoloKillSeconds(tier, room), if nextRoom then Config.getClubSoloKillSeconds(tier, nextRoom) else 0,
+		Config.getClubSoloKillSecondsWithDodge(tier, room))
+end
+-- 5D: บอสฟาด — วงวาด · วงตัดสิน · ง้าง · พัก · ดาเมจ · สัดส่วนเวลาตีจริง
+row("SLAM", Config.getBossSlamRadius(), Config.getBossSlamHitRadius(), Config.Balance.BossCycle.BOSS_SLAM_WINDUP_SECONDS,
+	Config.Balance.BossCycle.BOSS_SLAM_REST_SECONDS, Config.getBossSlamDamage(), Config.getBossDodgeUptime())
 
 -- ── ตารางหลักต่อด่าน (ผู้เล่นชั้นกลาง) ──
 for stage = 1, 9 do
@@ -180,12 +193,12 @@ for stage = 2, 9 do
 	local hrs = Config.getReferenceClearHours(stage)
 	local penIncome = Config.getPenCapacity(stage) * Config.getCoinsPerMinute(w, stage) * 60
 	local killTotal = Config.getStageDefenderRewardTotal(stage)
-	local bossPerHour = (3600 / Config.Balance.Boss.RESPAWN_SECONDS) * Config.getBossKillReward(stage)
+	local bossPerHour = (3600 / Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS) * Config.getBossKillReward(stage)
 		/ check.PLAYERS_PER_SERVER
 	local total = (penIncome + bossPerHour) * hrs + killTotal
 	local need = (Config.getPenUpgradeCost(stage) or 0)
 		+ (Config.getProductionUpgradeCost(stage - 1) or 0)
-		+ (Config.getWeaponUpgradeCost(stage) or 0)
+		+ Config.getClubPrice(stage) -- 5C: กระบองขั้น N ซื้อระหว่างด่าน N
 	local upg = Config.getStageDamageUpgradeTotal(stage)
 	row("INCOME", stage, hrs, penIncome, killTotal / hrs, bossPerHour,
 		Config.getReferenceStageIncome(stage), need + upg, upg,
@@ -295,7 +308,7 @@ row("META", "minWallThickness", Config.getMinWallThickness())
 row("META", "physicsFps", Config.Balance.SpeedUpgrade.PHYSICS_FPS)
 row("META", "thicknessSafety", Config.Balance.SpeedUpgrade.THICKNESS_SAFETY)
 row("META", "speedCostMultiplier", Config.Balance.SpeedUpgrade.COST_MULTIPLIER)
-row("META", "bossRespawn", Config.Balance.Boss.RESPAWN_SECONDS)
+row("META", "bossRespawn", Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS)
 
 -- ── ความหนากำแพงทุกชนิด ──
 for _, entry in
@@ -316,7 +329,7 @@ local nest1 = Config.getBossNestCenter(1).X - Config.getPenPlotCenter(1).X
 for level = 0, Config.Balance.SpeedUpgrade.MAX_LEVEL do
 	local v = Config.getWalkSpeed(level)
 	row("TRAVEL", level, v, nest9 / v, nest9 * 2 / v,
-		(nest9 * 2 / v) / Config.Balance.Boss.RESPAWN_SECONDS * 100, nest1 / v)
+		(nest9 * 2 / v) / Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS * 100, nest1 / v)
 end
 
 -- ── รายได้ vs รายจ่ายรวมต่อด่าน (แยกทุกบ่อ) ──
@@ -325,7 +338,7 @@ end
 for stage = 1, 9 do
 	local income = Config.getReferenceStageIncome(stage)
 	local dmg = Config.getStageDamageUpgradeTotal(stage)
-	local weapon = Config.getWeaponUpgradeCost(stage) or 0
+	local weapon = Config.getClubPrice(stage) -- 5C: กระบองขั้น N
 	local pen = Config.getPenUpgradeCost(stage) or 0
 	local prod = Config.getProductionUpgradeCost(stage - 1) or 0
 	local speed = if stage <= Config.Balance.SpeedUpgrade.MAX_LEVEL
@@ -344,7 +357,7 @@ do
 	for stage = 1, 9 do
 		local income = Config.getReferenceStageIncome(stage)
 		local spend = Config.getStageDamageUpgradeTotal(stage)
-			+ (Config.getWeaponUpgradeCost(stage) or 0)
+			+ Config.getClubPrice(stage) -- 5C: กระบองขั้น N ซื้อระหว่างด่าน N
 			+ (Config.getPenUpgradeCost(stage) or 0)
 			+ (Config.getProductionUpgradeCost(stage - 1) or 0)
 		bank += income - spend
@@ -369,10 +382,10 @@ end
 do
 	local w = check.REFERENCE_WEIGHT[1]
 	local perHour = Config.getPenCapacity(1) * Config.getCoinsPerMinute(w, 1) * 60
-		+ (3600 / Config.Balance.Boss.RESPAWN_SECONDS) * Config.getBossKillReward(1) / check.PLAYERS_PER_SERVER
+		+ (3600 / Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS) * Config.getBossKillReward(1) / check.PLAYERS_PER_SERVER
 	local needed = Config.getSpeedUpgradeCost(0) or 0
 	local others = Config.getStageDamageUpgradeTotal(1)
-		+ (Config.getWeaponUpgradeCost(1) or 0)
+		+ Config.getClubPrice(1) -- 5C: ขั้น 1 ฟรี
 		+ (Config.getPenUpgradeCost(1) or 0)
 		+ (Config.getProductionUpgradeCost(0) or 0)
 	row("FIRSTSPEED", perHour, needed, needed / perHour, others, (needed + others) / perHour)
@@ -389,7 +402,7 @@ do
 		end
 		local w = check.REFERENCE_WEIGHT[stage]
 		local incomePerHour = Config.getPenCapacity(stage) * Config.getCoinsPerMinute(w, stage) * 60
-			+ (3600 / Config.Balance.Boss.RESPAWN_SECONDS) * Config.getBossKillReward(stage) / check.PLAYERS_PER_SERVER
+			+ (3600 / Config.Balance.BossCycle.MODEL_BOSS_SPAWN_SECONDS) * Config.getBossKillReward(stage) / check.PLAYERS_PER_SERVER
 		local capDps = Config.getReferenceDps(stage)
 		local capLevel = Config.getMaxDamageLevel(stage)
 		local level = Config.getMaxDamageLevel(stage - 1)

@@ -231,7 +231,7 @@ EggService.debugWipeSavedData(player, player.Name)  -- ต้องส่งช�
 
 ---
 
-## คำสั่งบอส + วงจรกลางวัน/กลางคืน + ไข่บอส (Phase 5A · 5B · 5B-2) — อยู่ที่ `BossService`
+## คำสั่งบอส + วงจรกลางวัน/กลางคืน + ไข่บอส + บอสฟาด/เลือด (Phase 5A · 5B · 5B-2 · 5D) — อยู่ที่ `BossService`
 
 เรียกผ่าน**สะพานเดียวกัน** (`ServerStorage.EggServiceDebug`) — สะพานหาชื่อใน `EggService` ก่อน ไม่เจอค่อยหาใน `BossService`
 ทุกคำสั่งคืน**ข้อความสรุปสถานะ** (phase · เหลือกี่วิ · บอสยังอยู่กี่ห้อง · ล็อกใครเพราะห้องไหน · บรรทัดละห้อง) ให้ดูใน Output ทันที
@@ -248,6 +248,8 @@ EggService.debugWipeSavedData(player, player.Name)  -- ต้องส่งช�
 | `debugKillBoss(player, room?)` | ฆ่าบอส**ห้อง `room`** ในนามผู้เล่นคนนั้น (ดาเมจเท่า HP ที่เหลือ) → "กำจัดบอสห้อง N แล้ว!" · ปลดล็อกอัญเชิญ**เฉพาะคนที่ติดเพราะห้องนั้น** · ไข่ห้องนั้นหยิบได้ · **จ่ายเงินบอสห้องนั้น**ตามกติกาจริง (`Config.getBossKillReward(ห้อง)` · ต้องยืนอยู่ในห้องนั้นถึงได้) |
 | `debugBossStatus()` | ดูสถานะอย่างเดียว ไม่เปลี่ยนอะไร — บรรทัดแรก phase/เวลา/ล็อก · ตามด้วยบรรทัดละห้อง (HP · ผู้ทำดาเมจ · ไข่) |
 | `debugBossEggs(room?)` | น้ำหนัก · วาง/ถือ/เก็บแล้ว · ใครถือ ของไข่ + บอกว่าหยิบได้หรือยัง · ใส่ห้อง = ห้องเดียว · **ไม่ใส่ = ทุกห้อง** |
+| `debugBossAttack(on)` (5D) | เปิด/ปิด**บอสฟาด**ทั้งเซิร์ฟชั่วคราว · รับ `true/false` · `"on"/"off"` · `1/0` · ปิด = วงแดงที่ง้างค้างหายทันที ไม่มีใครโดน · ไม่แตะ `BossCycle.BOSS_ATTACK_ENABLED` (เซิร์ฟเปิดใหม่กลับเป็นค่าใน Config = เปิด) · ค่าแปลก = ไม่แตะอะไร |
+| `debugSetHealth(player, n)` (5D) | ตั้งเลือดผู้เล่น 0–เลือดเต็ม (100) · นับเป็น "เพิ่งโดนตี" → ยังไม่ฟื้นจนไม่โดนตีครบ 5 วิ · ⚠️ ยืนในเซฟโซน = เต็มทันทีใน 0.25 วิ (กติกา) — ทดสอบฟื้นเลือดให้ยืนในเลน · `0` = ตาย (ในสนามรบ → เกิดหน้าทางเข้าเลน · ในเซฟโซน → คอก) |
 
 ```lua
 local P1 = game.Players:GetPlayers()[1]
@@ -262,6 +264,10 @@ game.ServerStorage.EggServiceDebug:Invoke("debugKillBoss", P1, 5)         -- ห
 print(game.ServerStorage.EggServiceDebug:Invoke("debugBossStatus"))
 print(game.ServerStorage.EggServiceDebug:Invoke("debugBossEggs"))         -- ทุกห้อง
 print(game.ServerStorage.EggServiceDebug:Invoke("debugBossEggs", 3))      -- ห้อง 3
+print(game.ServerStorage.EggServiceDebug:Invoke("debugBossAttack", false)) -- 5D: ปิดบอสฟาดทั้งเซิร์ฟ (ตีบอสสบาย ๆ)
+print(game.ServerStorage.EggServiceDebug:Invoke("debugBossAttack", true))  -- 5D: เปิดกลับ
+print(game.ServerStorage.EggServiceDebug:Invoke("debugSetHealth", P1, 40)) -- 5D: เลือด 40 (ฟื้นเต็มเมื่อไม่โดนตี 5 วิ)
+print(game.ServerStorage.EggServiceDebug:Invoke("debugSetHealth", P1, 0))  -- 5D: ตายทันที (ทดสอบจุดเกิดใหม่)
 ```
 
 - อยากเห็นข้อความคืนมา → ห่อด้วย `print(...)` (Output เห็นบรรทัด `[BossService] ...` อยู่แล้วทุกครั้งที่ phase เปลี่ยน/บอสตาย)
@@ -269,7 +275,8 @@ print(game.ServerStorage.EggServiceDebug:Invoke("debugBossEggs", 3))      -- ห
 - ทดสอบล็อกอัญเชิญเร็ว ๆ: `debugBossNight` → `debugBossDay` (บอสทุกห้องอยู่) → `debugSetStageProgress(player, 2, 0, 1)`
   (ด่าน 2 เหลือ HP 1) → เปิดอัญเชิญ → ทหารพังกำแพงด่าน 2 → **ติดล็อกเพราะบอสห้อง 2** · `debugKillBoss(P1, 3)` ไม่ปลด ·
   `debugKillBoss(P1, 2)` ปลด · ขั้นตอนเต็มใน `docs/phase5-test-checklist.md` §14
-- ⚠️ ยังไม่มีคำสั่งตั้ง `weaponLevel` (ร้านอาวุธเป็น 5C) — อาวุธขั้น 1 ตีบอสห้อง 4 ขึ้นไปตายไม่ทันในวันเดียว ใช้ `debugKillBoss` แทนตอนทดสอบ
+- ~~ยังไม่มีคำสั่งตั้ง `weaponLevel`~~ → 5C: `debugSetWeaponTier(player, ขั้น)` (ข้างบน) · หรือ `debugKillBoss` ข้ามการตีจริง
+- 5D: บอสฟาดทำงานเฉพาะ**กลางวัน + บอสห้องนั้นยังอยู่ + มีคนในวงแดง** — ทดสอบ: `debugBossNight` → `debugBossDay` → เดินเข้าใกล้บอสห้อง 1
 
 ---
 

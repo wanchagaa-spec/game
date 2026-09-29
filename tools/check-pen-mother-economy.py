@@ -1136,6 +1136,45 @@ do
 	check("  ข้อความ", messageAll, "ผ่านครบทุกด่านแล้ว ไม่มีด่านให้ส่งแม่ไปรบ")
 end
 
+print("\n━━ sync (5E-1): ฟิลด์การรบถึง client ครบ — รวม battle (สนาม 6 ต่อ 6) ━━")
+do
+	-- ⚠️ เคยพลาดจริง: buildSyncFields มี battle แต่ buildSyncPayload ลอกฟิลด์ทีละตัวแล้วลืม → client ไม่เห็นทหารเลย
+	local player, data = freshPlayer("SyncBattle")
+	table.clear(data.mothersInPen)
+	data.stageProgress[1] = { defendersRemaining = 0, wallHpRemaining = 0 }
+	local key = Config.makeStackKey("wukong", 10000, {})
+	table.clear(data.children)
+	data.children[key] = 20
+	data.releaseOrder = { key }
+	data.summonEnabled = true
+	local meta = CombatService.getOrCreateMeta(player.UserId)
+	CombatService.tick(data, meta, 1)
+	EggService.sync(player)
+	local payload = firedTo(player, Config.RemoteNames.FARM_STATE_SYNC)[1]
+	local expected = CombatService.buildSyncFields(data, false, meta)
+	local missing = {}
+	for field, value in expected do
+		if value ~= nil and payload[field] == nil then
+			table.insert(missing, field)
+		end
+	end
+	table.sort(missing)
+	check("ทุกฟิลด์จาก CombatService.buildSyncFields ถึง payload จริง", table.concat(missing, ","), "")
+	local battle = payload.battle
+	check("  payload.battle มีทหารเรา 6 ช่อง", battle and #battle.our, 6)
+	check("  payload.battle มีศัตรู 6 ช่อง", battle and #battle.enemies, 6)
+	check("  ด่านที่กำลังตี = 2", battle and battle.stage, 2)
+	local shown = nil
+	for _, stack in payload.children do
+		if stack.key == key then
+			shown = stack.count
+		end
+	end
+	check("  จำนวนในกองที่โชว์หักลูกบนสนาม 6 ตัวแล้ว (20 → 14)", shown, 14)
+	check("  กองจริงยังนับลูกบนสนามอยู่ (หักตอนตาย)", data.children[key] >= 14, true)
+	CombatService.clearMeta(player.UserId)
+end
+
 print("\n━━ sync (UI-3): พลังต่อตัวของกองลูก + กองที่ติ๊กไว้แต่หมด (รอผลิต) ━━")
 do
 	local player, data = freshPlayer("SyncWaiting")

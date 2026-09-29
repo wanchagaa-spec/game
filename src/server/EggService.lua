@@ -416,6 +416,9 @@ local function buildSyncPayload(data: Data, bossLocked: boolean?, combatMeta: an
 		-- Phase 5A: ล็อกอัญเชิญเพราะบอส — nil = เปิดอัญเชิญได้ · หน้าต่างอัญเชิญปิดปุ่มส่ง + โชว์ข้อความนี้
 		summonBlockReason = combat.summonBlockReason,
 		bossLocked = combat.bossLocked,
+		-- 5E-1: สนามรบ 6 ต่อ 6 + รวมพล + ป้อม (TroopRenderer · HUD · หน้าต่างอัญเชิญ)
+		-- ⚠️ ฟิลด์ใหม่ใน CombatService.buildSyncFields ต้องเติมตรงนี้ด้วย — tools/check-pen-mother-economy.py ตรวจว่าครบทุกตัว
+		battle = combat.battle,
 	}
 end
 

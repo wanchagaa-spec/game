@@ -3,8 +3,10 @@
 --
 -- ⚠️ วาดตาม **สถานะจริงจาก server** (payload.battle ใน FarmStateSync ~1 ครั้ง/วิ) ไม่จำลองอะไรเองแล้ว
 --   ช่อง 1..6 ฝั่งเรา (ช่อง 1 = หน้าสุด · ช่อง 6 = หลังสุด ที่แม่ยืน) ยืนตรงข้ามศัตรูช่องเดียวกัน
---   ศัตรูยืนแถวหน้ากำแพงด่านที่กำลังตี · ตัวใหญ่ใหญ่กว่า · ศัตรูหมด = ทหารเราเดินเข้าไปตีกำแพง
---   แถบเลือดเหนือหัวทุกตัว · ป้อม = กล่องบนกำแพง + เส้นยิงสั้น ๆ ไปที่ตัวที่โดน
+--   **เดินทัพ** (ผู้ใช้สั่ง · server จับเวลาจริง `battle.line/marchFrom/marchRemaining`):
+--     ลงสนามจากสนามว่าง → กองทัพเราเดินออกจากแท่นอัญเชิญ + ศัตรูเดินออกจากหน้ากำแพงพร้อมกัน เจอกันกึ่งกลางเลน
+--     (Config.getBattleMeetX · นอกระยะป้อม) · ศัตรูหมด → เดินต่อไปตีกำแพง · ศัตรูหมดตั้งแต่แรก → เดินจากแท่นถึงกำแพงเลย
+--   ตัวใหญ่ใหญ่กว่า · แถบเลือดเหนือหัวทุกตัว · ป้อม = กล่องบนกำแพง + เส้นยิง **เฉพาะตอนกองทัพเดินถึงกำแพงแล้ว** (`turretFiring`)
 -- ⚠️ ไม่ตัดสินอะไรเลย (server เป็นเจ้าของทุกอย่าง) · ตัวไหน "ใหม่" ดูจากเลือดที่เพิ่มขึ้น/ชนิดเปลี่ยน
 --
 -- ⚠️ **ห้ามใช้ Humanoid** — โมเดลคนบล็อก ๆ ประกอบจาก Part ขยับทั้งก้อนด้วย Model:PivotTo()
@@ -32,11 +34,14 @@ local MOTHER_COLOR = Color3.fromRGB(245, 195, 60)
 local ENEMY_COLOR = Color3.fromRGB(170, 45, 45)
 local BIG_ENEMY_SCALE = 1.7
 local MOTHER_SCALE = 1.25
-local ENEMY_LINE_GAP = 10 -- แถวศัตรูห่างจากกำแพง
-local LINE_GAP = 9 -- แถวเราห่างจากแถวศัตรู
+local ENEMY_LINE_GAP = 10 -- แถวศัตรู (ยังไม่เดินออกมา) ห่างจากกำแพง
+local LINE_GAP = 9 -- แถวเราห่างจากแถวศัตรูตอนเจอกันกึ่งกลาง (ข้างละครึ่งจากจุดกึ่งกลาง)
 local RANK_STEP = 1.5 -- ช่องหลัง ๆ ถอยหลังนิดหน่อย (แม่ยืนหลังสุด)
-local WALL_ATTACK_GAP = 6 -- ศัตรูหมดแล้ว ทหารเรายืนห่างกำแพงเท่านี้
+local WALL_ATTACK_GAP = 6 -- ถึงกำแพงแล้ว ทหารเรายืนห่างกำแพงเท่านี้
 local MOVE_LERP_PER_SECOND = 6
+local MARCH_LERP_PER_SECOND = 20 -- ระหว่างเดินทัพเป้าเลื่อนทุกเฟรม → ตามให้ทัน (ห่างเป้า ≈ ความเร็ว ÷ ค่านี้)
+local MARCH_BOB_SPEED = 12
+local MARCH_BOB_HEIGHT = 0.35
 local SWING_SPEED = 9
 local SWING_DISTANCE = 0.6
 local HP_BAR_WIDTH = 3.2
@@ -92,6 +97,7 @@ type Unit = {
 	hp: number,
 	target: CFrame,
 	scale: number,
+	slot: number,
 }
 
 local function buildPersonModel(color: Color3, name: string): Model
@@ -157,7 +163,7 @@ local function attachHpBar(model: Model, color: Color3, scale: number): Frame
 	return fill
 end
 
-local function newUnit(kind: string, target: CFrame, isEnemy: boolean): Unit
+local function newUnit(kind: string, slot: number, target: CFrame, isEnemy: boolean): Unit
 	local color = if isEnemy then ENEMY_COLOR elseif kind == "mother" then MOTHER_COLOR else CHILD_COLOR
 	local scale = if kind == "big" then BIG_ENEMY_SCALE elseif kind == "mother" then MOTHER_SCALE else 1
 	local model = buildPersonModel(color, if isEnemy then "Enemy" else "Troop")
@@ -174,6 +180,7 @@ local function newUnit(kind: string, target: CFrame, isEnemy: boolean): Unit
 		hp = math.huge,
 		target = target,
 		scale = scale,
+		slot = slot,
 	}
 end
 
@@ -199,16 +206,74 @@ local function facing(position: Vector3, towardX: number): CFrame
 	return CFrame.lookAt(position, Vector3.new(towardX, position.Y, position.Z))
 end
 
-local function ourTarget(slot: number, wallX: number, enemiesPresent: boolean): CFrame
-	local enemyX = wallX - ENEMY_LINE_GAP
-	local frontX = if enemiesPresent then enemyX - LINE_GAP else wallX - WALL_ATTACK_GAP
-	local x = frontX - (slot - 1) * RANK_STEP
-	return facing(Vector3.new(x, 0, slotZ(slot, x)), wallX + 100)
+-- แนวรบล่าสุดจาก server + เวลาที่ได้รับ (เดินทัพต่อเองระหว่างรอ sync ถัดไป ~1 วิ · sync ใหม่แก้ให้ตรงเสมอ)
+local line = {
+	wall = 0,
+	pedestalX = 0,
+	meetX = 0,
+	at = nil :: string?, -- "middle" | "wall" | nil (สนามว่าง)
+	from = nil :: string?, -- "pedestal" | "middle" | "wall"
+	remaining = 0,
+	duration = 0,
+	receivedAt = 0,
+	enemiesAtMiddle = false,
+}
+
+local function marchRemainingNow(): number
+	return math.max(0, line.remaining - (os.clock() - line.receivedAt))
 end
 
-local function enemyTarget(slot: number, wallX: number): CFrame
-	local x = wallX - ENEMY_LINE_GAP
-	return facing(Vector3.new(x, 0, slotZ(slot, x)), wallX - 100)
+local function isMarching(): boolean
+	return line.at ~= nil and line.duration > 0 and marchRemainingNow() > 0
+end
+
+local function marchProgress(): number
+	if line.duration <= 0 then
+		return 1
+	end
+	return 1 - marchRemainingNow() / line.duration
+end
+
+-- หน้าแถวของเราที่แต่ละจุด (แท่นอัญเชิญ · กึ่งกลางเลน · หน้ากำแพง)
+local function ourAnchorX(where: string?): number
+	if where == "pedestal" then
+		return line.pedestalX
+	elseif where == "middle" then
+		return line.meetX - LINE_GAP / 2
+	end
+	return line.wall - WALL_ATTACK_GAP
+end
+
+local function ourFrontX(): number
+	local goal = ourAnchorX(line.at)
+	if line.from == nil or not isMarching() then
+		return goal
+	end
+	local start = ourAnchorX(line.from)
+	return start + (goal - start) * marchProgress()
+end
+
+-- ศัตรู: ยืนหน้ากำแพงจนกว่ากองทัพเราจะเดินออกมา → เดินออกมาพร้อมกันไปเจอกันกึ่งกลาง → ยืนกึ่งกลางต่อ
+local function enemyFrontX(): number
+	local home = line.wall - ENEMY_LINE_GAP
+	local middle = line.meetX + LINE_GAP / 2
+	if line.enemiesAtMiddle then
+		return middle
+	end
+	if line.at == "middle" and isMarching() then
+		return home + (middle - home) * marchProgress()
+	end
+	return home
+end
+
+local function ourTarget(slot: number): CFrame
+	local x = ourFrontX() - (slot - 1) * RANK_STEP
+	return facing(Vector3.new(x, 0, slotZ(slot, x)), line.wall + 100)
+end
+
+local function enemyTarget(slot: number): CFrame
+	local x = enemyFrontX() + (if slot == 1 then 0 else RANK_STEP)
+	return facing(Vector3.new(x, 0, slotZ(slot, x)), line.wall - 1000)
 end
 
 --------------------------------------------------------------------------------
@@ -288,7 +353,6 @@ end
 
 local ours: { [number]: Unit } = {}
 local enemies: { [number]: Unit } = {}
-local fighting = false
 
 local function clearSide(side: { [number]: Unit }, withEffect: boolean)
 	for slot, unit in side do
@@ -310,7 +374,7 @@ local function syncSide(side: { [number]: Unit }, entries: { any }, isEnemy: boo
 				removeUnit(existing, true)
 				existing = nil
 			end
-			local current: Unit = existing or newUnit(entry.kind, target, isEnemy)
+			local current: Unit = existing or newUnit(entry.kind, slot, target, isEnemy)
 			side[slot] = current
 			current.target = target
 			current.hp = entry.hp
@@ -336,30 +400,34 @@ function TroopRenderer.updateFromPayload(payload: any)
 		clearSide(ours, false)
 		clearSide(enemies, false)
 		removeTurret()
-		fighting = false
+		line.at = nil
 		return
 	end
 	local wall = wallX :: number
+	line.wall = wall
+	line.pedestalX = Config.getSummonPedestalCenter().X
+	line.meetX = Config.getBattleMeetX(stage) or (line.pedestalX + wall) / 2
+	line.at = if payload.summonEnabled and (battle.line == "middle" or battle.line == "wall") then battle.line else nil
+	line.from = if type(battle.marchFrom) == "string" then battle.marchFrom else nil
+	line.remaining = if type(battle.marchRemaining) == "number" then battle.marchRemaining else 0
+	line.duration = if type(battle.marchDuration) == "number" then battle.marchDuration else 0
+	line.receivedAt = os.clock()
+	line.enemiesAtMiddle = battle.enemiesAtMiddle == true
 
 	-- ปิดอัญเชิญ = ทหารเรากลับคลัง (ไม่ใช่ตาย) → เก็บเงียบ ๆ ไม่มีเอฟเฟกต์ · ศัตรูบาดเจ็บยังยืนรอ
 	if not payload.summonEnabled then
 		clearSide(ours, false)
 	end
-	local enemyEntries = battle.enemies or {}
-	syncSide(enemies, enemyEntries, true, function(slot: number): CFrame
-		return enemyTarget(slot, wall)
-	end)
-	local enemiesPresent = #enemyEntries > 0
+	syncSide(enemies, battle.enemies or {}, true, enemyTarget)
 	if payload.summonEnabled then
-		syncSide(ours, battle.our or {}, false, function(slot: number): CFrame
-			return ourTarget(slot, wall, enemiesPresent)
-		end)
+		-- ตัวใหม่ตอนเพิ่งเริ่มเดินทัพ = โผล่ที่แท่นอัญเชิญ (หน้าแถว ณ ตอนนี้) · ตัวที่ลงแทนระหว่างสู้ = โผล่หลังแถวแล้วเดินเข้าช่อง
+		syncSide(ours, battle.our or {}, false, ourTarget)
 	end
-	fighting = next(ours) ~= nil
 
+	-- ป้อมตั้งอยู่บนกำแพงเสมอ · ยิงเฉพาะตอนกองทัพเดินถึงกำแพงแล้ว (สู้กันกึ่งกลาง = นอกระยะ)
 	if battle.turretActive then
 		ensureTurret(wall)
-		local target = if battle.turretShots and battle.turretShots > 0 and battle.turretTarget
+		local target = if battle.turretFiring and battle.turretShots and battle.turretShots > 0 and battle.turretTarget
 			then ours[battle.turretTarget]
 			else nil
 		if target then
@@ -373,15 +441,20 @@ function TroopRenderer.updateFromPayload(payload: any)
 end
 
 --------------------------------------------------------------------------------
--- เฟรม — เลื่อนเข้าช่อง + ท่าฟันเล็ก ๆ ตอนกำลังสู้ (ภาพล้วน)
+-- เฟรม — เดินทัพ (เป้าเลื่อนทุกเฟรม) · เลื่อนเข้าช่อง · ท่าฟันเล็ก ๆ ตอนกำลังสู้ (ภาพล้วน)
 --------------------------------------------------------------------------------
 
-local function stepSide(side: { [number]: Unit }, alpha: number, swing: number)
+-- side = ฝั่งไหน · walking = ฝั่งนี้กำลังเดินอยู่ · fighting = ฝั่งนี้กำลังตี (ศัตรูตรงหน้า/กำแพง)
+local function stepSide(side: { [number]: Unit }, targetOf: (number) -> CFrame, delta: number, walking: boolean, fighting: boolean)
+	local alpha = math.clamp(delta * (if walking then MARCH_LERP_PER_SECOND else MOVE_LERP_PER_SECOND), 0, 1)
+	local clock = os.clock()
 	for slot, unit in side do
 		if unit.model.Parent then
-			-- พุ่งไปข้างหน้า (−Z ของโมเดล = ทิศที่หันอยู่) เป็นจังหวะ ๆ ตอนกำลังสู้
-			local lunge = if fighting then math.max(0, math.sin(swing + slot * 1.3)) * SWING_DISTANCE else 0
-			local goal = unit.target * CFrame.new(0, 0, -lunge)
+			unit.target = targetOf(unit.slot)
+			-- เดิน = เด้งขึ้นลงเล็กน้อย · สู้ = พุ่งไปข้างหน้า (−Z ของโมเดล = ทิศที่หันอยู่) เป็นจังหวะ ๆ
+			local bob = if walking then math.abs(math.sin(clock * MARCH_BOB_SPEED + slot)) * MARCH_BOB_HEIGHT else 0
+			local lunge = if fighting then math.max(0, math.sin(clock * SWING_SPEED + slot * 1.3)) * SWING_DISTANCE else 0
+			local goal = unit.target * CFrame.new(0, bob, -lunge)
 			local current = unit.model:GetPivot()
 			unit.model:PivotTo(current:Lerp(goal, alpha))
 		end
@@ -395,10 +468,11 @@ function TroopRenderer.start()
 	end
 	ensureFolder()
 	RunService.Heartbeat:Connect(function(delta: number)
-		local alpha = math.clamp(delta * MOVE_LERP_PER_SECOND, 0, 1)
-		local swing = os.clock() * SWING_SPEED
-		stepSide(ours, alpha, swing)
-		stepSide(enemies, alpha, swing)
+		local marching = isMarching()
+		local enemiesWalking = marching and line.at == "middle" and not line.enemiesAtMiddle
+		local oursFighting = line.at ~= nil and not marching and (line.at == "wall" or next(enemies) ~= nil)
+		stepSide(ours, ourTarget, delta, marching, oursFighting)
+		stepSide(enemies, enemyTarget, delta, enemiesWalking, oursFighting and line.at == "middle")
 	end)
 end
 

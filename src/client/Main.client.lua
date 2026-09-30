@@ -496,7 +496,12 @@ local function updateCombatHud()
 		local gatherText = if battle and battle.gathering
 			then ` · ⏳ กำลังรวมพล {battle.available}/{battle.gatherTarget}`
 			else ""
-		combatStageLabel.Text = `กำลังตีด่าน {activeStage}{gatherText}`
+		-- 5E-1 เดินทัพ: server จับเวลาเดินจริง (ระหว่างเดินไม่มีใครตีใคร) → บอกให้รู้ว่าทำไมหลอดยังไม่ลด
+		local marchText = ""
+		if battle and battle.line and (battle.marchRemaining or 0) > 0 then
+			marchText = if battle.line == "wall" then " · 🚶 เดินทัพไปกำแพง" else " · 🚶 เดินทัพไปเจอศัตรู"
+		end
+		combatStageLabel.Text = `กำลังตีด่าน {activeStage}{gatherText}{marchText}`
 
 		local info = lastPayload.stageProgress[activeStage]
 		local defendersRatio = 1

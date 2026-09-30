@@ -2162,22 +2162,52 @@ do
 	check("  ความสว่าง/exposure กลับค่าเดิมของเกมนี้", lighting2.Brightness == 3 and lighting2.ExposureCompensation == 0.2, true)
 end
 
-print("\n━━ TroopRenderer: สนามรบ 6 ต่อ 6 ตามสถานะจาก server (5E-1 ภาพชั่วคราว) ━━")
+print("\n━━ TroopRenderer: สนามรบ 6 ต่อ 6 ตามสถานะจาก server (5E-1 ภาพชั่วคราว · เดินทัพเจอกันกึ่งกลาง) ━━")
 do
 	local TroopRenderer = loaded.TroopRenderer
 	local effects = loaded.CombatEffects
 	local troops = workspaceMock
-	local function countModels(name)
+	local STAGE = 3
+	local pedestalX = Config.getSummonPedestalCenter().X
+	local meetX = Config.getBattleMeetX(STAGE)
+	local wallX = Config.getWallX(STAGE)
+	local march = Config.getArmyMarchSeconds(STAGE)
+	local function models(name)
+		local list = {}
 		local folderNow = troops:FindFirstChild("LocalTroops")
-		local n = 0
 		if folderNow then
 			for _, child in folderNow:GetChildren() do
 				if child.Name == name then
-					n += 1
+					table.insert(list, child)
 				end
 			end
 		end
-		return n
+		return list
+	end
+	local function countModels(name)
+		return #models(name)
+	end
+	-- ตำแหน่งที่โมเดลถูกวางครั้งล่าสุด (mock: Lerp คืนตัวเดิม → ตัวที่มีอยู่แล้วไม่ขยับ · ตัวใหม่ = จุดเกิด)
+	local function pivotXs(name)
+		local xs = {}
+		for _, child in models(name) do
+			local pivot = rawget(child, "__props").__pivot
+			if pivot then
+				table.insert(xs, pivot.Position.X)
+			end
+		end
+		return xs
+	end
+	local function allWithin(xs, low, high)
+		if #xs == 0 then
+			return false
+		end
+		for _, x in xs do
+			if x < low or x > high then
+				return false
+			end
+		end
+		return true
 	end
 	local function entries(kinds, hp)
 		local list = {}
@@ -2186,27 +2216,36 @@ do
 		end
 		return list
 	end
+	-- เพิ่งลงสนาม: เดินทัพจากแท่นอัญเชิญไปกึ่งกลาง (เพิ่งเริ่ม) · ศัตรูยังยืนหน้ากำแพง · ป้อมยังไม่ยิง
 	local payload = {
 		summonEnabled = true,
 		battle = {
-			stage = 3,
+			stage = STAGE,
 			our = entries({ "child", "child", "child", "child", "child", "mother" }, 10),
 			enemies = entries({ "big", "small", "small", "small", "small", "small" }, 10),
 			turretActive = true,
-			turretShots = 1,
-			turretTarget = 1,
+			turretFiring = false,
+			turretShots = 0,
+			turretTarget = nil,
+			line = "middle",
+			marchFrom = "pedestal",
+			marchRemaining = march,
+			marchDuration = march,
+			enemiesAtMiddle = false,
 		},
 	}
 	check("start ไม่ error", pcall(TroopRenderer.start))
-	check("sync สนามเต็ม ไม่ error", pcall(TroopRenderer.updateFromPayload, payload))
+	check("sync สนามเต็ม (เริ่มเดินทัพ) ไม่ error", pcall(TroopRenderer.updateFromPayload, payload))
 	check("  ทหารเรา 6 ตัว", countModels("Troop"), 6)
 	check("  ศัตรู 6 ตัว", countModels("Enemy"), 6)
-	check("  ป้อม 1 อัน", countModels("Turret"), 1)
-	check("  มีเส้นยิงของป้อม", countModels("TurretShot") >= 1, true)
+	check("  ป้อม 1 อัน (ตั้งอยู่บนกำแพง)", countModels("Turret"), 1)
+	check("  ทหารเราโผล่ที่แท่นอัญเชิญ (ไม่ใช่หน้าป้อม)", allWithin(pivotXs("Troop"), pedestalX - 10, pedestalX + 2), true)
+	check("  ศัตรูยังยืนหน้ากำแพงของตัวเอง", allWithin(pivotXs("Enemy"), wallX - 12, wallX - 8), true)
+	check("  เดินทัพอยู่ → ป้อมไม่ยิง (ไม่มีเส้นยิง)", countModels("TurretShot"), 0)
 	check("  ทหาร + ศัตรูบนจอไม่เกิน 12", countModels("Troop") + countModels("Enemy") <= 12, true)
 	check("  ตัวใหญ่ถูกขยาย", (function()
-		for _, child in troops:FindFirstChild("LocalTroops"):GetChildren() do
-			if child.Name == "Enemy" and rawget(child, "__props").__scale then
+		for _, child in models("Enemy") do
+			if rawget(child, "__props").__scale then
 				return true
 			end
 		end
@@ -2221,10 +2260,12 @@ do
 		return true
 	end)(), true)
 	services.RunService.Heartbeat:Fire(1 / 60)
-	check("  เฟรมเลื่อนทหารไม่ error", true)
+	check("  เฟรมเดินทัพไม่ error", true)
 
-	-- ศัตรูช่อง 2 ตาย (ไม่มีตัวมาแทน) + ช่อง 1 ของเราตายแล้วตัวใหม่ลงแทน (เลือดเพิ่ม)
+	-- เดินถึงกึ่งกลางแล้ว: ศัตรูยืนกึ่งกลาง · ศัตรูช่อง 2 ตาย (ไม่มีตัวมาแทน) + ช่อง 1 ของเราตายแล้วตัวใหม่ลงแทน (เลือดเพิ่ม)
 	local deathsBefore = effects.deaths
+	payload.battle.marchRemaining = 0
+	payload.battle.enemiesAtMiddle = true
 	payload.battle.enemies = entries({ "big", nil, "small", "small", "small", "small" }, 5)
 	payload.battle.our[1].hp = 3
 	TroopRenderer.updateFromPayload(payload)
@@ -2232,11 +2273,42 @@ do
 	check("ศัตรูหายแล้วสนามอัปเดต ไม่ error", pcall(TroopRenderer.updateFromPayload, payload))
 	check("  ศัตรูเหลือ 5", countModels("Enemy"), 5)
 	check("  เล่นเอฟเฟกต์ตาย (ศัตรู 1 + ทหารเราที่ถูกแทน 1)", effects.deaths - deathsBefore, 2)
+	services.RunService.Heartbeat:Fire(1 / 60)
+	check("  เฟรมสู้กันกึ่งกลางไม่ error", true)
+	local enemyXsBefore = pivotXs("Enemy")
+	payload.battle.enemies = entries({ "big", "small", "small", "small", "small", "small" }, 5)
+	TroopRenderer.updateFromPayload(payload)
+	local newEnemyX
+	for _, x in pivotXs("Enemy") do
+		if not table.find(enemyXsBefore, x) then
+			newEnemyX = x
+		end
+	end
+	check("  ศัตรูตัวที่ลงแทนโผล่ที่แนวกึ่งกลาง (นอกระยะป้อม)", newEnemyX ~= nil and math.abs(newEnemyX - meetX) <= 8, true)
+	check("  กึ่งกลางห่างกำแพงเท่าห่างแท่น", math.abs((wallX - meetX) - (meetX - pedestalX)) < 1e-9, true)
+	check("  สู้กันกึ่งกลาง → ป้อมยังไม่ยิง", countModels("TurretShot"), 0)
+
+	-- ศัตรูหมด → เดินต่อไปกำแพง แล้วป้อมยิง
+	payload.battle.enemies = {}
+	payload.battle.line = "wall"
+	payload.battle.marchFrom = "middle"
+	payload.battle.marchRemaining = 0
+	payload.battle.turretFiring = true
+	payload.battle.turretShots = 1
+	payload.battle.turretTarget = 1
+	check("ถึงกำแพง + ป้อมยิง ไม่ error", pcall(TroopRenderer.updateFromPayload, payload))
+	check("  มีเส้นยิงของป้อม", countModels("TurretShot") >= 1, true)
+	services.RunService.Heartbeat:Fire(1 / 60)
+	check("  เฟรมตีกำแพงไม่ error", true)
 
 	-- ปิดอัญเชิญ → ทหารเรากลับคลัง (เก็บเงียบ ๆ) · ศัตรูบาดเจ็บยังยืนอยู่
+	payload.battle.enemies = entries({ "big", nil, "small", "small", "small", "small" }, 5)
+	payload.battle.line = "middle"
+	TroopRenderer.updateFromPayload(payload)
 	deathsBefore = effects.deaths
 	payload.summonEnabled = false
 	payload.battle.our = {}
+	payload.battle.line = nil
 	TroopRenderer.updateFromPayload(payload)
 	check("ปิดอัญเชิญ → ทหารเราหายหมด", countModels("Troop"), 0)
 	check("  ไม่เล่นเอฟเฟกต์ตาย (กลับคลัง ไม่ใช่ตาย)", effects.deaths, deathsBefore)
@@ -2246,6 +2318,8 @@ do
 	check("ไม่มีด่าน → ไม่ error", pcall(TroopRenderer.updateFromPayload, { summonEnabled = true, battle = { stage = nil } }))
 	check("  ไม่มีทหาร/ศัตรู/ป้อมค้าง", countModels("Troop") + countModels("Enemy") + countModels("Turret"), 0)
 	check("payload ไม่มี battle → ไม่ error", pcall(TroopRenderer.updateFromPayload, { summonEnabled = true }))
+	services.RunService.Heartbeat:Fire(1 / 60)
+	check("  เฟรมตอนสนามว่างไม่ error", true)
 end
 
 print(string.format("\n=== ผ่าน %d / ตก %d ===", passCount, failCount))

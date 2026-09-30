@@ -1151,7 +1151,7 @@ do
 	p.summonBlockReason = nil
 end
 
-print("\n━━ SummonWindow: หน้าต่างแท่นอัญเชิญ (UI-3) ━━")
+print("\n━━ SummonWindow: หน้าต่างแท่นอัญเชิญ (UI-3 · 5E-1b เลขลำดับร่วมสองแท็บ) ━━")
 do
 	local SummonWindow = loaded.SummonWindow
 	local sp = makePayload()
@@ -1182,12 +1182,26 @@ do
 	sp.sendStageBlockReason = nil
 	-- แม่ในสนามแล้ว 7 ตัว → ที่ว่าง 3
 	local roster = {}
+	local rosterUids = {}
 	for index = 1, 7 do
 		local m = mother(`9-{index}`, "tang", 1000, false, 1)
 		m.statuses = {}
 		table.insert(roster, m)
+		table.insert(rosterUids, m.uid)
 	end
 	sp.battleRoster = roster
+	-- 5E-1b: รอบวนจาก server = กองที่ติ๊ก (ตามลำดับ) แล้วแม่ในสนาม (ต่อท้าย · server จำตำแหน่งแม่ใน memory)
+	local function cycleOf(keys, uids)
+		local list = {}
+		for _, key in keys do
+			table.insert(list, { kind = "child", id = key })
+		end
+		for _, uid in uids do
+			table.insert(list, { kind = "mother", id = uid })
+		end
+		return list
+	end
+	sp.releaseCycle = cycleOf(sp.releaseOrder, rosterUids)
 
 	local summonCalls = {}
 	local function recordSummon(name)
@@ -1211,6 +1225,7 @@ do
 	local stopButton = findDescendant(win, "Stop")
 	local confirm = findDescendant(win, "Confirm")
 	local notice = findDescendant(win, "Notice")
+	local preview = findDescendant(win, "Preview")
 	local function cards()
 		local list = {}
 		for _, child in grid2:GetChildren() do
@@ -1242,10 +1257,21 @@ do
 		end
 		return table.concat(names, ",")
 	end
+	-- แม่ในกระเป๋าที่ติ๊กไว้ (ไม่นับแม่ในสนาม ซึ่งอยู่ในรอบวนเสมอ)
+	local function newMotherTicks()
+		local list = {}
+		for _, uid in SummonWindow.getTicks("mothers") do
+			if not table.find(rosterUids, uid) then
+				table.insert(list, uid)
+			end
+		end
+		return list
+	end
 
 	-- ── แท็บลูก (เปิดครั้งแรก = แท็บลูก) ──
 	check("แท็บลูก: ทุกกอง + กองรอผลิต = 4 ใบ", #cards(), 4)
-	check("เปิดมา = ติ๊กตาม releaseOrder ล่าสุด", joined(SummonWindow.getTicks("children")), joined({ sB.key, sW.key, sA.key }))
+	check("เปิดมา = ติ๊กกองตามรอบวนล่าสุด", joined(SummonWindow.getTicks("children")), joined({ sB.key, sW.key, sA.key }))
+	check("  รอบวนรวม = กอง 3 + แม่ในสนาม 7", #SummonWindow.getOrder(), 10)
 	check("  เลขบนการ์ด: ลิง = 1", badge(cardFor(sB.charName)), "1")
 	check("  กองรอผลิต = 2 · มีคำว่ารอผลิต", badge(cardFor(sW.charName)) == "2"
 		and string.find(findDescendant(cardFor(sW.charName), "InfoLabel").Text, "รอผลิต", 1, true) ~= nil, true)
@@ -1254,33 +1280,40 @@ do
 	check("  การ์ดโชว์จำนวน + พลังต่อตัว", string.find(findDescendant(cardFor(sA.charName), "InfoLabel").Text, "×120", 1, true) ~= nil
 		and string.find(findDescendant(cardFor(sA.charName), "InfoLabel").Text, "⚔️900", 1, true) ~= nil, true)
 	check("  ข้อความบอกว่ากองที่ไม่ติ๊กไม่ถูกปล่อย", string.find(notice.Text, "ไม่ถูกปล่อย", 1, true) ~= nil)
+	check("  ข้อความบอกว่าเลขลำดับร่วมกับแท็บแม่", string.find(notice.Text, "ร่วมกับแท็บแม่", 1, true) ~= nil)
+	check("  ตัวอย่างลำดับวนใต้รายการ", string.find(preview.Text, `ลำดับ: {sB.charName} → {sW.charName} → {sA.charName} → แม่`, 1, true) ~= nil)
+	check("  ตัวอย่างยาวเกินตัดด้วย … และบอกว่าวนกลับ", string.find(preview.Text, "→ … → วนกลับตัวแรก", 1, true) ~= nil)
 	check("หยุดอยู่ → ไม่มีปุ่มหยุดอัญเชิญ", stopButton.Visible, false)
 
-	-- เอากองลำดับ 1 ออก → ตัวหลังเลื่อนขึ้น · ติ๊กหมูเพิ่ม → ต่อท้าย
+	-- เอากองลำดับ 1 ออก → ตัวหลังเลื่อนขึ้น (ทั้งสองแท็บ) · ติ๊กหมูเพิ่ม → ต่อท้ายรอบวน (หลังแม่ในสนาม 7 ตัว)
 	cardFor(sB.charName).Activated:Fire()
 	check("เอาลิง (1) ออก → กองรอผลิตเลื่อนเป็น 1", badge(cardFor(sW.charName)), "1")
 	check("  ซุนหงอคงเลื่อนเป็น 2", badge(cardFor(sA.charName)), "2")
 	cardFor(sC.charName).Activated:Fire()
-	check("ติ๊กหมูเพิ่ม → ได้เลข 3", badge(cardFor(sC.charName)), "3")
-	check("  ลำดับ = รอผลิต, ซุนหงอคง, หมู", joined(SummonWindow.getTicks("children")), joined({ sW.key, sA.key, sC.key }))
+	check("ติ๊กหมูเพิ่ม → ต่อท้ายรอบวน ได้เลข 10 (เลขร่วมกับแม่ในสนาม 3–9)", badge(cardFor(sC.charName)), "10")
+	check("  ลำดับกอง = รอผลิต, ซุนหงอคง, หมู", joined(SummonWindow.getTicks("children")), joined({ sW.key, sA.key, sC.key }))
 
-	-- ติ๊กแค่ลูก → ส่งไปรบ = ไม่มีกล่องยืนยัน · ตั้งลำดับ แล้วเปิดอัญเชิญ
+	-- ไม่มีแม่ใหม่ → ส่งไปรบ = ไม่มีกล่องยืนยัน · ตั้งลำดับรวม แล้วเปิดอัญเชิญ
 	local before = #summonCalls
 	sendButton.Activated:Fire()
-	check("ติ๊กแค่ลูก → ไม่มีกล่องยืนยัน", confirm.Visible, false)
+	check("ไม่มีแม่ใหม่ → ไม่มีกล่องยืนยัน", confirm.Visible, false)
 	check("  ยิง ตั้งลำดับ → เปิดอัญเชิญ (ไม่ส่งแม่)", callNames(before), "setReleaseOrder,setSummonEnabled")
-	check("  ลำดับที่ส่ง = ที่ติ๊ก", joined(summonCalls[before + 1].args[1]), joined({ sW.key, sA.key, sC.key }))
+	local sentOrder = summonCalls[before + 1].args[1]
+	check("  ลำดับที่ส่ง = รอบวนรวม (กอง + uid แม่ในสนามปนกัน)", joined(sentOrder), joined(SummonWindow.getOrder()))
+	check("  หัวรอบวน = รอผลิต, ซุนหงอคง แล้วแม่ในสนาม · หมูท้ายสุด",
+		sentOrder[1] == sW.key and sentOrder[2] == sA.key and sentOrder[3] == rosterUids[1] and sentOrder[10] == sC.key, true)
 	check("  เปิดอัญเชิญ = true", summonCalls[before + 2].args[1], true)
 
 	-- ── แท็บแม่ ──
 	findDescendant(win, "Tab_mothers").Activated:Fire()
 	local motherCards = cards()
 	check("แท็บแม่: แม่ในสนามอยู่บนสุด ติดป้ายในสนาม", findDescendant(motherCards[1], "FieldTag").Visible, true)
+	check("  แม่ในสนามมีเลขลำดับในรอบวน (ต่อจากกองลูก 2 กอง = 3)", badge(motherCards[1]), "3")
 	local penShown = cardFor("ซุนหงอคง") ~= nil
 	check("  แม่ในคอกไม่แสดง", penShown, false)
 	before = #summonCalls
 	motherCards[1].Activated:Fire()
-	check("  กดแม่ในสนาม → แจ้งเตือน ไม่ติ๊ก", callNames(before) == "notify" and #SummonWindow.getTicks("mothers") == 0, true)
+	check("  กดแม่ในสนาม → แจ้งเตือน เลขเดิม (ดึงกลับไม่ได้)", callNames(before) == "notify" and badge(motherCards[1]) == "3", true)
 
 	-- แม่ในกระเป๋า: หลังแม่ในสนาม 7 ตัว · เรียงคลาสสูง/หนักก่อน · ตัวที่ล็อก (1-101) ติ๊กไม่ได้
 	grid2.CanvasPosition = Vector2.new(0, 10000)
@@ -1293,10 +1326,10 @@ do
 	check("แม่ที่ล็อกมี 🔒 + ทาเทา", lockedCard ~= nil and findDescendant(lockedCard, "Shade").Visible == true, true)
 	before = #summonCalls
 	lockedCard.Activated:Fire()
-	check("  กดแม่ที่ล็อก → แจ้งเตือน ไม่ติ๊ก", callNames(before) == "notify" and #SummonWindow.getTicks("mothers") == 0, true)
+	check("  กดแม่ที่ล็อก → แจ้งเตือน ไม่ติ๊ก", callNames(before) == "notify" and #newMotherTicks() == 0, true)
 	grid2.CanvasPosition = Vector2.zero
 
-	-- ที่ว่าง 3 ตัว (ในสนาม 7/10): ติ๊ก 4 ตัว → ตัวที่ 4 ไม่ติด
+	-- ที่ว่าง 3 ตัว (ในสนาม 7/10): ติ๊ก 4 ตัว → ตัวที่ 4 ไม่ติด · เลขต่อจากรอบวนเดิม (11 · 12 · 13)
 	local bagCards = {}
 	for _, card in cards() do
 		if not findDescendant(card, "FieldTag").Visible and not findDescendant(card, "LockBadge").Visible then
@@ -1309,57 +1342,83 @@ do
 	bagCards[3].Activated:Fire()
 	before = #summonCalls
 	bagCards[4].Activated:Fire()
-	check("ติ๊กเกินที่ว่างใน roster (3) → ไม่ติด + แจ้งเตือน", #SummonWindow.getTicks("mothers") == 3 and callNames(before) == "notify", true)
-	check("  เลขบนการ์ด 1 · 2 · 3", badge(bagCards[1]) .. badge(bagCards[2]) .. badge(bagCards[3]), "123")
-	local firstThree = SummonWindow.getTicks("mothers")
+	check("ติ๊กเกินที่ว่างใน roster (3) → ไม่ติด + แจ้งเตือน", #newMotherTicks() == 3 and callNames(before) == "notify", true)
+	check("  เลขบนการ์ด 11 · 12 · 13 (เลขร่วมกับแท็บลูก)", `{badge(bagCards[1])},{badge(bagCards[2])},{badge(bagCards[3])}`, "11,12,13")
+	local firstThree = newMotherTicks()
 	bagCards[1].Activated:Fire()
-	check("เอาตัวที่ 1 ออก → ที่เหลือเลื่อนเป็น 1 · 2", badge(bagCards[2]) .. badge(bagCards[3]), "12")
+	check("เอาตัวที่ 11 ออก → ที่เหลือเลื่อนเป็น 11 · 12", `{badge(bagCards[2])},{badge(bagCards[3])}`, "11,12")
 	bagCards[4].Activated:Fire()
-	check("  ตอนนี้ติ๊กตัวที่ 4 ได้แล้ว (เลข 3)", badge(bagCards[4]), "3")
-	local motherTicks = SummonWindow.getTicks("mothers")
-	check("  ลำดับแม่ = 2, 3, 4", joined(motherTicks), joined({ firstThree[2], firstThree[3], motherTicks[3] }))
-	check("  ลำดับแยกจากแท็บลูก (ลูกยังเหมือนเดิม)", joined(SummonWindow.getTicks("children")), joined({ sW.key, sA.key, sC.key }))
+	check("  ตอนนี้ติ๊กตัวที่ 4 ได้แล้ว (เลข 13)", badge(bagCards[4]), "13")
+	local motherTicks = newMotherTicks()
+	check("  ลำดับแม่ใหม่ = 2, 3, 4", joined(motherTicks), joined({ firstThree[2], firstThree[3], motherTicks[3] }))
+	-- กลับไปแท็บลูก: เอาซุนหงอคง (2) ออก → เลขแม่เลื่อนตาม (เลขร่วม)
+	findDescendant(win, "Tab_children").Activated:Fire()
+	cardFor(sA.charName).Activated:Fire()
+	check("เอากองลำดับ 2 ออก → หมูเลื่อน 10 → 9", badge(cardFor(sC.charName)), "9")
+	findDescendant(win, "Tab_mothers").Activated:Fire()
+	check("  แม่ใหม่เลื่อนตามในแท็บแม่ (11 → 10)", badge(bagCards[2]), "10")
+	check("  แม่ในสนามตัวแรกเลื่อน 3 → 2", badge(cards()[1]), "2")
+	findDescendant(win, "Tab_children").Activated:Fire()
+	cardFor(sA.charName).Activated:Fire() -- ติ๊กคืน = ต่อท้ายรอบวน
+	check("  ติ๊กซุนหงอคงคืน = ต่อท้ายรอบวน (13)", badge(cardFor(sA.charName)), "13")
+	findDescendant(win, "Tab_mothers").Activated:Fire()
 
-	-- ส่งไปรบ (มีแม่) → กล่องยืนยัน → ยกเลิก = ไม่ยิงอะไร
+	-- ส่งไปรบ (มีแม่ใหม่) → กล่องยืนยัน → ยกเลิก = ไม่ยิงอะไร
 	before = #summonCalls
 	sendButton.Activated:Fire()
-	check("มีแม่ → กล่องยืนยันขึ้น", confirm.Visible, true)
+	check("มีแม่ใหม่ → กล่องยืนยันขึ้น", confirm.Visible, true)
 	local confirmTextNow = findDescendant(confirm, "Text").Text
 	check("  บอกจำนวน + ตายถาวร + ดึงกลับไม่ได้", string.find(confirmTextNow, "ส่งแม่ 3 ตัว", 1, true) ~= nil
 		and string.find(confirmTextNow, "ตายถาวร", 1, true) ~= nil
 		and string.find(confirmTextNow, "ดึงกลับไม่ได้", 1, true) ~= nil, true)
-	-- 5E-1 (ผู้ใช้สั่ง): แม่อาจตายระหว่างรบ + ที่เหลือตายหมดเมื่อด่านพัง
+	-- 5E-1 (ผู้ใช้สั่ง · คงเดิมใน 5E-1b): แม่อาจตายระหว่างรบ + ที่เหลือตายหมดเมื่อด่านพัง
 	check("  5E-1: บอกว่าแม่อาจตายระหว่างรบ", string.find(confirmTextNow, "อาจตายถาวรระหว่างรบ", 1, true) ~= nil)
 	check("  5E-1: บอกว่าแม่ที่เหลือตายหมดเมื่อด่านพัง", string.find(confirmTextNow, "แม่ที่เหลือทั้งหมดจะตายถาวรทันทีที่ด่านที่กำลังตีพัง", 1, true) ~= nil)
+	check("  5E-1b: บอกว่าลูกปล่อยทีละตัวตามรอบวน", string.find(confirmTextNow, "ทีละตัวตามรอบวน", 1, true) ~= nil)
 	findDescendant(confirm, "ConfirmCancel").Activated:Fire()
 	check("  ยกเลิก → กล่องปิด ไม่ยิงอะไรเลย", confirm.Visible == false and #summonCalls == before, true)
-	check("  ยกเลิกแล้วที่ติ๊กไว้ยังอยู่", #SummonWindow.getTicks("mothers"), 3)
+	check("  ยกเลิกแล้วที่ติ๊กไว้ยังอยู่", #newMotherTicks(), 3)
 
-	-- ยืนยัน → ส่งแม่ → ตั้งลำดับ → เปิดอัญเชิญ (ตามลำดับนี้เท่านั้น)
+	-- ยืนยัน → ส่งแม่ → ตั้งลำดับรวม → เปิดอัญเชิญ (ตามลำดับนี้เท่านั้น)
+	local orderBeforeSend = SummonWindow.getOrder()
 	sendButton.Activated:Fire()
 	findDescendant(confirm, "ConfirmSend").Activated:Fire()
 	check("ยืนยัน → ยิง ส่งแม่ → ตั้งลำดับ → เปิดอัญเชิญ", callNames(before), "sendMothers,setReleaseOrder,setSummonEnabled")
-	check("  แม่ที่ส่ง = ที่ติ๊กตามลำดับ", joined(summonCalls[before + 1].args[1]), joined(motherTicks))
-	check("  ลำดับลูกที่ส่ง = ที่ติ๊กไว้ในแท็บลูก", joined(summonCalls[before + 2].args[1]), joined({ sW.key, sA.key, sC.key }))
-	check("  ส่งแล้วล้างที่ติ๊กแม่", #SummonWindow.getTicks("mothers"), 0)
-	check("ไม่ได้ติ๊กอะไรในแท็บแม่ แต่ลูกยังติ๊กอยู่ → ปุ่มส่งยังกดได้", sendButton.AutoButtonColor, true)
+	check("  แม่ที่ส่ง = แม่ใหม่ที่ติ๊กตามลำดับ", joined(summonCalls[before + 1].args[1]), joined(motherTicks))
+	check("  ลำดับที่ส่ง = รอบวนรวมทั้งหมด (แม่ใหม่อยู่ตำแหน่งที่ติ๊ก)", joined(summonCalls[before + 2].args[1]), joined(orderBeforeSend))
+	check("  ส่งแล้วรอบวนยังจำตำแหน่งแม่ใหม่ไว้", joined(SummonWindow.getOrder()), joined(orderBeforeSend))
 
-	-- กำลังอัญเชิญ → ปุ่มหยุดโผล่ · กดแล้วปิดอัญเชิญ
+	-- sync ถัดไป: แม่ใหม่ย้ายเข้า roster → กลายเป็น "ในสนาม" ที่ตำแหน่งเดิม
+	for _, uid in motherTicks do
+		local m = mother(uid, "monkey", 500, false, 1)
+		m.statuses = {}
+		table.insert(sp.battleRoster, m)
+		table.insert(rosterUids, uid)
+	end
+	local keptBag = {}
+	for _, m in sp.mothersInBag do
+		if not table.find(motherTicks, m.uid) then
+			table.insert(keptBag, m)
+		end
+	end
+	sp.mothersInBag = keptBag
 	sp.summonEnabled = true
 	SummonWindow.setPayload(sp)
+	check("แม่ที่ส่งแล้วเข้า roster → ตำแหน่งในรอบวนเดิม", joined(SummonWindow.getOrder()), joined(orderBeforeSend))
+	check("  ไม่เหลือแม่ใหม่ค้างติ๊ก", #newMotherTicks(), 0)
+
+	-- กำลังอัญเชิญ → ปุ่มหยุดโผล่ · กดแล้วปิดอัญเชิญ
 	check("กำลังอัญเชิญ → ปุ่มหยุดอัญเชิญโผล่", stopButton.Visible, true)
 	before = #summonCalls
 	stopButton.Activated:Fire()
 	check("  กดหยุด → setSummonEnabled(false)", callNames(before) == "setSummonEnabled" and summonCalls[before + 1].args[1] == false, true)
 
-	-- 5E-1 (ค3): กำลังรวมพล → หัวหน้าต่างบอก "กำลังรวมพล 7/12" (ตัวเลขจาก server)
+	-- 5E-1b: ไม่มีรวมพลแล้ว · หัวหน้าต่างบอกจำนวนในแถว (ตัวเลขจาก server)
 	local statusLabel = findDescendant(win, "Status")
-	sp.battle = { gathering = true, available = 7, gatherTarget = Config.Balance.Combat.GATHER_SIZE, our = {}, enemies = {} }
+	sp.battle = { our = { { pos = 1 }, { pos = 2 }, { pos = 3 } }, enemies = {}, lineLength = Config.Balance.Combat.LINE_LENGTH }
 	SummonWindow.setPayload(sp)
-	check("5E-1 กำลังรวมพล → หัวหน้าต่างบอกจำนวน", string.find(statusLabel.Text, `กำลังรวมพล 7/{Config.Balance.Combat.GATHER_SIZE}`, 1, true) ~= nil)
-	sp.battle.gathering = false
-	SummonWindow.setPayload(sp)
-	check("  สู้อยู่ → กลับเป็น 'กำลังอัญเชิญ'", string.find(statusLabel.Text, "กำลังอัญเชิญ", 1, true) ~= nil)
+	check("5E-1b กำลังอัญเชิญ → หัวหน้าต่างบอกแถว 3/10", string.find(statusLabel.Text, `แถว 3/{Config.Balance.Combat.LINE_LENGTH}`, 1, true) ~= nil)
+	check("  ไม่มีคำว่ารวมพลแล้ว", string.find(statusLabel.Text, "รวมพล", 1, true) == nil)
 	sp.battle = nil
 
 	-- auto-pause → เตือนในหัวหน้าต่าง
@@ -1381,7 +1440,7 @@ do
 	check("  การ์ดแม่ในกระเป๋าทาเทา", findDescendant(bagCards[1], "Shade").Visible, true)
 	before = #summonCalls
 	bagCards[1].Activated:Fire()
-	check("  กดแล้วแจ้งเหตุผล ไม่ติ๊ก", callNames(before) == "notify" and #SummonWindow.getTicks("mothers") == 0, true)
+	check("  กดแล้วแจ้งเหตุผล ไม่ติ๊ก", callNames(before) == "notify" and #newMotherTicks() == 0, true)
 	sp.sendStageBlockReason = nil
 
 	-- ⚠️ Phase 5A: ล็อกอัญเชิญเพราะบอส — ปุ่มส่งไปรบกดไม่ได้ + ข้อความ · รวมกับ auto-pause (ไม่แทนที่)
@@ -1411,57 +1470,73 @@ do
 	check("ปลดล็อก → ปุ่มไม่ติดล็อกแล้ว", string.find(sendButton.Text, "กำจัดบอสก่อน", 1, true) == nil)
 	check("  ข้อความล็อกหายไป", string.find(notice.Text, Config.BOSS_LOCK_MESSAGE, 1, true) == nil)
 
-	-- ลำดับปล่อยว่าง (ไม่เคยติ๊ก) → เปิดมาติ๊กทุกกองไว้ก่อน เรียงพลังต่อตัวมาก → น้อย
+	-- ยังไม่เคยติ๊กกองไหน (releaseOrder ว่าง) → เปิดมาติ๊กทุกกองไว้ก่อน เรียงพลังต่อตัวมาก → น้อย แล้วต่อด้วยแม่ในสนาม
 	SummonWindow.close()
 	sp.releaseOrder = {}
 	sp.waitingStacks = {} -- server ส่งกองรอผลิตเฉพาะที่อยู่ในลำดับ — ลำดับว่างจึงไม่มี
+	sp.releaseCycle = cycleOf({}, rosterUids)
 	SummonWindow.setPayload(sp)
 	SummonWindow.open()
 	findDescendant(win, "Tab_children").Activated:Fire()
 	check("ลำดับว่าง → ติ๊กทุกกองที่มีของ เรียงพลังมาก→น้อย (ซุนหงอคง 900 · หมู 30 · ลิง 1)",
 		joined(SummonWindow.getTicks("children")), joined({ sA.key, sC.key, sB.key }))
 	check("  ม้า (กองที่ไม่มีของ) ไม่อยู่ในค่าเริ่มต้น", table.find(SummonWindow.getTicks("children"), sW.key) == nil, true)
-	check("  เลขบนการ์ด 1 · 2 · 3", badge(cardFor(sA.charName)) .. badge(cardFor(sC.charName)) .. badge(cardFor(sB.charName)), "123")
+	check("  เลขบนการ์ด 1 · 2 · 3 (กองมาก่อนแม่ในสนาม)", badge(cardFor(sA.charName)) .. badge(cardFor(sC.charName)) .. badge(cardFor(sB.charName)), "123")
 	before = #summonCalls
 	check("  ยังไม่ยิงอะไรจนกว่าจะกดส่ง", #summonCalls, before)
 	cardFor(sC.charName).Activated:Fire()
 	check("  เอาติ๊กออกเองได้ (หมูออก → ลิงเลื่อนเป็น 2)", badge(cardFor(sB.charName)), "2")
 	sendButton.Activated:Fire()
-	check("  กดส่ง = ส่งลำดับที่เหลือ", joined(summonCalls[before + 1].args[1]), joined({ sA.key, sB.key }))
+	local sentDefault = summonCalls[before + 1].args[1]
+	check("  กดส่ง = ส่งรอบวนที่เหลือ (ซุนหงอคง, ลิง แล้วแม่ในสนาม)", `{sentDefault[1]},{sentDefault[2]},{sentDefault[3]}`,
+		`{sA.key},{sB.key},{rosterUids[1]}`)
 
-	-- ไม่มีอะไรให้ติ๊กเลย (ลำดับว่าง + ไม่มีกอง) → ปุ่มส่งถูกปิด กดแล้วไม่ยิง
+	-- ไม่มีอะไรให้ปล่อยเลย (ไม่มีกอง + ไม่มีแม่ในสนาม) → ปุ่มส่งถูกปิด กดแล้วไม่ยิง
 	SummonWindow.close()
-	local savedChildren = sp.children
+	local savedChildren, savedRoster = sp.children, sp.battleRoster
 	sp.children = {}
 	sp.waitingStacks = {}
+	sp.battleRoster = {}
+	sp.releaseCycle = {}
 	SummonWindow.setPayload(sp)
 	SummonWindow.open()
-	check("ไม่ติ๊กอะไร → ปุ่มส่งไปรบถูกปิด", sendButton.AutoButtonColor, false)
+	check("รอบวนว่าง → ปุ่มส่งไปรบถูกปิด", sendButton.AutoButtonColor, false)
+	check("  ตัวอย่างลำดับบอกว่ายังไม่ได้ติ๊ก", string.find(preview.Text, "ยังไม่ได้ติ๊ก", 1, true) ~= nil)
 	before = #summonCalls
 	sendButton.Activated:Fire()
 	check("  กดแล้วไม่ยิงอะไร", #summonCalls, before)
 	sp.children = savedChildren
+	sp.battleRoster = savedRoster
 	sp.waitingStacks = { sW }
 
-	-- ปิดแล้วเปิดใหม่: ติ๊กแม่ไม่ค้าง · ติ๊กลูกกลับมาตาม releaseOrder
+	-- ปิดแล้วเปิดใหม่: แม่ใหม่ที่ติ๊กไม่ค้าง · กองกลับมาตามรอบวนจาก server
+	SummonWindow.close()
 	sp.releaseOrder = { sC.key, sA.key }
+	sp.releaseCycle = cycleOf(sp.releaseOrder, rosterUids)
 	SummonWindow.setPayload(sp)
+	SummonWindow.open()
 	findDescendant(win, "Tab_mothers").Activated:Fire()
+	sp.battleRoster = { roster[1] } -- เหลือแม่ในสนามตัวเดียว → มีที่ว่างให้ติ๊ก
+	rosterUids = { roster[1].uid }
+	sp.releaseCycle = cycleOf(sp.releaseOrder, rosterUids)
+	SummonWindow.setPayload(sp)
 	for _, card in cards() do
 		if not findDescendant(card, "FieldTag").Visible and not findDescendant(card, "LockBadge").Visible then
 			card.Activated:Fire()
 			break
 		end
 	end
-	check("ติ๊กแม่ไว้ 1 ตัว", #SummonWindow.getTicks("mothers"), 1)
+	check("ติ๊กแม่ใหม่ไว้ 1 ตัว", #newMotherTicks(), 1)
+	check("  แม่ในสนามที่ตาย (หลุด roster) หลุดจากรอบวนเอง", #SummonWindow.getTicks("mothers"), 2)
 	SummonWindow.close()
 	SummonWindow.open()
-	check("เปิดใหม่ → ไม่มีแม่ค้างติ๊ก", #SummonWindow.getTicks("mothers"), 0)
-	check("  ลูกติ๊กตาม releaseOrder ล่าสุด", joined(SummonWindow.getTicks("children")), joined({ sC.key, sA.key }))
+	check("เปิดใหม่ → ไม่มีแม่ใหม่ค้างติ๊ก", #newMotherTicks(), 0)
+	check("  กองติ๊กตามรอบวนล่าสุด", joined(SummonWindow.getTicks("children")), joined({ sC.key, sA.key }))
 
-	-- กองในลำดับที่ไม่ได้แสดง (หมด + ไม่มีแม่ผลิตเติม) → ไม่ติ๊ก
+	-- กองในรอบวนที่ไม่ได้แสดง (หมด + ไม่มีแม่ผลิตเติม) → ไม่ติ๊ก
 	SummonWindow.close()
 	sp.releaseOrder = { "ghost|123|", sA.key }
+	sp.releaseCycle = cycleOf(sp.releaseOrder, rosterUids)
 	SummonWindow.setPayload(sp)
 	SummonWindow.open()
 	check("กองที่หายไปแล้วหลุดจากติ๊ก", joined(SummonWindow.getTicks("children")), sA.key)
@@ -2162,12 +2237,13 @@ do
 	check("  ความสว่าง/exposure กลับค่าเดิมของเกมนี้", lighting2.Brightness == 3 and lighting2.ExposureCompensation == 0.2, true)
 end
 
-print("\n━━ TroopRenderer: สนามรบ 6 ต่อ 6 ตามสถานะจาก server (5E-1 ภาพชั่วคราว · เดินทัพเจอกันกึ่งกลาง) ━━")
+print("\n━━ TroopRenderer: สองแถวตามสถานะจาก server (5E-1b ภาพชั่วคราว · เดินทัพเจอกันกึ่งกลาง) ━━")
 do
 	local TroopRenderer = loaded.TroopRenderer
 	local effects = loaded.CombatEffects
 	local troops = workspaceMock
 	local STAGE = 3
+	local LINE = Config.Balance.Combat.LINE_LENGTH
 	local pedestalX = Config.getSummonPedestalCenter().X
 	local meetX = Config.getBattleMeetX(STAGE)
 	local wallX = Config.getWallX(STAGE)
@@ -2209,20 +2285,24 @@ do
 		end
 		return true
 	end
-	local function entries(kinds, hp)
+	-- แถวจาก server: pos 1 = หน้าสุด · id = เลขประจำตัว (เรา) / ตัวที่เท่าไรของด่าน (ศัตรู)
+	local function lineOf(kinds, firstId, hp)
 		local list = {}
-		for slot, kind in kinds do
-			table.insert(list, { slot = slot, kind = kind, hp = hp, maxHp = 10 })
+		for pos, kind in kinds do
+			table.insert(list, { pos = pos, id = firstId + pos - 1, kind = kind, hp = hp, maxHp = 10 })
 		end
 		return list
 	end
-	-- เพิ่งลงสนาม: เดินทัพจากแท่นอัญเชิญไปกึ่งกลาง (เพิ่งเริ่ม) · ศัตรูยังยืนหน้ากำแพง · ป้อมยังไม่ยิง
+	local ourKinds = { "child", "child", "mother", "child", "child", "child", "child", "child", "child", "child" }
+	local enemyKinds = { "small", "small", "small", "small", "small", "big", "small", "small", "small", "small" }
+	-- เพิ่งปล่อย: เดินทัพจากแท่นอัญเชิญไปกึ่งกลาง (เพิ่งเริ่ม) · ศัตรูยังยืนหน้ากำแพง · ป้อมยังไม่ยิง
 	local payload = {
 		summonEnabled = true,
 		battle = {
 			stage = STAGE,
-			our = entries({ "child", "child", "child", "child", "child", "mother" }, 10),
-			enemies = entries({ "big", "small", "small", "small", "small", "small" }, 10),
+			lineLength = LINE,
+			our = lineOf(ourKinds, 1, 10),
+			enemies = lineOf(enemyKinds, 1, 10),
 			turretActive = true,
 			turretFiring = false,
 			turretShots = 0,
@@ -2235,14 +2315,24 @@ do
 		},
 	}
 	check("start ไม่ error", pcall(TroopRenderer.start))
-	check("sync สนามเต็ม (เริ่มเดินทัพ) ไม่ error", pcall(TroopRenderer.updateFromPayload, payload))
-	check("  ทหารเรา 6 ตัว", countModels("Troop"), 6)
-	check("  ศัตรู 6 ตัว", countModels("Enemy"), 6)
+	check("sync สองแถว (เริ่มเดินทัพ) ไม่ error", pcall(TroopRenderer.updateFromPayload, payload))
+	check("  ทหารเรา 10 ตัว", countModels("Troop"), LINE)
+	check("  ศัตรู 10 ตัว", countModels("Enemy"), LINE)
+	check("  บนจอไม่เกิน 20 ตัว", countModels("Troop") + countModels("Enemy") <= 2 * LINE, true)
 	check("  ป้อม 1 อัน (ตั้งอยู่บนกำแพง)", countModels("Turret"), 1)
-	check("  ทหารเราโผล่ที่แท่นอัญเชิญ (ไม่ใช่หน้าป้อม)", allWithin(pivotXs("Troop"), pedestalX - 10, pedestalX + 2), true)
-	check("  ศัตรูยังยืนหน้ากำแพงของตัวเอง", allWithin(pivotXs("Enemy"), wallX - 12, wallX - 8), true)
+	check("  แถวเราโผล่ที่แท่นอัญเชิญเรียงไปทางหลัง", allWithin(pivotXs("Troop"), pedestalX - 45, pedestalX + 1), true)
+	check("  แถวศัตรูยืนเรียงหน้ากำแพง (ไม่ทะลุกำแพง)", allWithin(pivotXs("Enemy"), wallX - 60, wallX - 1), true)
+	check("  เรียงเดี่ยวกลางเลน (Z = 0 ทุกตัว)", (function()
+		for _, name in { "Troop", "Enemy" } do
+			for _, child in models(name) do
+				if rawget(child, "__props").__pivot.Position.Z ~= 0 then
+					return false
+				end
+			end
+		end
+		return true
+	end)(), true)
 	check("  เดินทัพอยู่ → ป้อมไม่ยิง (ไม่มีเส้นยิง)", countModels("TurretShot"), 0)
-	check("  ทหาร + ศัตรูบนจอไม่เกิน 12", countModels("Troop") + countModels("Enemy") <= 12, true)
 	check("  ตัวใหญ่ถูกขยาย", (function()
 		for _, child in models("Enemy") do
 			if rawget(child, "__props").__scale then
@@ -2262,33 +2352,40 @@ do
 	services.RunService.Heartbeat:Fire(1 / 60)
 	check("  เฟรมเดินทัพไม่ error", true)
 
-	-- เดินถึงกึ่งกลางแล้ว: ศัตรูยืนกึ่งกลาง · ศัตรูช่อง 2 ตาย (ไม่มีตัวมาแทน) + ช่อง 1 ของเราตายแล้วตัวใหม่ลงแทน (เลือดเพิ่ม)
+	-- ถึงกึ่งกลางแล้ว: ศัตรูตัวหน้าสุด (id 1) ตาย → แถวศัตรูขยับขึ้น + ตัวใหม่ (id 11) ต่อท้าย
+	--                   ตัวหน้าสุดของเรา (id 1) ตาย → แถวเราขยับขึ้น + ตัวใหม่ (id 11) ต่อท้าย
 	local deathsBefore = effects.deaths
 	payload.battle.marchRemaining = 0
 	payload.battle.enemiesAtMiddle = true
-	payload.battle.enemies = entries({ "big", nil, "small", "small", "small", "small" }, 5)
-	payload.battle.our[1].hp = 3
-	TroopRenderer.updateFromPayload(payload)
-	payload.battle.our[1].hp = 10 -- ตัวใหม่
-	check("ศัตรูหายแล้วสนามอัปเดต ไม่ error", pcall(TroopRenderer.updateFromPayload, payload))
-	check("  ศัตรูเหลือ 5", countModels("Enemy"), 5)
-	check("  เล่นเอฟเฟกต์ตาย (ศัตรู 1 + ทหารเราที่ถูกแทน 1)", effects.deaths - deathsBefore, 2)
-	services.RunService.Heartbeat:Fire(1 / 60)
-	check("  เฟรมสู้กันกึ่งกลางไม่ error", true)
-	local enemyXsBefore = pivotXs("Enemy")
-	payload.battle.enemies = entries({ "big", "small", "small", "small", "small", "small" }, 5)
-	TroopRenderer.updateFromPayload(payload)
+	local enemyIdsBefore = pivotXs("Enemy")
+	payload.battle.enemies = lineOf({ "small", "small", "small", "small", "big", "small", "small", "small", "small", "small" }, 2, 7)
+	payload.battle.our = lineOf({ "child", "mother", "child", "child", "child", "child", "child", "child", "child", "child" }, 2, 9)
+	check("ตัวหน้าสุดสองฝั่งตาย แถวขยับ ไม่ error", pcall(TroopRenderer.updateFromPayload, payload))
+	check("  ยังเต็ม 10 ต่อฝั่ง (ตัวใหม่ต่อท้าย)", countModels("Troop") == LINE and countModels("Enemy") == LINE, true)
+	check("  เล่นเอฟเฟกต์ตายเฉพาะตัวหน้าสุดที่หายไป (สองฝั่ง = 2)", effects.deaths - deathsBefore, 2)
 	local newEnemyX
 	for _, x in pivotXs("Enemy") do
-		if not table.find(enemyXsBefore, x) then
+		if not table.find(enemyIdsBefore, x) then
 			newEnemyX = x
 		end
 	end
-	check("  ศัตรูตัวที่ลงแทนโผล่ที่แนวกึ่งกลาง (นอกระยะป้อม)", newEnemyX ~= nil and math.abs(newEnemyX - meetX) <= 8, true)
+	check("  ศัตรูตัวใหม่โผล่ท้ายแถว (ฝั่งกำแพง · ไกลกว่ากึ่งกลาง)", newEnemyX ~= nil and newEnemyX > meetX + 20, true)
 	check("  กึ่งกลางห่างกำแพงเท่าห่างแท่น", math.abs((wallX - meetX) - (meetX - pedestalX)) < 1e-9, true)
 	check("  สู้กันกึ่งกลาง → ป้อมยังไม่ยิง", countModels("TurretShot"), 0)
+	services.RunService.Heartbeat:Fire(1 / 60)
+	check("  เฟรมปะทะกึ่งกลางไม่ error", true)
 
-	-- ศัตรูหมด → เดินต่อไปกำแพง แล้วป้อมยิง
+	-- ตัวในแถวที่ไม่ใช่หน้าสุดหายไป (เช่น ล้างคลังทาง debug) → ไม่เล่นเอฟเฟกต์ตาย
+	deathsBefore = effects.deaths
+	table.remove(payload.battle.our, 5)
+	for pos, entry in payload.battle.our do
+		entry.pos = pos
+	end
+	TroopRenderer.updateFromPayload(payload)
+	check("ตัวกลางแถวหายไป → ไม่มีเอฟเฟกต์ตาย", effects.deaths, deathsBefore)
+	check("  เหลือ 9 ตัว", countModels("Troop"), LINE - 1)
+
+	-- ศัตรูหมด → เดินต่อไปกำแพง แล้วป้อมยิงตัวหน้าสุด
 	payload.battle.enemies = {}
 	payload.battle.line = "wall"
 	payload.battle.marchFrom = "middle"
@@ -2302,7 +2399,7 @@ do
 	check("  เฟรมตีกำแพงไม่ error", true)
 
 	-- ปิดอัญเชิญ → ทหารเรากลับคลัง (เก็บเงียบ ๆ) · ศัตรูบาดเจ็บยังยืนอยู่
-	payload.battle.enemies = entries({ "big", nil, "small", "small", "small", "small" }, 5)
+	payload.battle.enemies = lineOf(enemyKinds, 20, 5)
 	payload.battle.line = "middle"
 	TroopRenderer.updateFromPayload(payload)
 	deathsBefore = effects.deaths
@@ -2312,7 +2409,17 @@ do
 	TroopRenderer.updateFromPayload(payload)
 	check("ปิดอัญเชิญ → ทหารเราหายหมด", countModels("Troop"), 0)
 	check("  ไม่เล่นเอฟเฟกต์ตาย (กลับคลัง ไม่ใช่ตาย)", effects.deaths, deathsBefore)
-	check("  ศัตรูบาดเจ็บยังยืนรอ", countModels("Enemy"), 5)
+	check("  ศัตรูบาดเจ็บยังยืนรอ", countModels("Enemy"), LINE)
+
+	-- ด่านเปลี่ยน → เริ่มสองแถวใหม่ (เลขศัตรูซ้ำกับด่านเก่าได้) ไม่มีเอฟเฟกต์ตาย
+	deathsBefore = effects.deaths
+	payload.summonEnabled = true
+	payload.battle.stage = STAGE + 1
+	payload.battle.enemies = lineOf(enemyKinds, 1, 10)
+	payload.battle.our = lineOf(ourKinds, 50, 10)
+	check("ด่านเปลี่ยน ไม่ error", pcall(TroopRenderer.updateFromPayload, payload))
+	check("  ไม่มีเอฟเฟกต์ตายตอนล้างด่านเก่า", effects.deaths, deathsBefore)
+	check("  สองแถวใหม่ครบ", countModels("Troop") == LINE and countModels("Enemy") == LINE, true)
 
 	-- ไม่มีด่านที่มีกำแพง (ผ่านครบ) → เก็บทุกอย่าง
 	check("ไม่มีด่าน → ไม่ error", pcall(TroopRenderer.updateFromPayload, { summonEnabled = true, battle = { stage = nil } }))

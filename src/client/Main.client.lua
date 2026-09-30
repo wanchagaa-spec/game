@@ -491,17 +491,14 @@ local function updateCombatHud()
 		setHudBar(defendersHudFill, defendersHudText, "ทหารฝ่ายรับ", 0)
 		setHudBar(wallHudFill, wallHudText, "กำแพง", 0)
 	else
-		-- 5E-1: รวมพล (ค3) ขึ้นต่อท้ายชื่อด่าน · ตัวเลขทั้งหมดมาจาก server (payload.battle)
+		-- 5E-1b: ตัวเลขทั้งหมดมาจาก server (payload.battle) · ไม่มีรวมพลแล้ว (แถวเดียว)
 		local battle = lastPayload.battle
-		local gatherText = if battle and battle.gathering
-			then ` · ⏳ กำลังรวมพล {battle.available}/{battle.gatherTarget}`
-			else ""
 		-- 5E-1 เดินทัพ: server จับเวลาเดินจริง (ระหว่างเดินไม่มีใครตีใคร) → บอกให้รู้ว่าทำไมหลอดยังไม่ลด
 		local marchText = ""
 		if battle and battle.line and (battle.marchRemaining or 0) > 0 then
 			marchText = if battle.line == "wall" then " · 🚶 เดินทัพไปกำแพง" else " · 🚶 เดินทัพไปเจอศัตรู"
 		end
-		combatStageLabel.Text = `กำลังตีด่าน {activeStage}{gatherText}{marchText}`
+		combatStageLabel.Text = `กำลังตีด่าน {activeStage}{marchText}`
 
 		local info = lastPayload.stageProgress[activeStage]
 		local defendersRatio = 1

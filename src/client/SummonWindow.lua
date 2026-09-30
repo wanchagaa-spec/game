@@ -1,15 +1,21 @@
 --!strict
 -- egg-army-game :: หน้าต่างแท่นอัญเชิญ — UI-3 (กด E ค้างที่แท่นอัญเชิญปากเลน · MapSigns.lua)
 --
--- สองแท็บ แม่ / ลูก · ติ๊กได้หลายรายการ · เลขบนการ์ด = ลำดับที่ติ๊ก (เอาออกแล้วตัวหลังเลื่อนขึ้น) · ลำดับแยกกันต่อแท็บ
---   ลูก: ติ๊กกอง = ปล่อยทั้งกอง · ลำดับปล่อย = ลำดับติ๊ก · **กองที่ไม่ติ๊กไม่ถูกปล่อย** (CombatService · UI-3)
---        เปิดใหม่เห็นติ๊ก + ลำดับเดิมจาก releaseOrder ใน sync · กองที่หมดแต่แม่ในคอกผลิตเติมอยู่ = การ์ด "รอผลิต"
---        releaseOrder ว่าง (ไม่เคยติ๊ก) → เปิดมา**ติ๊กทุกกองไว้ก่อน** เรียงพลังต่อตัวมาก → น้อย (ผู้เล่นเอาออกเองได้)
---   แม่: เฉพาะแม่ในกระเป๋า (แม่ในคอกไม่แสดงเลย) · แม่ในสนามอยู่บนสุด ติดป้าย "ในสนาม" ติ๊กไม่ได้ · ล็อก = ติ๊กไม่ได้
+-- สองแท็บ แม่ / ลูก · ติ๊กได้หลายรายการ · เลขบนการ์ด = ลำดับในรอบวน (เอาออกแล้วตัวหลังเลื่อนขึ้น)
+-- ⚠️ 5E-1b: **เลขลำดับใช้ร่วมกันทั้งสองแท็บ** (ติ๊กแม่เป็น 1 แล้วไปติ๊กกองลูกได้ 2 …) = รอบวนปล่อยของแถวเดียว
+--   server ปล่อยทีละตัวตามรอบวน 1,2,…,N,1,2,… (กองลูก = ทีละตัวจากกองนั้น · แม่ = ออกได้ทีละครั้ง)
+--   ใต้รายการมีตัวอย่างลำดับวนสั้น ๆ ("ลำดับ: หมู → แม่ลิง → ม้า → …")
+--   ลูก: ติ๊กกอง = อยู่ในรอบวน · **กองที่ไม่ติ๊กไม่ถูกปล่อย** (CombatService · UI-3)
+--        กองที่หมดแต่แม่ในคอกผลิตเติมอยู่ = การ์ด "รอผลิต"
+--        ยังไม่เคยติ๊กกองไหน (releaseOrder ว่าง) → เปิดมา**ติ๊กทุกกองไว้ก่อน** เรียงพลังต่อตัวมาก → น้อย (ผู้เล่นเอาออกเองได้)
+--   แม่: เฉพาะแม่ในกระเป๋า (แม่ในคอกไม่แสดงเลย) · ล็อก = ติ๊กไม่ได้
+--        แม่ในสนาม (roster) อยู่บนสุด ติดป้าย "ในสนาม" · **อยู่ในรอบวนเสมอ** มีเลขลำดับ แต่เอาติ๊กออกไม่ได้ (ดึงกลับไม่ได้)
 --        ติ๊กได้ไม่เกินที่ว่างใน roster (MAX_BATTLE_MOTHERS − ในสนาม) · ไม่มีด่านให้ส่ง = บอกเหตุผล + ติ๊กไม่ได้
---        ที่ติ๊กแม่ไว้ไม่จำข้ามการเปิดหน้าต่าง (ส่งแม่ = ตายถาวร ห้ามมีของค้างติ๊กที่ลืมไปแล้ว)
--- "ส่งไปรบ": มีแม่ = กล่องยืนยันครั้งเดียว → ส่งแม่ (ชุดเดียว) → ตั้งลำดับลูก → เปิดอัญเชิญ
---            ลูกอย่างเดียว = ตั้งลำดับ + เปิดอัญเชิญเลย ไม่ถาม · ไม่ติ๊กอะไร = ปุ่มปิด
+--        แม่ในกระเป๋าที่ติ๊กไว้ไม่จำข้ามการเปิดหน้าต่าง (ส่งแม่ = ตายถาวร ห้ามมีของค้างติ๊กที่ลืมไปแล้ว)
+--   เปิดใหม่ = ลำดับจาก server (releaseCycle ใน sync) · ⚠️ ตำแหน่งแม่ในรอบวน server จำใน memory (ไม่แตะ schema) —
+--        ออกเกม/เซิร์ฟใหม่ แม่ไปต่อท้ายรอบวน
+-- "ส่งไปรบ": มีแม่ใหม่ = กล่องยืนยันครั้งเดียว → ส่งแม่ (ชุดเดียว) → ตั้งลำดับรวม → เปิดอัญเชิญ
+--            ไม่มีแม่ใหม่ = ตั้งลำดับรวม + เปิดอัญเชิญเลย ไม่ถาม · รอบวนว่าง = ปุ่มปิด
 -- "หยุดอัญเชิญ" โชว์เฉพาะตอนอัญเชิญอยู่
 -- ⚠️ client ไม่ตัดสินอะไร: การปิดติ๊กเป็นแค่บอกผู้เล่นเร็ว ๆ — server ตรวจทุกตัวซ้ำ (SendMothersToBattleBatchRequest)
 -- ⚠️ virtual grid แบบเดียวกับ BagWindow/SellWindow — ห้ามสร้าง ViewportFrame ทุกใบพร้อมกัน
@@ -24,7 +30,8 @@ local SummonWindow = {}
 export type Actions = {
 	-- ⚠️ Main ต่อ remote ให้ · หน้าต่างนี้เรียกตามลำดับ แม่ → ลำดับลูก → เปิดอัญเชิญ เสมอ
 	sendMothers: (uids: { string }) -> (),
-	setReleaseOrder: (keys: { string }) -> (),
+	-- 5E-1b: ลำดับรวม (stack key + uid แม่ปนกัน) — SetReleaseOrderRequest signature เดิม
+	setReleaseOrder: (order: { string }) -> (),
 	setSummonEnabled: (enabled: boolean) -> (),
 	notify: (text: string, ok: boolean) -> (),
 }
@@ -98,12 +105,49 @@ local lastPayload: any = nil
 local activeTab: Tab = "children"
 local items: { Item } = {}
 local pool: { Card } = {}
--- ลำดับที่ติ๊ก (หัว = ส่ง/ปล่อยก่อน) · เก็บ uid/stack key ไม่ใช่ตำแหน่ง — ลิสต์เปลี่ยนลำดับได้ทุก sync
-type Ticks = { mothers: { string }, children: { string } }
-local ticks: Ticks = { mothers = {}, children = {} }
+local previewLabel: TextLabel
+-- 5E-1b: รอบวนรวมสองแท็บ (หัว = ปล่อยก่อน) · เก็บ uid/stack key ไม่ใช่ตำแหน่ง — ลิสต์เปลี่ยนลำดับได้ทุก sync
+type Entry = { kind: "mother" | "child", key: string }
+local order: { Entry } = {}
+local PREVIEW_ITEMS = 6
 
-local function tickList(tab: Tab): { string }
-	return if tab == "mothers" then ticks.mothers else ticks.children
+local function orderIndex(key: string): number?
+	for index, entry in order do
+		if entry.key == key then
+			return index
+		end
+	end
+	return nil
+end
+
+local function countKind(kind: "mother" | "child"): number
+	local count = 0
+	for _, entry in order do
+		if entry.kind == kind then
+			count += 1
+		end
+	end
+	return count
+end
+
+local function rosterSet(): { [string]: boolean }
+	local set: { [string]: boolean } = {}
+	for _, mother in (if lastPayload then lastPayload.battleRoster else nil) or {} do
+		set[mother.uid] = true
+	end
+	return set
+end
+
+-- แม่ในกระเป๋าที่ติ๊กไว้ (= จะส่งไปรบตอนกดส่ง) เรียงตามรอบวน
+local function newMotherUids(): { string }
+	local inRoster = rosterSet()
+	local uids: { string } = {}
+	for _, entry in order do
+		if entry.kind == "mother" and not inRoster[entry.key] then
+			table.insert(uids, entry.key)
+		end
+	end
+	return uids
 end
 
 --------------------------------------------------------------------------------
@@ -241,32 +285,75 @@ local function motherTickable(item: Item): boolean
 	return not item.inField and not item.locked and stageBlockReason() == nil
 end
 
--- ตัดที่ติ๊กไว้แต่ใช้ไม่ได้แล้วทิ้ง (ส่ง/ขาย/ย้ายไปแล้ว · ถูกล็อกทีหลัง · ด่านหมด · roster เต็มจากที่อื่น)
+-- ตัดที่ติ๊กไว้แต่ใช้ไม่ได้แล้วทิ้ง (ส่ง/ขาย/ย้ายไปแล้ว · ถูกล็อกทีหลัง · ด่านหมด · roster เต็มจากที่อื่น · แม่ในสนามตาย)
+-- แม่ในสนามที่ยังไม่อยู่ในรอบวน (ส่งจากที่อื่น) ต่อท้ายให้ — server ก็ต่อท้ายแบบเดียวกัน (อยู่ในรอบวนเสมอ)
 local function pruneTicks()
 	local mothers = buildItems("mothers")
-	local keptMothers: { string } = {}
-	for _, uid in ticks.mothers do
-		local item = findItem(mothers, uid)
-		if item and motherTickable(item) and #keptMothers < freeSlots() then
-			table.insert(keptMothers, uid)
-		end
-	end
-	ticks.mothers = keptMothers
-
 	local stacks = buildItems("children")
-	local keptStacks: { string } = {}
-	for _, key in ticks.children do
-		if findItem(stacks, key) then
-			table.insert(keptStacks, key)
+	local kept: { Entry } = {}
+	local newMothers = 0
+	for _, entry in order do
+		if entry.kind == "mother" then
+			local item = findItem(mothers, entry.key)
+			if item and item.inField then
+				table.insert(kept, entry)
+			elseif item and motherTickable(item) and newMothers < freeSlots() then
+				newMothers += 1
+				table.insert(kept, entry)
+			end
+		elseif findItem(stacks, entry.key) then
+			table.insert(kept, entry)
 		end
 	end
-	ticks.children = keptStacks
+	order = kept
+	for _, item in mothers do
+		if item.inField and not orderIndex(item.key) then
+			table.insert(order, { kind = "mother", key = item.key })
+		end
+	end
 end
 
--- ลำดับที่ติ๊กของแท็บนั้น (สำเนา) — หัว = ส่ง/ปล่อยก่อน
+-- รายการที่ติ๊กของแท็บนั้น เรียงตามรอบวน (สำเนา) — หัว = ปล่อยก่อน
 function SummonWindow.getTicks(tab: Tab): { string }
-	return table.clone(tickList(tab))
+	local kind = if tab == "mothers" then "mother" else "child"
+	local keys: { string } = {}
+	for _, entry in order do
+		if entry.kind == kind then
+			table.insert(keys, entry.key)
+		end
+	end
+	return keys
 end
+
+-- รอบวนรวมสองแท็บ (สำเนา) — เลขบนการ์ด = ตำแหน่งในรายการนี้
+function SummonWindow.getOrder(): { string }
+	local keys: { string } = {}
+	for _, entry in order do
+		table.insert(keys, entry.key)
+	end
+	return keys
+end
+
+-- ตัวอย่างลำดับวนสั้น ๆ ใต้รายการ: "ลำดับ: หมู → แม่ลิง → ม้า → …"
+local function previewText(): string
+	if #order == 0 then
+		return "ลำดับ: (ยังไม่ได้ติ๊ก)"
+	end
+	local mothers = buildItems("mothers")
+	local stacks = buildItems("children")
+	local names: { string } = {}
+	for index, entry in order do
+		if index > PREVIEW_ITEMS then
+			break
+		end
+		local item = if entry.kind == "mother" then findItem(mothers, entry.key) else findItem(stacks, entry.key)
+		local name = if item then item.charName else "?"
+		table.insert(names, if entry.kind == "mother" then `แม่{name}` else name)
+	end
+	local more = if #order > PREVIEW_ITEMS then " → …" else ""
+	return `ลำดับ: {table.concat(names, " → ")}{more} → วนกลับตัวแรก`
+end
+SummonWindow.getPreviewText = previewText
 
 --------------------------------------------------------------------------------
 -- การ์ด (pool ใช้ซ้ำ)
@@ -276,17 +363,17 @@ local layoutGrid: () -> ()
 local refreshHeader: () -> ()
 
 local function toggleItem(item: Item)
-	local list = tickList(activeTab)
-	local index = table.find(list, item.key)
+	if activeTab == "mothers" and item.inField then
+		-- แม่ในสนามอยู่ในรอบวนเสมอ — เอาติ๊กออก = ดึงกลับ ซึ่งทำไม่ได้
+		actions.notify("แม่ตัวนี้อยู่ในสนามรบแล้ว — อยู่ในรอบวนเสมอ ดึงกลับไม่ได้", false)
+		return
+	end
+	local index = orderIndex(item.key)
 	if index then
-		-- เอาออก → ตัวที่อยู่หลังเลื่อนขึ้นเอง (ลำดับ = ตำแหน่งในอาเรย์)
-		table.remove(list, index)
+		-- เอาออก → ตัวที่อยู่หลังเลื่อนขึ้นเองทั้งสองแท็บ (ลำดับ = ตำแหน่งในอาเรย์)
+		table.remove(order, index)
 	else
 		if activeTab == "mothers" then
-			if item.inField then
-				actions.notify("แม่ตัวนี้อยู่ในสนามรบแล้ว — ดึงกลับไม่ได้", false)
-				return
-			end
 			if item.locked then
 				actions.notify("แม่ตัวนี้ล็อกอยู่ ส่งไปรบไม่ได้ — ปลดล็อกในกระเป๋าก่อน", false)
 				return
@@ -296,12 +383,12 @@ local function toggleItem(item: Item)
 				actions.notify(reason, false)
 				return
 			end
-			if #list >= freeSlots() then
+			if #newMotherUids() >= freeSlots() then
 				actions.notify(`ส่งแม่ได้อีก {freeSlots()} ตัว (ในสนาม {rosterCount()}/{MAX_BATTLE_MOTHERS})`, false)
 				return
 			end
 		end
-		table.insert(list, item.key)
+		table.insert(order, { kind = if activeTab == "mothers" then "mother" else "child", key = item.key })
 	end
 	layoutGrid()
 	refreshHeader()
@@ -432,18 +519,19 @@ end
 
 local function bindCard(card: Card, item: Item)
 	card.item = item
-	local order = table.find(tickList(activeTab), item.key)
-	local disabled = activeTab == "mothers" and not motherTickable(item)
+	local position = orderIndex(item.key)
+	-- แม่ในสนาม: ทาเทา (ดึงกลับไม่ได้) แต่ยังโชว์เลขลำดับในรอบวน
+	local disabled = activeTab == "mothers" and not item.inField and not motherTickable(item)
 	card.button.BackgroundColor3 = if disabled
 		then CARD_DISABLED_COLOR
-		elseif order then CARD_SELECTED_COLOR
+		elseif position then CARD_SELECTED_COLOR
 		else CARD_COLOR
-	card.selectedStroke.Enabled = order ~= nil
-	card.orderBadge.Visible = order ~= nil
-	card.orderBadge.Text = if order then tostring(order) else ""
+	card.selectedStroke.Enabled = position ~= nil
+	card.orderBadge.Visible = position ~= nil
+	card.orderBadge.Text = if position then tostring(position) else ""
 	card.lockBadge.Visible = item.locked
 	card.fieldTag.Visible = item.inField
-	card.shade.Visible = disabled
+	card.shade.Visible = disabled or (activeTab == "mothers" and item.inField)
 	UiKit.setPortrait(card.portrait, item.charId, item.class)
 	card.nameLabel.Text = `{item.charName}{statusText(item.statuses)}\n({item.weightText}kg)`
 	if activeTab == "mothers" then
@@ -512,15 +600,15 @@ local function setButton(button: TextButton, text: string, color: Color3, enable
 end
 
 local function refreshConfirm()
-	local mothers = #ticks.mothers
+	local mothers = #newMotherUids()
 	if mothers == 0 then
 		-- แม่ที่ติ๊กหลุดหมดระหว่างเปิดกล่อง (ส่ง/ล็อกจากที่อื่น · ด่านหมด) → ไม่มีอะไรให้ยืนยันแล้ว
 		confirm.Visible = false
 		return
 	end
-	local children = #ticks.children
+	local children = countKind("child")
 	local childLine = if children > 0
-		then `ลูก {children} กอง ปล่อยตามลำดับที่ติ๊ก`
+		then `ลูก {children} กอง ปล่อยทีละตัวตามรอบวนที่ติ๊ก`
 		else "ไม่ได้ติ๊กลูก — ลูกจะไม่ถูกปล่อย"
 	-- 5E-1 (ผู้ใช้สั่ง): แม่ลงสนามจริงแล้ว โดนศัตรู/ป้อมฆ่าระหว่างรบได้ + ที่รอดตายหมดตอนด่านพัง (กติกาเดิม)
 	confirmText.Text = `ส่งแม่ {mothers} ตัว — แม่อาจตายถาวรระหว่างรบ (โดนศัตรู/ป้อมยิง)`
@@ -539,13 +627,13 @@ refreshHeader = function()
 
 	local summoning = payload.summonEnabled == true
 	local stage = if payload.activeStage then `ด่าน {payload.activeStage}` else "ผ่านครบทุกด่านแล้ว"
-	-- 5E-1 (ค3): สนามว่าง → server รอพร้อมปล่อยครบ GATHER_SIZE ก่อนลงสนาม · ตัวเลขมาจาก server (payload.battle)
+	-- 5E-1b: แถวเดียว (ไม่มีรวมพลแล้ว) · จำนวนในแถวมาจาก server (payload.battle)
 	local battle = payload.battle
-	local summonText = if not summoning
-		then "⏸ หยุดอยู่"
-		elseif battle and battle.gathering then `⏳ กำลังรวมพล {battle.available}/{battle.gatherTarget}`
-		else "🟢 กำลังอัญเชิญ"
-	statusLabel.Text = `{summonText} · ด่านที่กำลังตี: {stage}`
+	local lineText = if summoning and battle and battle.our
+		then ` · แถว {#battle.our}/{battle.lineLength or Config.Balance.Combat.LINE_LENGTH}`
+		else ""
+	local summonText = if summoning then "🟢 กำลังอัญเชิญ" else "⏸ หยุดอยู่"
+	statusLabel.Text = `{summonText}{lineText} · ด่านที่กำลังตี: {stage}`
 		.. ` · แม่ในสนามรบ {rosterCount()}/{MAX_BATTLE_MOTHERS}`
 
 	-- ⚠️ Phase 5A: รวมเหตุผลทุกข้อที่บล็อกอยู่ (ไม่แทนที่กัน) — ล็อกบอสขึ้นก่อนเพราะเป็นตัวที่ห้ามกดส่งจริง
@@ -572,14 +660,15 @@ refreshHeader = function()
 		noticeLabel.Text = `⚠️ {table.concat(warnings, " · ")}`
 		noticeLabel.TextColor3 = WARN_COLOR
 	elseif activeTab == "mothers" then
-		noticeLabel.Text = `ติ๊กได้อีก {freeSlots() - #ticks.mothers} ตัว · เลข = ลำดับส่ง · แม่ในคอกไม่แสดง (ถอดเข้ากระเป๋าก่อน)`
+		noticeLabel.Text = `ติ๊กได้อีก {freeSlots() - #newMotherUids()} ตัว · เลข = ลำดับในรอบวน (ร่วมกับแท็บลูก) · แม่ในคอกไม่แสดง`
 		noticeLabel.TextColor3 = HINT_COLOR
 	else
-		noticeLabel.Text = "ติ๊กกองที่จะปล่อย · เลข = ลำดับปล่อย · กองที่ไม่ติ๊กจะไม่ถูกปล่อย"
+		noticeLabel.Text = "ติ๊กกองที่จะปล่อย · เลข = ลำดับในรอบวน (ร่วมกับแท็บแม่) · กองที่ไม่ติ๊กจะไม่ถูกปล่อย"
 		noticeLabel.TextColor3 = HINT_COLOR
 	end
+	previewLabel.Text = previewText()
 
-	local mothers, children = #ticks.mothers, #ticks.children
+	local mothers, children = countKind("mother"), countKind("child")
 	if blocked then
 		setButton(sendButton, "🔒 ส่งไปรบไม่ได้ — กำจัดบอสก่อน", SEND_COLOR, false)
 		confirm.Visible = false -- ล็อกเข้ามาตอนกล่องยืนยันเปิดอยู่ → ปิดทิ้ง (กดยืนยันไปก็ไม่มีผล)
@@ -604,37 +693,35 @@ local function refreshAll()
 	refreshHeader()
 end
 
--- ⚠️ ลำดับยิงตายตัว: แม่ (ถ้ามี · ชุดเดียว) → ลำดับลูก → เปิดอัญเชิญ — server รับตามลำดับที่ยิง
--- ส่งแม่ไม่ได้สักตัวก็ยังตั้งลำดับ + เปิดอัญเชิญ (server แจ้งผลแม่แยกทาง toast)
+-- ⚠️ ลำดับยิงตายตัว: แม่ใหม่ (ถ้ามี · ชุดเดียว) → ลำดับรวม → เปิดอัญเชิญ — server รับตามลำดับที่ยิง
+-- (แม่ต้องเข้า roster ก่อน ลำดับรวมถึงอ้าง uid ได้) · ส่งแม่ไม่ได้สักตัวก็ยังตั้งลำดับ + เปิดอัญเชิญ (server ตัด uid ที่ไม่อยู่ใน roster เอง)
 local function fire()
-	local uids = table.clone(ticks.mothers)
-	local order = table.clone(ticks.children)
-	table.clear(ticks.mothers)
+	local uids = newMotherUids()
+	local keys = SummonWindow.getOrder()
 	if #uids > 0 then
 		actions.sendMothers(uids)
 	end
-	actions.setReleaseOrder(order)
+	actions.setReleaseOrder(keys)
 	actions.setSummonEnabled(true)
 	layoutGrid()
 	refreshHeader()
 end
 
 local function onSend()
-	local mothers, children = #ticks.mothers, #ticks.children
-	if mothers + children == 0 or summonBlockReason() then
+	if #order == 0 or summonBlockReason() then
 		return
 	end
-	if mothers > 0 then
+	if #newMotherUids() > 0 then
 		confirm.Visible = true
 		refreshConfirm()
 		return
 	end
-	fire() -- ลูกอย่างเดียว ไม่ต้องยืนยัน (ไม่มีอะไรตายถาวร)
+	fire() -- ไม่มีแม่ใหม่ ไม่ต้องยืนยัน (ไม่มีอะไรตายถาวรเพิ่ม)
 end
 
 local function onConfirm()
 	confirm.Visible = false
-	if #ticks.mothers == 0 or summonBlockReason() then
+	if #newMotherUids() == 0 or summonBlockReason() then
 		return
 	end
 	fire()
@@ -794,13 +881,18 @@ function SummonWindow.create(parent: ScreenGui, windowActions: Actions)
 	scroll = Instance.new("ScrollingFrame")
 	scroll.Name = "Grid"
 	scroll.Position = UDim2.fromScale(0.015, 0.22)
-	scroll.Size = UDim2.fromScale(0.97, 0.63)
+	scroll.Size = UDim2.fromScale(0.97, 0.58)
 	scroll.BackgroundTransparency = 1
 	scroll.BorderSizePixel = 0
 	scroll.ScrollBarThickness = 6
 	scroll.ScrollingDirection = Enum.ScrollingDirection.Y
 	scroll.CanvasSize = UDim2.fromOffset(0, 0)
 	scroll.Parent = content
+
+	-- 5E-1b: ตัวอย่างลำดับวน (แม่ + กองลูกรวมกัน) ใต้รายการ
+	previewLabel = makeHeaderLabel("Preview", 0.808, INFO_COLOR)
+	previewLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	previewLabel.Parent = content
 
 	emptyLabel = UiKit.label({
 		Name = "Empty",
@@ -903,25 +995,36 @@ local function defaultChildTicks(): { string }
 	return keys
 end
 
--- เปิด = ติ๊กลูกตาม releaseOrder ล่าสุดจาก server (เห็นลำดับเดิม) · ว่าง = ติ๊กทุกกองไว้ก่อน · ติ๊กแม่เริ่มว่างเสมอ
--- ⚠️ "ว่าง" รวมกรณีผู้เล่นเคยส่งลำดับว่างเอง (ส่งแม่อย่างเดียว) — แยกไม่ได้โดยไม่แตะ schema ·
---   เปิดครั้งถัดไปจึงติ๊กทุกกองให้อีกรอบ (กล่องยืนยันบอกจำนวนกองที่จะปล่อยก่อนส่งเสมอ)
+-- เปิด = รอบวนล่าสุดจาก server (releaseCycle ใน sync · แม่ในสนาม + กองที่ติ๊ก ตามลำดับเดิม)
+-- ยังไม่เคยติ๊กกองไหน (releaseOrder ว่าง) = ติ๊กทุกกองไว้ก่อน (เรียงพลัง) ตามด้วยแม่ในสนาม · แม่ในกระเป๋าเริ่มไม่ติ๊กเสมอ
+-- ⚠️ "ว่าง" รวมกรณีผู้เล่นเคยส่งลำดับที่ไม่มีกองลูกเอง — แยกไม่ได้โดยไม่แตะ schema ·
+--   เปิดครั้งถัดไปจึงติ๊กทุกกองให้อีกรอบ (กล่องยืนยัน/ปุ่มส่งบอกจำนวนกองที่จะปล่อยก่อนส่งเสมอ)
 function SummonWindow.open()
 	window.Visible = true
 	confirm.Visible = false
-	table.clear(ticks.mothers)
-	local order = if lastPayload then lastPayload.releaseOrder or {} else {}
-	ticks.children = if #order > 0 then table.clone(order) else defaultChildTicks()
+	table.clear(order)
+	local payload = lastPayload
+	local released = if payload then payload.releaseOrder or {} else {}
+	local cycle = if payload then payload.releaseCycle or {} else {}
+	if #released == 0 then
+		for _, key in defaultChildTicks() do
+			table.insert(order, { kind = "child", key = key })
+		end
+	end
+	for _, item in cycle do
+		if (item.kind == "child" or item.kind == "mother") and type(item.id) == "string" and not orderIndex(item.id) then
+			table.insert(order, { kind = item.kind, key = item.id })
+		end
+	end
 	scroll.CanvasPosition = Vector2.zero
-	refreshAll() -- pruneTicks ตัดกองในลำดับที่ไม่ได้แสดง (หมดแล้วไม่มีแม่ผลิตเติม) ทิ้ง
+	refreshAll() -- pruneTicks ตัดกองที่ไม่ได้แสดง (หมดแล้วไม่มีแม่ผลิตเติม) ทิ้ง + ต่อท้ายแม่ในสนามที่ขาด
 end
 
--- ปิด = ล้างที่ติ๊กไว้ทั้งสองแท็บ + ปิดกล่องยืนยัน (ติ๊กลูกกลับมาจาก releaseOrder ตอนเปิดใหม่)
+-- ปิด = ล้างที่ติ๊กไว้ทั้งหมด + ปิดกล่องยืนยัน (ลำดับกลับมาจาก releaseCycle ตอนเปิดใหม่)
 function SummonWindow.close()
 	window.Visible = false
 	confirm.Visible = false
-	table.clear(ticks.mothers)
-	table.clear(ticks.children)
+	table.clear(order)
 end
 
 return SummonWindow

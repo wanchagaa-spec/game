@@ -44,9 +44,8 @@ row("META", "damageFormula", Config.Balance.Damage.ACTIVE_FORMULA)
 row("META", "coinBase", Config.Balance.Economy.BASE_PER_MINUTE)
 row("META", "coinStageMult", Config.Balance.Economy.STAGE_MULTIPLIER)
 row("META", "sellMinutes", Config.Balance.Economy.SELL_MOTHER_MINUTES)
--- 5E-1 รบแบบชุด: ค่าเดิม (autoPause/maxVisible/walkSeconds) ลบแล้ว
-row("META", "fieldSlots", Config.Balance.Combat.FIELD_SLOTS)
-row("META", "gatherSize", Config.Balance.Combat.GATHER_SIZE)
+-- 5E-1b แถวเดียว: ค่าเดิม (autoPause/maxVisible/walkSeconds · สนาม 6 ช่อง/รวมพล) ลบแล้ว
+row("META", "lineLength", Config.Balance.Combat.LINE_LENGTH)
 row("META", "autoPauseDeaths", Config.Balance.Combat.AUTO_PAUSE_AFTER_DEATHS)
 row("META", "bagCapacity", Config.Balance.Bag.CAPACITY)
 row("META", "maxSsOverS", Config.Balance.BalanceCheck.MAX_SS_OVER_S_RATIO)
@@ -256,15 +255,15 @@ for _, w in WEIGHTS do
 end
 
 -- ── turret (5E-1: ยิงจริง · สัดส่วนของเลือดลูกอ้างอิงที่เข้าสนาม) ──
--- แถว: ด่าน · ดาเมจช่องเต็ม/วิ · turretDps · สัดส่วน (= TOLL) · 10% ของดาเมจ (อ้างอิงเดิม) · ช่องบนสนาม ·
---       วิที่ป้อมล้างสนามเต็มได้ลำพัง · วินาทีตีทั้งด่าน (โมเดลรวมพล)
+-- แถว: ด่าน · ดาเมจตัวหน้าสุด/วิ · turretDps · สัดส่วน (= TOLL) · 10% ของดาเมจ (อ้างอิงเดิม) · ทหารในแถว ·
+--       วิที่ป้อมล้างแถวเต็มได้ลำพัง · วินาทีตีทั้งด่าน (โมเดลแถวเดียว)
 for stage = 2, 9 do
 	local ref = Config.getReferenceUnitStats(stage)
 	local fullOutput = ref.fullPower * ref.releaseRate
 	local t = Config.getStageTurretDps(stage)
 	local hpIn = math.min(ref.producedPerSecond, ref.releaseRate) * ref.hp
-	local slots = Config.Balance.Combat.FIELD_SLOTS
-	row("TURRET", stage, fullOutput, t, t / hpIn, 0.1 * fullOutput, slots, slots * ref.hp / t,
+	local lineLength = Config.Balance.Combat.LINE_LENGTH
+	row("TURRET", stage, fullOutput, t, t / hpIn, 0.1 * fullOutput, lineLength, lineLength * ref.hp / t,
 		Config.getReferenceClearEstimate(stage).totalSeconds)
 end
 

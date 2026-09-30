@@ -1161,17 +1161,19 @@ do
 	table.sort(missing)
 	check("ทุกฟิลด์จาก CombatService.buildSyncFields ถึง payload จริง", table.concat(missing, ","), "")
 	local battle = payload.battle
-	check("  payload.battle มีทหารเรา 6 ช่อง", battle and #battle.our, 6)
-	check("  payload.battle มีศัตรู 6 ช่อง", battle and #battle.enemies, 6)
+	local lineLength = Config.Balance.Combat.LINE_LENGTH
+	check(`  payload.battle มีแถวเรา {lineLength} ตัว (5E-1b แถวเดียว)`, battle and #battle.our, lineLength)
+	check(`  payload.battle มีแถวศัตรู {lineLength} ตัวแรก`, battle and #battle.enemies, lineLength)
 	check("  ด่านที่กำลังตี = 2", battle and battle.stage, 2)
+	check("  รอบวนปล่อยถึง payload (releaseCycle)", payload.releaseCycle and #payload.releaseCycle, 1)
 	local shown = nil
 	for _, stack in payload.children do
 		if stack.key == key then
 			shown = stack.count
 		end
 	end
-	check("  จำนวนในกองที่โชว์หักลูกบนสนาม 6 ตัวแล้ว (20 → 14)", shown, 14)
-	check("  กองจริงยังนับลูกบนสนามอยู่ (หักตอนตาย)", data.children[key] >= 14, true)
+	check(`  จำนวนในกองที่โชว์หักลูกในแถว {lineLength} ตัวแล้ว (20 → {20 - lineLength})`, shown, 20 - lineLength)
+	check("  กองจริงยังนับลูกในแถวอยู่ (หักตอนตาย)", data.children[key] >= 20 - lineLength, true)
 	CombatService.clearMeta(player.UserId)
 end
 

@@ -503,7 +503,7 @@ W('''<div class="note">ค่านี้พลาดมาแล้ว <b>ส�
 <tr class="hi"><td><b>✅</b></td><td><b>เก็บเป็นสัดส่วน ให้โค้ดคำนวณเอง</b></td><td><b>ไม่ต้องแก้มืออีกแล้ว</b></td></tr>
 </tbody></table></div>
 <div class="formula">Config.Balance.Combat.TURRET_TOLL = {{ {', '.join(f'{float(r[3]):.2f}' for r in TUR)} }}<br>
-turretDps(N) = TURRET_TOLL[N] × min(ผลิต, ปล่อย) × เลือดลูกอ้างอิง (5E-1: ป้อมยิงจริง ยิงตัวหน้าสุด)</div>''')
+turretDps(N) = TURRET_TOLL[N] × min(ผลิต, ปล่อย) × เลือดลูกอ้างอิง (5E-1b: ป้อมยิงจริง ยิงตัวหน้าสุดของแถว · เฉพาะตอนถึงกำแพง)</div>''')
 rows = []
 for r in TUR:
     st, ourdps, tdps, ratio, sug, onfield, wipe, secs = r
@@ -512,7 +512,7 @@ for r in TUR:
                   cell(fint(onfield) + ' ตัว'),
                   cell(fhours(float(secs)/3600)),
                   cell(f'{float(wipe):,.0f} วิ', 'dim')], ''))
-W(table(['ด่าน','damage/วิ ของเรา','turretDps ที่คำนวณได้','กินกำลังพล','ทหารบนสนาม','เวลารบทั้งด่าน','turret ล้างสนามใน'], rows))
+W(table(['ด่าน','damage/วิ ของเรา','turretDps ที่คำนวณได้','กินกำลังพล','ทหารในแถว','เวลารบทั้งด่าน','turret ล้างแถวใน'], rows))
 W(f'''<div class="key"><b>ตาราง <code>Stages</code> ไม่มีฟิลด์ <code>turretDps</code> แล้ว</b> —
 ปรับตัวคูณคลาส / ตัวคูณ damage / อัตราปล่อย / อัตราผลิต / ความจุคอก อะไรก็ตาม
 <b>turret ขยับตามเองทันที ไม่ต้องแตะอะไรเลย</b><br>

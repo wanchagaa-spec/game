@@ -580,10 +580,10 @@ return function(t, Config)
 	check("คืนราคาเดิมแล้ว validate ผ่าน", pcall(Config.validate), true)
 
 	print("── เกมต้องยากขึ้นเรื่อย ๆ ──")
-	-- 5E-1 รบแบบชุด + รวมพล (ค3) + เดินทัพ: คิดแยกจาก Config เอง แล้วเทียบกับ getReferenceClearHours ข้างล่าง
-	-- ช่องเต็ม = พลังเต็ม × อัตราปล่อย · ช่วงศัตรู: สู้กันกึ่งกลางเลน ลูกตาย = ศัตรูรุม (พลังฐาน × อัตราปล่อย) ÷ เลือดลูก
-	-- (ป้อมไม่ยิง — นอกระยะ) · ช่วงกำแพง: โดนแค่ป้อม · แต่ละช่วงบวกเวลาเดินทัพครึ่งทาง T
-	-- ผลิตไม่ทันการตาย → ผลิต × (ดาเมจเต็ม ÷ อัตราตาย) × (1 − (6 − 1) ÷ (2 × (12 + ผลิต × T)))
+	-- 5E-1b แถวเดียว + เดินทัพ: คิดแยกจาก Config เอง แล้วเทียบกับ getReferenceClearHours ข้างล่าง
+	-- ตัวหน้าสุดตี = พลังเต็ม × อัตราปล่อย · ช่วงศัตรู: สู้ตัวต่อตัวกึ่งกลางเลน ศัตรูหน้าสุดตีเฉลี่ยตามเวลา
+	-- = พลังฐาน × อัตราปล่อย (เล็ก 5 → ใหญ่ 1 · ใหญ่ 5 เท่า) · ป้อมไม่ยิง — นอกระยะ · ช่วงกำแพง: โดนแค่ป้อม
+	-- ผลิตไม่ทันการตาย → ผลิต × ดาเมจเต็ม ÷ อัตราตาย (ไม่มีรวมพล · ไม่มีช่องว่างเสียเปล่า) · แต่ละช่วงบวกเวลาเดินทัพ T
 	local function hoursAt(st)
 		local defHp, wallHp = Config.getStageDefenderHp(st), Config.getStageWallHp(st)
 		if defHp + wallHp <= 0 then return 0 end
@@ -601,7 +601,7 @@ return function(t, Config)
 		local function rate(incoming)
 			local deaths = incoming / base
 			if deaths <= produced then return full * R end
-			return produced * full * R / deaths * (1 - 5 / (2 * (12 + produced * T)))
+			return produced * full * R / deaths
 		end
 		local enemyPart = if defHp > 0 then defHp / rate(base * R) + T else 0
 		local wallPart = if wallHp > 0 then wallHp / rate(turret) + T else 0
@@ -686,12 +686,12 @@ return function(t, Config)
 	Config.Balance.Combat.MOTHERS_SELECTABLE_FROM_PEN = savedP
 
 	do
-	print("── 5E-1 รบแบบชุด: ค่าใน Config ──")
+	print("── 5E-1b แถวเดียว: ค่าใน Config ──")
 	local combatCfg = Config.Balance.Combat
-	check("สนาม 6 ช่องต่อฝ่าย", combatCfg.FIELD_SLOTS, 6)
-	check("แม่ยืนช่องหลังสุด", combatCfg.MOTHER_SLOT, combatCfg.FIELD_SLOTS)
-	check("รวมพล 12 ตัว (ค3)", combatCfg.GATHER_SIZE, 12)
-	check("ศัตรูชุดละ ใหญ่ 1 + เล็ก 5", combatCfg.ENEMY_BIG_PER_GROUP == 1 and combatCfg.ENEMY_SMALL_PER_GROUP == 5, true)
+	check("แถวยาวสูงสุด 10 ตัว", combatCfg.LINE_LENGTH, 10)
+	check("ไม่มีสนาม 6 ช่อง/รวมพลแล้ว", combatCfg.FIELD_SLOTS == nil and combatCfg.MOTHER_SLOT == nil and combatCfg.GATHER_SIZE == nil, true)
+	check("ไม่มีตัวลดประสิทธิภาพรวมพลแล้ว", Config.getGatherEfficiency, nil)
+	check("รอบวนศัตรู เล็ก 5 → ใหญ่ 1", combatCfg.ENEMY_BIG_PER_GROUP == 1 and combatCfg.ENEMY_SMALL_PER_GROUP == 5, true)
 	check("ตัวใหญ่ 5 เท่า", combatCfg.ENEMY_BIG_MULTIPLIER, 5)
 	check("auto-pause ตายติดกัน 30 ตัว", combatCfg.AUTO_PAUSE_AFTER_DEATHS, 30)
 	check("ค่าเก่าของระบบปล่อยต่อเนื่องลบแล้ว", combatCfg.AUTO_PAUSE_AFTER_UNITS == nil
@@ -700,39 +700,50 @@ return function(t, Config)
 	combatCfg.MAX_VISIBLE_UNITS = 120
 	check("เติม MAX_VISIBLE_UNITS กลับ → validate ไม่ผ่าน", pcall(Config.validate), false)
 	combatCfg.MAX_VISIBLE_UNITS = nil
-	combatCfg.GATHER_SIZE = 4
-	check("รวมพลน้อยกว่าช่อง → validate ไม่ผ่าน", pcall(Config.validate), false)
-	combatCfg.GATHER_SIZE = 12
-	combatCfg.ENEMY_SMALL_PER_GROUP = 4
-	check("ศัตรูชุดไม่เท่าจำนวนช่อง → validate ไม่ผ่าน", pcall(Config.validate), false)
-	combatCfg.ENEMY_SMALL_PER_GROUP = 5
+	for _, legacy in { "FIELD_SLOTS", "MOTHER_SLOT", "GATHER_SIZE" } do
+		combatCfg[legacy] = 6
+		check(`เติม {legacy} (5E-1) กลับ → validate ไม่ผ่าน`, pcall(Config.validate), false)
+		combatCfg[legacy] = nil
+	end
+	combatCfg.LINE_LENGTH = 0
+	check("แถวยาว 0 → validate ไม่ผ่าน", pcall(Config.validate), false)
+	combatCfg.LINE_LENGTH = 10
 	check("คืนค่าเดิมแล้ว validate ผ่าน", pcall(Config.validate), true)
 
-	print("── 5E-1 ทหารเรา: เลือด = พลังฐาน · ดาเมจ = พลังเต็ม × อัตราปล่อย ÷ 6 ──")
+	print("── 5E-1b ทหารเรา: เลือด = พลังฐาน · ดาเมจ = พลังเต็ม × อัตราปล่อย (ตีแค่ตัวหน้าสุด) ──")
 	local ww = 1500
 	check("เลือดไม่รวมอัปดาเมจ", Config.getUnitHp(ww, "wukong", nil), Config.computePower(ww, "wukong", nil))
-	near("ดาเมจ/วิ = พลังเต็ม × R ÷ 6", Config.getUnitDps(9, ww, "wukong", nil, 40, 3),
-		Config.computeBattlePower(ww, "wukong", nil, 40, 3) * 10 / 6, 1e-9)
+	near("ดาเมจ/วิ = พลังเต็ม × R (ไม่หาร 6 แล้ว)", Config.getUnitDps(9, ww, "wukong", nil, 40, 3),
+		Config.computeBattlePower(ww, "wukong", nil, 40, 3) * 10, 1e-9)
 	check("อัปดาเมจเพิ่มดาเมจ ไม่เพิ่มเลือด", Config.getUnitDps(5, ww, "wukong", nil, 20) > Config.getUnitDps(5, ww, "wukong", nil, 0)
 		and Config.getUnitHp(ww, "wukong", nil) == Config.computePower(ww, "wukong", nil), true)
 
-	print("── 5E-1 ศัตรู: ใหญ่ 5 เท่า · เลือดรวมเท่าเดิม · สองชนิดหมดพร้อมกัน ──")
-	local enemyTotalsOk, enemyRatioOk, enemyDpsOk = true, true, true
+	print("── 5E-1b ศัตรู: รอบวน เล็ก 5 → ใหญ่ 1 · ใหญ่ 5 เท่า · เลือดรวม/เงินรวมเท่าเดิม ──")
+	local enemyTotalsOk, enemyRatioOk, enemyDpsOk, enemyCountOk = true, true, true, true
 	for st = 1, 9 do
 		local e = Config.getStageEnemyStats(st)
 		local sum = e.bigCount * e.bigHp + e.smallCount * e.smallHp
 		if math.abs(sum - Config.getStageDefenderHp(st)) > Config.getStageDefenderHp(st) * 1e-9 then enemyTotalsOk = false end
 		if st >= 2 then
 			if e.bigHp ~= e.smallHp * 5 or e.bigDps ~= e.smallDps * 5 then enemyRatioOk = false end
-			-- เลือดรวมตัวใหญ่ : ตัวเล็ก = 1 : 5 (ตามสัดส่วนช่อง) → ทุกช่องโดนเท่ากันแล้วหมดพร้อมกัน
-			if math.abs(e.bigCount * e.bigHp * 5 - e.smallCount * e.smallHp) > sum * 1e-9 then enemyRatioOk = false end
+			-- จำนวนตัว เล็ก : ใหญ่ = 5 : 1 ตามรอบวน (5E-1 เคยเป็น 25 : 1)
+			if e.smallCount ~= 5 * e.bigCount or e.bigCount ~= e.cycles then enemyCountOk = false end
+			-- ตีตัวหน้าสุดทีละตัว เฉลี่ยตามเวลา (ตัวใหญ่ยืนนาน 5 เท่า) = พลังฐานลูกอ้างอิง × อัตราปล่อย
 			local ref = Config.getReferenceUnitStats(st)
-			if math.abs((e.bigDps + 5 * e.smallDps) - ref.hp * ref.releaseRate) > 1e-9 * ref.hp * ref.releaseRate then enemyDpsOk = false end
+			local average = (5 * e.smallHp * e.smallDps + e.bigHp * e.bigDps) / (5 * e.smallHp + e.bigHp)
+			if math.abs(average - ref.hp * ref.releaseRate) > 1e-9 * ref.hp * ref.releaseRate then enemyDpsOk = false end
+			if math.abs(Config.getStageEnemyAverageDps(st) - average) > 1e-9 * average then enemyDpsOk = false end
 		end
 	end
 	check("เลือดรวมศัตรู = HP ทหารฝ่ายรับเดิมทุกด่าน", enemyTotalsOk, true)
-	check("ตัวใหญ่ = ตัวเล็ก × 5 (เลือด+ดาเมจ) · เลือดรวมสองชนิด 1 : 5", enemyRatioOk, true)
-	check("ศัตรูทั้งชุดรุม = พลังฐานลูกอ้างอิง × อัตราปล่อย", enemyDpsOk, true)
+	check("ตัวใหญ่ = ตัวเล็ก × 5 (เลือด+ดาเมจ)", enemyRatioOk, true)
+	check("จำนวนตัว เล็ก 5 : ใหญ่ 1 ตามรอบวน", enemyCountOk, true)
+	check("ดาเมจตัวหน้าสุดเฉลี่ยตามเวลา = พลังฐานลูกอ้างอิง × อัตราปล่อย (ลูกอ้างอิงตาย R ตัว/วิ)", enemyDpsOk, true)
+	check("ชนิดตามรอบวน: 1–5 เล็ก · 6 ใหญ่ · 7 เล็ก · 12 ใหญ่",
+		`{Config.getEnemyKindAt(1)} {Config.getEnemyKindAt(5)} {Config.getEnemyKindAt(6)} {Config.getEnemyKindAt(7)} {Config.getEnemyKindAt(12)}`,
+		"small small big small big")
+	check("นับตัวใหญ่ถึงตัวที่ 13 = 2", Config.countEnemyBigUpTo(13), 2)
+	check("นับตัวใหญ่ถึงตัวที่ 5 = 0 · 6 = 1 · 0 = 0", `{Config.countEnemyBigUpTo(5)} {Config.countEnemyBigUpTo(6)} {Config.countEnemyBigUpTo(0)}`, "0 1 0")
 	check("ด่าน 1 ไม่มีศัตรู", Config.getStageEnemyStats(1).bigCount + Config.getStageEnemyStats(1).smallCount, 0)
 	near("เลือดตัวเล็กด่าน 9 ≈ พลังเต็มลูกอ้างอิง", Config.getStageEnemyStats(9).smallHp / Config.getReferenceUnitStats(9).fullPower, 1, 0.01)
 	for st = 2, 9 do

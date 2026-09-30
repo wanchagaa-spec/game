@@ -7,7 +7,9 @@
 --     แม่หมด = ลูก 6 · ลูกหมด = แม่หลายตัว · เลือด = พลังฐาน · ดาเมจ/วิ = พลังเต็ม × อัตราปล่อย ÷ 6
 --   ฝั่งศัตรู: ใหญ่ 1 (ช่อง 1) + เล็ก 5 · ตายแล้วตัวชนิดเดียวกันลงช่องเดิมจนหมดจำนวนของด่าน
 --   ทหารเราตีศัตรูช่องเดียวกัน (ไม่มี = ตัวหน้าสุด) · ศัตรูทั้งหมดรุมทหารเราตัวหน้าสุด · ป้อมยิงตัวหน้าสุด
---   ศัตรูหมดแล้วค่อยตีกำแพงได้ · ป้อมยิงทั้งสองช่วง
+--   ศัตรูหมดแล้วค่อยตีกำแพงได้
+-- เดินทัพ (ผู้ใช้สั่ง): สนามว่างแล้วลงใหม่ = เดินจากแท่นอัญเชิญ · ศัตรูเดินออกจากกำแพงพร้อมกัน เจอกันกึ่งกลางเลน (นอกระยะป้อม) ·
+--   ศัตรูหมด → เดินต่อไปกำแพง · ระหว่างเดินไม่มีใครตีใคร · **ป้อมยิงเฉพาะตอนเดินถึงกำแพงแล้ว** (Config.getArmyMarchSeconds)
 -- รวมพล (ค3): สนามว่าง → รอพร้อมปล่อยครบ GATHER_SIZE ก่อน (ไม่มีทางถึง = ปล่อยเท่าที่มี) · ระหว่างสู้เติมทีละตัว
 --
 -- ⚠️ คำนวณแบบเหตุการณ์ต่อเนื่อง (เวลาจริง ไม่ใช่ขั้นเวลาตายตัว) — ผลแน่นอน ไม่สุ่ม · ไม่มีเศษเวลาหาย
@@ -62,6 +64,7 @@ export type EnemyState = {
 	bigQueue: number, -- ตัวใหญ่ที่ยังไม่ลงสนาม
 	smallQueue: number,
 	knownDefenders: number, -- defendersRemaining ที่สถานะนี้ตรงอยู่ (ไม่ตรง = มีคนแก้จากข้างนอก → สร้างใหม่)
+	atMiddle: boolean, -- เดินออกมายืนกึ่งกลางเลนแล้ว (ภาพ) — แถวใหม่เริ่มที่กำแพงเสมอ
 }
 
 export type CombatMeta = {
@@ -74,6 +77,11 @@ export type CombatMeta = {
 	gathering: boolean, -- กำลังรวมพล (สนามว่าง · รอให้ครบ GATHER_SIZE)
 	lastTurretShots: number, -- นัดที่ป้อมยิงใน tick ล่าสุด (ภาพเท่านั้น)
 	lastTurretTarget: number?, -- ช่องที่โดนนัดล่าสุด (ภาพเท่านั้น)
+	-- 5E-1 เดินทัพ (ผู้ใช้สั่ง): กองทัพเราอยู่/กำลังไปที่ไหน · ระหว่างเดินไม่มีใครตีใคร · ป้อมยิงเฉพาะ lineAt = "wall" ที่เดินถึงแล้ว
+	lineAt: ("middle" | "wall")?, -- nil = สนามว่าง
+	marchFrom: ("pedestal" | "middle" | "wall")?,
+	marchRemaining: number, -- วินาทีที่ยังต้องเดิน (0 = ถึงแล้ว)
+	marchDuration: number,
 }
 
 local combatMeta: { [number]: CombatMeta } = {}
@@ -92,6 +100,10 @@ function CombatService.newMeta(): CombatMeta
 		gathering = false,
 		lastTurretShots = 0,
 		lastTurretTarget = nil,
+		lineAt = nil,
+		marchFrom = nil,
+		marchRemaining = 0,
+		marchDuration = 0,
 	}
 end
 
@@ -476,6 +488,7 @@ function CombatService.buildEnemyState(stage: number, defendersRemaining: number
 		bigQueue = 0,
 		smallQueue = 0,
 		knownDefenders = defendersRemaining,
+		atMiddle = false,
 	}
 	local stats = Config.getStageEnemyStats(stage)
 	if stats.totalHp <= 0 or defendersRemaining <= 0 then
@@ -748,6 +761,10 @@ end
 function CombatService.clearField(meta: CombatMeta)
 	table.clear(meta.field)
 	meta.gathering = false
+	meta.lineAt = nil
+	meta.marchFrom = nil
+	meta.marchRemaining = 0
+	meta.marchDuration = 0
 end
 
 -- ตัดทหารบนสนามที่ของจริงหายไปแล้ว (debug ล้างคลัง · แม่ถูกย้ายออกจาก roster ทางอื่น) + อัปเดตดาเมจตามขั้นอัปล่าสุด
@@ -924,9 +941,47 @@ local function runBattle(data: Data, meta: CombatMeta, stage: number, seconds: n
 	local shotDamage = turretDps * shotPeriod
 	local wallTotal = Config.getStageWallHp(stage)
 	local enemy = ensureEnemyState(meta, data, stage)
+	local marchHalf = Config.getArmyMarchSeconds(stage)
+
+	local function enemiesRemain(): boolean
+		return frontEnemySlot(enemy) ~= nil or enemy.bigQueue > 0 or enemy.smallQueue > 0
+	end
+	local function startMarch(from: "pedestal" | "middle" | "wall", to: "middle" | "wall", duration: number)
+		meta.marchFrom = from
+		meta.lineAt = to
+		meta.marchDuration = duration
+		meta.marchRemaining = duration
+		meta.turretClock = 0
+	end
+	-- 5E-1 เดินทัพ: สนามว่าง = ไม่มีแนวรบ · ลงสนามใหม่ = เดินจากแท่น (ศัตรูยังอยู่ → ไปเจอกันกึ่งกลาง · หมดแล้ว → ไปกำแพงเต็มทาง) ·
+	-- ศัตรูหมดตอนยืนกึ่งกลาง = เดินต่อไปกำแพง · ศัตรูกลับมาตอนยืนที่กำแพง (debug ตั้งค่า) = ถอยกลับไปกึ่งกลาง
+	local function updateLine()
+		if fieldIsEmpty(meta) then
+			meta.lineAt = nil
+			meta.marchFrom = nil
+			meta.marchRemaining = 0
+			return
+		end
+		if meta.lineAt == nil then
+			if enemiesRemain() then
+				startMarch("pedestal", "middle", marchHalf)
+			else
+				startMarch("pedestal", "wall", marchHalf * 2)
+			end
+		elseif meta.lineAt == "middle" and meta.marchRemaining <= 0 and not enemiesRemain() then
+			startMarch("middle", "wall", marchHalf)
+		elseif meta.lineAt == "wall" and enemiesRemain() then
+			startMarch("wall", "middle", marchHalf)
+		end
+	end
+	local function deploy()
+		result.unitsReleased += CombatService.fillField(data, meta, stage)
+		updateLine()
+	end
 
 	refreshField(data, meta, stage)
-	result.unitsReleased += CombatService.fillField(data, meta, stage)
+	updateLine()
+	deploy()
 
 	local incoming: { [number]: number } = {}
 	local t = 0
@@ -938,24 +993,28 @@ local function runBattle(data: Data, meta: CombatMeta, stage: number, seconds: n
 			break
 		end
 
-		-- อัตราดาเมจตอนนี้
+		-- อัตราดาเมจตอนนี้ — ⚠️ 5E-1: ระหว่างเดินทัพไม่มีใครตีใคร · สู้ศัตรูกลางเลน (นอกระยะป้อม) · ป้อมยิงเฉพาะตอนเดินถึงกำแพงแล้ว
+		updateLine()
 		table.clear(incoming)
 		local enemyFront = frontEnemySlot(enemy)
+		local marching = meta.marchRemaining > 0
+		local fightingEnemies = not marching and meta.lineAt == "middle" and enemyFront ~= nil
+		local atWall = not marching and meta.lineAt == "wall"
 		local wallRate = 0
 		for slot = 1, slots do
 			local unit = meta.field[slot]
 			if unit then
-				if enemyFront then
-					local target = if enemy.field[slot] then slot else enemyFront
+				if fightingEnemies then
+					local target = if enemy.field[slot] then slot else enemyFront :: number
 					incoming[target] = (incoming[target] or 0) + unit.dps
-				elseif progress.wallHpRemaining > 0 then
+				elseif atWall and progress.wallHpRemaining > 0 then
 					wallRate += unit.dps
 				end
 			end
 		end
 		local ourFront = frontOurSlot(meta)
 		local enemyDps = 0
-		if ourFront then
+		if ourFront and fightingEnemies then
 			for slot = 1, slots do
 				local foe = enemy.field[slot]
 				if foe then
@@ -963,10 +1022,14 @@ local function runBattle(data: Data, meta: CombatMeta, stage: number, seconds: n
 				end
 			end
 		end
+		local turretActive = turretDps > 0 and atWall and ourFront ~= nil
 
 		-- เหตุการณ์ถัดไป
 		local dt = seconds - t
-		if turretDps > 0 then
+		if marching then
+			dt = math.min(dt, meta.marchRemaining)
+		end
+		if turretActive then
 			dt = math.min(dt, math.max(0, shotPeriod - meta.turretClock))
 		end
 		dt = math.min(dt, enemyKindEventTime(enemy, "big", incoming), enemyKindEventTime(enemy, "small", incoming))
@@ -985,7 +1048,20 @@ local function runBattle(data: Data, meta: CombatMeta, stage: number, seconds: n
 
 		-- เดินเวลา
 		t += dt
-		meta.turretClock += dt
+		if turretActive then
+			meta.turretClock += dt
+		else
+			meta.turretClock = 0 -- นัดแรกมาหลังเดินถึงกำแพงครบรอบยิง
+		end
+		if marching then
+			meta.marchRemaining = math.max(0, meta.marchRemaining - dt)
+			if meta.marchRemaining <= EPSILON then
+				meta.marchRemaining = 0
+				if meta.lineAt == "middle" then
+					enemy.atMiddle = true
+				end
+			end
+		end
 		local enemyDealt = 0
 		for slot = 1, slots do
 			local rate = incoming[slot]
@@ -1027,8 +1103,8 @@ local function runBattle(data: Data, meta: CombatMeta, stage: number, seconds: n
 			meta.deathsSinceProgress = 0
 		end
 
-		-- ป้อมยิง (ตัวหน้าสุด · นัดเดียวต่อเป้า ส่วนเกินทิ้ง)
-		if turretDps > 0 and meta.turretClock >= shotPeriod - EPSILON then
+		-- ป้อมยิง (ตัวหน้าสุด · นัดเดียวต่อเป้า ส่วนเกินทิ้ง) — เฉพาะตอนกองทัพเดินถึงกำแพงแล้ว
+		if turretActive and meta.turretClock >= shotPeriod - EPSILON then
 			meta.turretClock = math.max(0, meta.turretClock - shotPeriod)
 			local target = frontOurSlot(meta)
 			if target then
@@ -1064,7 +1140,7 @@ local function runBattle(data: Data, meta: CombatMeta, stage: number, seconds: n
 			break
 		end
 
-		result.unitsReleased += CombatService.fillField(data, meta, stage)
+		deploy()
 	end
 end
 
@@ -1246,8 +1322,15 @@ local function buildBattleView(data: Data, meta: CombatMeta?, stage: number?)
 		bigTotal = 0,
 		smallTotal = 0,
 		turretActive = false,
+		turretFiring = false,
 		turretShots = 0,
 		turretTarget = nil :: number?,
+		-- 5E-1 เดินทัพ: แนวรบ "middle" (กึ่งกลางเลน · Config.getBattleMeetX) / "wall" / nil = สนามว่าง
+		line = nil :: string?,
+		marchFrom = nil :: string?,
+		marchRemaining = 0,
+		marchDuration = 0,
+		enemiesAtMiddle = false,
 	}
 	if not stage then
 		return view
@@ -1255,6 +1338,7 @@ local function buildBattleView(data: Data, meta: CombatMeta?, stage: number?)
 	local stats = Config.getStageEnemyStats(stage)
 	view.bigTotal = stats.bigCount
 	view.smallTotal = stats.smallCount
+	-- ป้อมมีอยู่ในด่านนี้ (วาดกล่องบนกำแพง) · ยิงจริงเฉพาะตอนกองทัพเดินถึงกำแพงแล้ว (turretFiring)
 	view.turretActive = turretEnabled and Config.getStageTurretDps(stage) > 0
 	local progress = data.stageProgress[stage]
 	if type(progress) == "table" then
@@ -1278,6 +1362,12 @@ local function buildBattleView(data: Data, meta: CombatMeta?, stage: number?)
 	end
 	view.gathering = meta.gathering
 	view.available = CombatService.countAvailable(data, meta)
+	view.line = meta.lineAt
+	view.marchFrom = meta.marchFrom
+	view.marchRemaining = meta.marchRemaining
+	view.marchDuration = meta.marchDuration
+	view.enemiesAtMiddle = enemy ~= nil and enemy.stage == stage and enemy.atMiddle
+	view.turretFiring = view.turretActive and meta.lineAt == "wall" and meta.marchRemaining <= 0
 	view.turretShots = meta.lastTurretShots
 	view.turretTarget = meta.lastTurretTarget
 	for slot = 1, slotCount() do
@@ -1388,6 +1478,20 @@ function CombatService.describeBattle(data: Data, meta: CombatMeta?): string
 				Config.getStageWallHp(stage)
 			)
 		)
+	end
+	if meta then
+		local lineText = if meta.lineAt == nil
+			then "สนามว่าง"
+			elseif meta.marchRemaining > 0 then string.format(
+				"เดินทัพ %s → %s เหลือ %.1f/%.1f วิ",
+				meta.marchFrom or "?",
+				meta.lineAt,
+				meta.marchRemaining,
+				meta.marchDuration
+			)
+			elseif meta.lineAt == "middle" then "สู้ศัตรูกึ่งกลางเลน (นอกระยะป้อม)"
+			else "ถึงกำแพงแล้ว (ป้อมยิง)"
+		table.insert(lines, `แนวรบ: {lineText}`)
 	end
 	local reserved = CombatService.getReservedChildren(meta)
 	for slot = 1, slotCount() do

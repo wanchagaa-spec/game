@@ -23,6 +23,35 @@ return function(t, Config)
 		return CombatService.newMeta()
 	end
 
+	-- 5E-1 เดินทัพ: ลงสนามแล้วต้องเดินจากแท่นอัญเชิญก่อนถึงแนวรบ (ด่าน 9 เต็มทาง ~44 วิ) → tick ซ้ำจนด่านพัง
+	-- คืนผลของ tick ที่ด่านพัง (หรือ tick สุดท้ายถ้าไม่พังภายใน maxSeconds)
+	local function tickUntilCleared(data, meta, maxSeconds: number?)
+		local limit = maxSeconds or 120
+		local elapsed = 0
+		local result
+		repeat
+			result = CombatService.tick(data, meta, 5)
+			elapsed += 5
+		until result.stageCleared or elapsed >= limit
+		return result
+	end
+
+	-- ลงสนาม + เดินเวลาจนกองทัพเดินทัพถึงแนวรบ (ระหว่างเดินไม่มีใครตีใคร) · คืนผลรวมระหว่างเดิน
+	local function tickThroughMarch(data, meta)
+		local total = { damageDealt = 0, turretShots = 0, unitsReleased = 0, childrenLost = 0 }
+		local function add(r)
+			total.damageDealt += r.damageDealt
+			total.turretShots += r.turretShots
+			total.unitsReleased += r.unitsReleased
+			total.childrenLost += r.childrenLost
+		end
+		add(CombatService.tick(data, meta, 0.01))
+		while meta.marchRemaining > 0 do
+			add(CombatService.tick(data, meta, math.min(5, meta.marchRemaining)))
+		end
+		return total
+	end
+
 	----------------------------------------------------------------------------
 	-- init ด่านใหม่ถูกต้องตามสูตร
 	----------------------------------------------------------------------------
@@ -435,8 +464,11 @@ return function(t, Config)
 		table.insert(data.battleRoster, makeMother())
 		local before = data.stageProgress[2].defendersRemaining
 
+		local marched = tickThroughMarch(data, meta)
+		check("ไม่มีลูกในคลัง → แม่ 2 ตัวลงสนาม (ลูกหมด = แม่ลงช่องอื่นได้)", marched.unitsReleased, 2)
+		check("  ระหว่างเดินทัพไปกึ่งกลางยังไม่มีใครตีใคร", marched.damageDealt, 0)
+		check("  เดินถึงกึ่งกลางเลนแล้ว", meta.lineAt, "middle")
 		local result = CombatService.tick(data, meta, 2)
-		check("ไม่มีลูกในคลัง → แม่ 2 ตัวลงสนาม (ลูกหมด = แม่ลงช่องอื่นได้)", result.unitsReleased, 2)
 		check("  แม่ตัวแรกยืนช่องหลังสุด", meta.field[Config.Balance.Combat.MOTHER_SLOT].uid, data.battleRoster[1].uid)
 		check("  แม่ตัวที่สองลงช่องหน้าสุด", meta.field[1].uid, data.battleRoster[2].uid)
 		-- ด่าน 2 อัตราปล่อย 1 → แม่ละ 10 × 1 ÷ 6 ต่อวิ × 2 ตัว × 2 วิ
@@ -482,7 +514,7 @@ return function(t, Config)
 		table.insert(data.mothersInBag, makeMother())
 		local lostBefore = data.stats.mothersLost
 
-		local result = CombatService.tick(data, meta, 1)
+		local result = tickUntilCleared(data, meta)
 		check("ด่าน 2 พัง", result.stageCleared, true)
 		check(`แม่ตายพร้อมกันทั้ง {MAX_ROSTER} ตัว`, result.mothersLost, MAX_ROSTER)
 		check("roster เหลือ 0", #data.battleRoster, 0)
@@ -571,7 +603,7 @@ return function(t, Config)
 		-- ผ่าน tick จริงทีละด่าน: ด่านเพิ่งพังต้องคืนจำนวนไข่ตามตาราง + ติดธงเฉพาะด่านนั้น
 		for stage = 2, Config.Balance.Stage.COUNT do
 			local data = dataAboutToClear(stage)
-			local result = CombatService.tick(data, freshMeta(), 1)
+			local result = tickUntilCleared(data, freshMeta())
 			check(`tick พังด่าน {stage}: clearedStage`, result.clearedStage, stage)
 			check(`tick พังด่าน {stage}: ได้ไข่ {EXPECTED_BONUS[stage]} ฟอง`, result.bonusEggs, EXPECTED_BONUS[stage])
 			check(`  ติดธงด่าน {stage}`, data.stageClearBonusGranted[stage], true)
@@ -584,7 +616,7 @@ return function(t, Config)
 	do
 		local data = dataAboutToClear(2)
 		local meta = freshMeta()
-		local first = CombatService.tick(data, meta, 1)
+		local first = tickUntilCleared(data, meta)
 		check("รอบแรก: ด่าน 2 พัง ได้ไข่ 1", first.bonusEggs, 1)
 		check("  ธงด่าน 2 = true", data.stageClearBonusGranted[2], true)
 
@@ -639,7 +671,7 @@ return function(t, Config)
 
 		migrated.summonEnabled = true
 		table.insert(migrated.battleRoster, makeMother())
-		local result = CombatService.tick(migrated, freshMeta(), 1)
+		local result = tickUntilCleared(migrated, freshMeta())
 		check("ด่าน 4 เพิ่งพังหลังอัปเดต → ได้ไข่ของด่าน 4 เท่านั้น (2 ฟอง)", result.bonusEggs, 2)
 		check("  ธงด่าน 4 = true", migrated.stageClearBonusGranted[4], true)
 		check("  ด่าน 1–3 ที่พังก่อนอัปเดตยังไม่ได้รางวัล (false)", countTrue(migrated.stageClearBonusGranted), 1)
@@ -649,7 +681,7 @@ return function(t, Config)
 
 	do
 		local data = dataAboutToClear(5)
-		CombatService.tick(data, freshMeta(), 1)
+		tickUntilCleared(data, freshMeta())
 		PlayerData.sanitizeForSave(data) -- ต้องไม่ throw (อาเรย์ boolean ยาวคงที่ ไม่มีรู)
 		local back = Json.decode(PlayerData.encode(data))
 		check("ธงด่าน 5 กลับมาเป็น true", back.stageClearBonusGranted[5], true)
@@ -707,7 +739,7 @@ return function(t, Config)
 		local data = dataAboutToClear(2)
 		table.insert(data.battleRoster, makeMother())
 		table.insert(data.battleRoster, makeMother())
-		local first = CombatService.tick(data, freshMeta(), 1)
+		local first = tickUntilCleared(data, freshMeta())
 		check("ด่าน 2 พังครั้งแรก: ไข่ 1", first.bonusEggs, 1)
 		check("  แม่ตาย 3 (นับก่อนล้าง roster)", first.mothersLost, 3)
 		check("  roster ถูกล้างแล้วจริง", #data.battleRoster, 0)
@@ -716,7 +748,7 @@ return function(t, Config)
 		-- พังซ้ำหลังได้รางวัลไปแล้ว (เช่น debug ตั้ง HP ด่าน 2 กลับมา) + มีแม่ในสนาม → แม่ตายอย่างเดียว
 		local again = dataAboutToClear(2)
 		again.stageClearBonusGranted[2] = true
-		local repeatResult = CombatService.tick(again, freshMeta(), 1)
+		local repeatResult = tickUntilCleared(again, freshMeta())
 		check("พังซ้ำ: ไม่ได้ไข่", repeatResult.bonusEggs, 0)
 		check("  แม่ตาย 1", repeatResult.mothersLost, 1)
 		check("  → ยังยิง popup (แจ้งแม่ตาย)", CombatService.shouldNotifyStageCleared(repeatResult), true)
@@ -1118,7 +1150,7 @@ return function(t, Config)
 		check("  ศัตรูลดลงจริง", big + small < stats.bigCount + stats.smallCount, true)
 	end
 
-	print("── 5E-1 เลือดรวม/เงินรวมต่อด่านเท่าเดิม · กำแพงโดนหลังศัตรูหมดเท่านั้น · ป้อมยิงทั้งสองช่วง ──")
+	print("── 5E-1 เลือดรวม/เงินรวมต่อด่านเท่าเดิม · กำแพงโดนหลังศัตรูหมดเท่านั้น · ป้อมยิงเฉพาะตอนถึงกำแพง ──")
 
 	do
 		local data = battleData(2)
@@ -1130,9 +1162,12 @@ return function(t, Config)
 		local stats = Config.getStageEnemyStats(2)
 		local wallFull = Config.getStageWallHp(2)
 		local wallTouchedEarly, killed, damage = false, 0, 0
-		local shotsEnemy, shotsWall = 0, 0
+		local shotsEnemy, shotsWall, shotsWhileMarching = 0, 0, 0
+		local wallHitWhileMarching, sawMiddleToWall = false, false
 		for _ = 1, 200 do
 			local progressBefore = data.stageProgress[2].defendersRemaining
+			local wallBefore = data.stageProgress[2].wallHpRemaining
+			local marchingBefore = meta.marchRemaining > 0
 			local r = CombatService.tick(data, meta, 0.5)
 			killed += r.enemiesKilled
 			damage += r.damageDealt
@@ -1145,6 +1180,16 @@ return function(t, Config)
 			if p.defendersRemaining > 0 and p.wallHpRemaining < wallFull then
 				wallTouchedEarly = true
 			end
+			if progressBefore <= 0 and marchingBefore and meta.marchRemaining > 0 then
+				-- ทั้ง tick อยู่ระหว่างเดินจากกึ่งกลางไปกำแพง
+				shotsWhileMarching += r.turretShots
+				if p.wallHpRemaining < wallBefore then
+					wallHitWhileMarching = true
+				end
+			end
+			if meta.marchFrom == "middle" and meta.lineAt == "wall" then
+				sawMiddleToWall = true
+			end
 			if r.stageCleared then
 				break
 			end
@@ -1154,8 +1199,11 @@ return function(t, Config)
 		check("ศัตรูตายครบทั้งด่าน (ใหญ่ + เล็ก)", killed, stats.bigCount + stats.smallCount)
 		near("HP ที่ลดรวม = HP ทหารฝ่ายรับ + กำแพง", damage, Config.getStageTotalHp(2), 1e-6)
 		check("เงินรวมทั้งด่าน = เงินกวาดทหารเดิม (±1 จากเศษ)", math.abs((data.currency.coins - coinsBefore) - Config.getStageDefenderRewardTotal(2)) <= 1, true)
-		check("ป้อมยิงช่วงสู้ศัตรู", shotsEnemy > 0, true)
-		check("ป้อมยิงช่วงตีกำแพง", shotsWall > 0, true)
+		check("ป้อมไม่ยิงช่วงสู้ศัตรู (สู้กันกึ่งกลางเลน นอกระยะป้อม)", shotsEnemy, 0)
+		check("ศัตรูหมด → เดินจากกึ่งกลางไปกำแพง", sawMiddleToWall, true)
+		check("  ระหว่างเดินไปกำแพง: ป้อมไม่ยิง", shotsWhileMarching, 0)
+		check("  ระหว่างเดินไปกำแพง: กำแพงไม่โดน", wallHitWhileMarching, false)
+		check("ป้อมยิงช่วงตีกำแพง (เดินถึงแล้ว)", shotsWall > 0, true)
 		check("ลูกที่รอดกลับกองครบ (ไม่มีใครตาย)", data.children[key], 50)
 		check("สนามว่างหลังด่านพัง", layout(meta), "------")
 		check("แถวศัตรูถูกล้างรอด่านใหม่", meta.enemy, nil)
@@ -1163,10 +1211,16 @@ return function(t, Config)
 		-- ป้อมยิงตัวหน้าสุด · ปิดป้อม (debug) = ไม่ยิง
 		local data2 = battleData(3)
 		local meta2 = freshMeta()
+		data2.stageProgress[3].defendersRemaining = 0 -- ศัตรูหมดแล้ว → ลงสนามแล้วเดินเต็มทางไปกำแพง
 		data2.children[key] = 50
 		data2.releaseOrder = { key }
+		local marched = tickThroughMarch(data2, meta2)
+		check("ศัตรูหมดแล้ว → เดินจากแท่นเต็มทาง (2 เท่าของครึ่งทาง)", meta2.marchDuration, Config.getArmyMarchSeconds(3) * 2)
+		check("  เดินจากแท่นอัญเชิญ", meta2.marchFrom, "pedestal")
+		check("  ระหว่างเดิน ป้อมไม่ยิง · กำแพงไม่โดน", `{marched.turretShots} {marched.damageDealt}`, "0 0")
+		check("  ถึงกำแพงแล้ว", meta2.lineAt, "wall")
 		local r1 = CombatService.tick(data2, meta2, 2)
-		check("ป้อมยิง 1 นัด/วิ", r1.turretShots, 2)
+		check("ป้อมยิง 1 นัด/วิ (นับจากเดินถึง)", r1.turretShots, 2)
 		check("  เป้า = ช่องหน้าสุด", meta2.lastTurretTarget, 1)
 		CombatService.setTurretEnabled(false)
 		local r2 = CombatService.tick(data2, meta2, 3)
@@ -1183,6 +1237,7 @@ return function(t, Config)
 		local key = Config.makeStackKey("wukong", 10000, {})
 		data.children[key] = 40
 		data.releaseOrder = { key }
+		tickThroughMarch(data, meta)
 		CombatService.tick(data, meta, 2.3)
 		local snapshot = {}
 		for slot = 1, SLOTS do
@@ -1348,6 +1403,9 @@ return function(t, Config)
 		local meta = freshMeta()
 		data.stageProgress[9] = { defendersRemaining = 0, wallHpRemaining = Config.getStageWallHp(9) }
 		table.insert(data.battleRoster, makeMother(100, "monkey")) -- เลือด 10 · ป้อมด่าน 9 ยิงนัดละ ~161
+		local marched = tickThroughMarch(data, meta)
+		check("เดินเต็มทางไปกำแพงด่าน 9 ป้อมยังไม่ยิง", marched.turretShots, 0)
+		check("  แม่ยังอยู่ใน roster", #data.battleRoster, 1)
 		local r = CombatService.tick(data, meta, 1.5)
 		check("แม่ตัวเดียวโดนป้อมยิงตาย", r.mothersFallen, 1)
 		check("  roster ว่าง", #data.battleRoster, 0)
@@ -1372,6 +1430,16 @@ return function(t, Config)
 		local stats = Config.getStageEnemyStats(2)
 		check("นับศัตรูที่เหลือได้", battle.bigLeft + battle.smallLeft <= stats.bigCount + stats.smallCount, true)
 		check("ป้อมทำงาน", battle.turretActive, true)
+		check("เดินทัพจากแท่นไปกึ่งกลาง", `{battle.marchFrom} → {battle.line}`, "pedestal → middle")
+		check("  ยังเดินไม่ถึง", battle.marchRemaining > 0 and battle.marchRemaining < battle.marchDuration, true)
+		check("  ศัตรูกำลังเดินออกมา (ยังไม่ถึงกึ่งกลาง)", battle.enemiesAtMiddle, false)
+		check("  ป้อมไม่ยิง", battle.turretFiring, false)
+		tickThroughMarch(data, meta)
+		local arrived = CombatService.buildSyncFields(data, false, meta).battle
+		check("เดินถึงแล้ว: ศัตรูยืนกึ่งกลาง", `{arrived.enemiesAtMiddle} {arrived.marchRemaining}`, "true 0")
+		check("  สู้กึ่งกลางเลน ป้อมยังไม่ยิง", arrived.turretFiring, false)
+		near("  กึ่งกลาง = ระหว่างแท่นอัญเชิญกับกำแพง", Config.getBattleMeetX(2),
+			(Config.getSummonPedestalCenter().X + Config.getWallX(2)) / 2, 1e-9)
 		local noMeta = CombatService.buildSyncFields(data).battle
 		check("ไม่มี meta → สนามว่าง ไม่ error", #noMeta.our, 0)
 		check("  ยังนับศัตรูจาก HP รวมได้", noMeta.bigLeft + noMeta.smallLeft > 0, true)

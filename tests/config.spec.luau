@@ -580,9 +580,10 @@ return function(t, Config)
 	check("คืนราคาเดิมแล้ว validate ผ่าน", pcall(Config.validate), true)
 
 	print("── เกมต้องยากขึ้นเรื่อย ๆ ──")
-	-- 5E-1 รบแบบชุด + รวมพล (ค3): คิดแยกจาก Config เอง แล้วเทียบกับ getReferenceClearHours ข้างล่าง
-	-- ช่องเต็ม = พลังเต็ม × อัตราปล่อย · ลูกตาย = (ศัตรูรุม พลังฐาน × อัตราปล่อย + ป้อม) ÷ เลือดลูก
-	-- ผลิตไม่ทันการตาย → ผลิต × (ดาเมจเต็ม ÷ อัตราตาย) × (1 − (6 − 1) ÷ (2 × 12)) · ช่วงกำแพงโดนแค่ป้อม
+	-- 5E-1 รบแบบชุด + รวมพล (ค3) + เดินทัพ: คิดแยกจาก Config เอง แล้วเทียบกับ getReferenceClearHours ข้างล่าง
+	-- ช่องเต็ม = พลังเต็ม × อัตราปล่อย · ช่วงศัตรู: สู้กันกึ่งกลางเลน ลูกตาย = ศัตรูรุม (พลังฐาน × อัตราปล่อย) ÷ เลือดลูก
+	-- (ป้อมไม่ยิง — นอกระยะ) · ช่วงกำแพง: โดนแค่ป้อม · แต่ละช่วงบวกเวลาเดินทัพครึ่งทาง T
+	-- ผลิตไม่ทันการตาย → ผลิต × (ดาเมจเต็ม ÷ อัตราตาย) × (1 − (6 − 1) ÷ (2 × (12 + ผลิต × T)))
 	local function hoursAt(st)
 		local defHp, wallHp = Config.getStageDefenderHp(st), Config.getStageWallHp(st)
 		if defHp + wallHp <= 0 then return 0 end
@@ -596,12 +597,15 @@ return function(t, Config)
 		local R = Config.getReleaseRate(st)
 		local produced = Config.getPenCapacity(st) * Config.getProductionPerMinute(w, nil, st - 1, true) / 60
 		local turret = Config.Balance.Combat.TURRET_TOLL[st] * math.min(produced, R) * base
+		local T = Config.getArmyMarchSeconds(st)
 		local function rate(incoming)
-			local deaths = (incoming + turret) / base
+			local deaths = incoming / base
 			if deaths <= produced then return full * R end
-			return produced * full * R / deaths * (1 - 5 / 24)
+			return produced * full * R / deaths * (1 - 5 / (2 * (12 + produced * T)))
 		end
-		return (defHp / rate(base * R) + wallHp / rate(0)) / 3600
+		local enemyPart = if defHp > 0 then defHp / rate(base * R) + T else 0
+		local wallPart = if wallHp > 0 then wallHp / rate(turret) + T else 0
+		return (enemyPart + wallPart) / 3600
 	end
 	-- ⚠️ เส้นเวลา "ซิกแซก" โดยตั้งใจ เพราะคลาสไต่เป็นขั้น ๆ (C→B→A) ไม่ใช่ต่อเนื่อง
 	-- ด่านที่ผู้เล่นเพิ่งได้คลาสใหม่จะง่ายลง แล้วค่อยยากขึ้นอีกสองด่าน

@@ -382,15 +382,27 @@ return function(t, Config)
 			return data
 		end
 
+		-- 5E-1 เดินทัพ: ลงสนามแล้วต้องเดินจากแท่นไปกำแพงก่อน → tick ซ้ำจนด่านพัง (คืนผลของ tick ที่พัง)
+		local function tickUntilCleared(data, meta)
+			local result
+			for _ = 1, 20 do
+				result = CombatService.tick(data, meta, 5)
+				if result.stageCleared then
+					break
+				end
+			end
+			return result
+		end
+
 		-- ผลของ tick ตอนไม่มีบอส (ฐานเปรียบเทียบ) กับตอนมีบอส ต้องเหมือนกันทุกช่อง — ล็อกเกิด "หลัง" tick
 		local base = aboutToClearStage2()
-		local baseResult = CombatService.tick(base, CombatService.newMeta(), 1)
+		local baseResult = tickUntilCleared(base, CombatService.newMeta())
 
 		local s = BossService.newState(0)
 		BossService.step(s, 540) -- บอสทุกห้องอยู่
 		local data = aboutToClearStage2()
 		local meta = CombatService.newMeta()
-		local result = CombatService.tick(data, meta, 1)
+		local result = tickUntilCleared(data, meta)
 		-- 5B-2: ดูบอสห้องของด่านที่เพิ่งพัง (ห้อง 2) — แบบเดียวกับ CombatService.start
 		local cleared = result.clearedStage
 		if cleared and CombatService.shouldBossLock(cleared, s.rooms[cleared].bossAlive) then

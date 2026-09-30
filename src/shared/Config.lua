@@ -1875,8 +1875,14 @@ Balance.Combat = {
 	ENEMY_BIG_PER_GROUP = 1,
 	ENEMY_SMALL_PER_GROUP = 5,
 	ENEMY_BIG_MULTIPLIER = 5,
-	-- ป้อมบนกำแพง: ยิงตัวหน้าสุดของเรา นัดละ turretDps ÷ อัตรานี้ · ยิงทั้งตอนสู้ศัตรูและตอนตีกำแพง
+	-- ป้อมบนกำแพง: ยิงตัวหน้าสุดของเรา นัดละ turretDps ÷ อัตรานี้
+	-- ⚠️ 5E-1 (ผู้ใช้สั่ง): **ยิงเฉพาะตอนกองทัพเราเดินถึงกำแพงแล้ว** — ตอนสู้ศัตรู สองกองทัพเจอกันกลางเลน นอกระยะป้อม
 	TURRET_SHOTS_PER_SECOND = 1,
+	-- 5E-1 (ผู้ใช้สั่ง): เดินทัพจริงฝั่ง server — ความเร็ว studs/วิ (เท่าคนวิ่งปกติ)
+	--   สนามว่างแล้วลงใหม่ → กองทัพเราเดินจากแท่นอัญเชิญ + ศัตรูเดินออกจากกำแพงพร้อมกัน เจอกันกึ่งกลาง (Config.getBattleMeetX)
+	--   ศัตรูหมด → กองทัพเดินจากกึ่งกลางไปกำแพง แล้วป้อมเริ่มยิง · ระหว่างเดิน ไม่มีใครตีใคร
+	--   ตัวที่ลงแทนระหว่างสู้เข้าช่องทันที (ไม่เดินจากแท่น — ด่านสูงตายหลายตัวต่อวิ เดินไม่ทัน)
+	ARMY_MARCH_SPEED = 32,
 	-- auto-pause (ผู้ใช้กำหนด): ทหารเราตายติดกันครบเท่านี้ โดยที่ HP ศัตรูรวม + HP กำแพง **ไม่ลดเลย** → หยุดปล่อยเอง
 	-- ดูที่ HP ลด ไม่ใช่นับการฆ่า (ตีตัวใหญ่ที่ยังไม่ตายแต่ HP ลด = คืบหน้า)
 	AUTO_PAUSE_AFTER_DEATHS = 30,
@@ -3928,6 +3934,25 @@ function Config.getStageTurretShotDamage(stage: number): number
 	return Config.getStageTurretDps(stage) / Config.Balance.Combat.TURRET_SHOTS_PER_SECOND
 end
 
+-- 5E-1: จุดที่สองกองทัพเจอกัน = กึ่งกลางระหว่างแท่นอัญเชิญกับกำแพงด่านนั้น (นอกระยะป้อม) · nil = ด่านที่ไม่มีกำแพง
+function Config.getBattleMeetX(stage: number): number?
+	local wallX = Config.getWallX(stage)
+	if not wallX then
+		return nil
+	end
+	return (Config.getSummonPedestalCenter().X + wallX) / 2
+end
+
+-- 5E-1: เวลาเดินทัพครึ่งทาง (แท่น → กึ่งกลาง = กึ่งกลาง → กำแพง = ศัตรูจากกำแพง → กึ่งกลาง) · 0 = ด่านที่ไม่มีกำแพง
+-- ลงสนามตอนศัตรูหมดแล้ว (ช่วงกำแพง) = เดินเต็มทาง 2 เท่าของค่านี้
+function Config.getArmyMarchSeconds(stage: number): number
+	local wallX = Config.getWallX(stage)
+	if not wallX then
+		return 0
+	end
+	return (wallX - Config.getSummonPedestalCenter().X) / 2 / Config.Balance.Combat.ARMY_MARCH_SPEED
+end
+
 -- ══ 5E-1 ศัตรู (ทหารฝ่ายรับ) ══ บนสนามชุดละ ใหญ่ nb + เล็ก ns · ตัวใหญ่ = ตัวเล็ก × k ทั้งเลือดและดาเมจ
 -- ตายแล้วตัว**ชนิดเดียวกัน**ลงช่องเดิม · ทหารเราตีช่องตรงหน้า → แต่ละช่องโดนดาเมจเท่ากัน
 -- ⚠️ จำนวนตัวของด่านจึงแบ่งให้ **เลือดรวมตัวใหญ่ : ตัวเล็ก = nb : ns** (= ตัวเล็ก k × ns ÷ nb ตัวต่อตัวใหญ่ 1 ตัว = 1 : 25)
@@ -4147,14 +4172,15 @@ end
 
 -- ══ โมเดลเวลาตีด่าน (5E-1 · รวมพล ค3) ══ — ยามสมดุลทุกตัวอ่านเวลาจากตรงนี้
 -- ผู้เล่นส่งลูกเลือด unitHp · พลังเต็ม unitFull · คอกผลิต producedPerSecond ตัว/วิ (ไม่ส่งแม่ · เปิดอัญเชิญตลอด)
--- ช่องเต็ม → ดาเมจ = unitFull × อัตราปล่อย · ลูกตาย c = (ดาเมจที่โดน + ป้อม) ÷ unitHp ตัว/วิ (ทีละตัวที่หน้าสุด)
+-- ช่องเต็ม → ดาเมจ = unitFull × อัตราปล่อย · ลูกตาย c = ดาเมจที่โดน ÷ unitHp ตัว/วิ (ทีละตัวที่หน้าสุด)
 --   c ≤ ผลิต → ช่องเต็มตลอด ดาเมจเต็ม
---   c > ผลิต (ผลิตไม่ทัน · ด่าน 2) → รวมพล GATHER_SIZE แล้วสู้จนสนามว่าง วนไป:
---     ดาเมจเฉลี่ย = ผลิต × (ดาเมจเต็ม ÷ c) × (1 − (FIELD_SLOTS − 1) ÷ (2 × GATHER_SIZE))
---     (ช่วงท้ายของแต่ละรอบคลังสำรองหมด ช่องว่างลงทีละช่องตามจังหวะตาย — ตัวที่ยืนอยู่ตีได้เต็มจนตาย
---      เฉลี่ยช่วงท้าย (S + 1) ÷ 2 ช่อง ไม่ใช่ S ÷ 2 แบบไหลต่อเนื่อง · เทียบเครื่องยนต์จริงใน tests/combat.spec.luau)
--- ศัตรู: สนามเป็นใหญ่ + เล็กครบชุดตลอดด่าน (getStageEnemyStats แบ่งให้หมดพร้อมกัน) → โดนรุมเต็มชุดทั้งช่วง
--- กำแพง: ศัตรูหมดแล้ว โดนแค่ป้อม
+--   c > ผลิต (ผลิตไม่ทัน · ด่าน 2) → รวมพล GATHER_SIZE แล้วเดินทัพ T แล้วสู้จนสนามว่าง วนไป:
+--     ดาเมจเฉลี่ย = ผลิต × (ดาเมจเต็ม ÷ c) × (1 − (FIELD_SLOTS − 1) ÷ (2 × G')) · G' = GATHER_SIZE + ผลิต × T
+--     (ระหว่างเดินทัพคอกผลิตเข้าคลังสำรองเพิ่ม · ช่วงท้ายของแต่ละรอบคลังสำรองหมด ช่องว่างลงทีละช่องตามจังหวะตาย —
+--      ตัวที่ยืนอยู่ตีได้เต็มจนตาย เฉลี่ยช่วงท้าย (S + 1) ÷ 2 ช่อง · เทียบเครื่องยนต์จริงใน tests/combat.spec.luau)
+-- ศัตรู: สนามเป็นใหญ่ + เล็กครบชุดตลอดด่าน (getStageEnemyStats แบ่งให้หมดพร้อมกัน) → โดนรุมเต็มชุดทั้งช่วง ·
+--   สู้กันกลางเลน **ป้อมไม่ยิง** (ผู้ใช้สั่ง) · + เดินทัพไปเจอกัน T (getArmyMarchSeconds)
+-- กำแพง: ศัตรูหมดแล้ว เดินทัพจากกึ่งกลางไปกำแพง T แล้วโดนแค่ป้อม
 export type ClearEstimate = {
 	enemyRate: number,
 	wallRate: number,
@@ -4163,9 +4189,10 @@ export type ClearEstimate = {
 	totalSeconds: number,
 }
 
-function Config.getGatherEfficiency(): number
+-- `extraGathered` = ลูกที่ผลิตเข้าคลังระหว่างเดินทัพ (นับรวมกับรวมพล) · ไม่ส่ง = 0
+function Config.getGatherEfficiency(extraGathered: number?): number
 	local combat = Config.Balance.Combat
-	return 1 - (combat.FIELD_SLOTS - 1) / (2 * combat.GATHER_SIZE)
+	return 1 - (combat.FIELD_SLOTS - 1) / (2 * (combat.GATHER_SIZE + (extraGathered or 0)))
 end
 
 function Config.estimateStageClearSeconds(
@@ -4184,20 +4211,22 @@ function Config.estimateStageClearSeconds(
 	local fullOutput = unitFull * Config.getReleaseRate(stage)
 	local turretDps = Config.getStageTurretDps(stage)
 	local enemy = Config.getStageEnemyStats(stage)
-	local efficiency = Config.getGatherEfficiency()
+	local marchSeconds = Config.getArmyMarchSeconds(stage)
+	local efficiency = Config.getGatherEfficiency(producedPerSecond * marchSeconds)
 
 	local function rateUnder(incomingDps: number): number
-		local deathsPerSecond = (incomingDps + turretDps) / unitHp
+		local deathsPerSecond = incomingDps / unitHp
 		if deathsPerSecond <= producedPerSecond then
 			return fullOutput
 		end
 		return producedPerSecond * fullOutput / deathsPerSecond * efficiency
 	end
 
+	-- ⚠️ ป้อมยิงเฉพาะช่วงกำแพง (สู้ศัตรูกลางเลน นอกระยะป้อม)
 	local enemyRate = rateUnder(nb * enemy.bigDps + ns * enemy.smallDps)
-	local wallRate = rateUnder(0)
-	local enemySeconds = if defenderHp > 0 then defenderHp / enemyRate else 0
-	local wallSeconds = if wallHp > 0 then wallHp / wallRate else 0
+	local wallRate = rateUnder(turretDps)
+	local enemySeconds = if defenderHp > 0 then defenderHp / enemyRate + marchSeconds else 0
+	local wallSeconds = if wallHp > 0 then wallHp / wallRate + marchSeconds else 0
 	return {
 		enemyRate = enemyRate,
 		wallRate = wallRate,
@@ -6032,6 +6061,17 @@ function Config.validate()
 		`Config: ENEMY_BIG_MULTIPLIER × ENEMY_SMALL_PER_GROUP ÷ ENEMY_BIG_PER_GROUP ต้องเป็นจำนวนเต็ม (ได้ {smallPerBig})`
 	)
 	assert(combat.TURRET_SHOTS_PER_SECOND > 0, "Config: TURRET_SHOTS_PER_SECOND ต้องมากกว่า 0")
+	assert(combat.ARMY_MARCH_SPEED > 0, "Config: ARMY_MARCH_SPEED ต้องมากกว่า 0")
+	-- จุดเจอกันต้องอยู่ระหว่างแท่นอัญเชิญกับกำแพงทุกด่าน (ไม่งั้นเดินทัพย้อนทาง)
+	for meetStage = 1, Config.Balance.Stage.COUNT do
+		local meetX = Config.getBattleMeetX(meetStage)
+		if meetX then
+			assert(
+				meetX > Config.getSummonPedestalCenter().X and meetX < (Config.getWallX(meetStage) :: number),
+				`Config: จุดเจอกันด่าน {meetStage} ต้องอยู่ระหว่างแท่นอัญเชิญกับกำแพง`
+			)
+		end
+	end
 	assert(positiveInt(combat.AUTO_PAUSE_AFTER_DEATHS), "Config: AUTO_PAUSE_AFTER_DEATHS ต้องเป็นจำนวนเต็มบวก")
 	assert(combat.MAX_TICK_SECONDS > 0, "Config: MAX_TICK_SECONDS ต้องมากกว่า 0")
 	-- ค่าเก่าของระบบปล่อยต่อเนื่อง (ลบแล้วใน 5E-1) ห้ามเติมกลับ — ไม่มีโค้ดอ่านแล้ว ตั้งไว้จะหลอกว่ายังมีผล

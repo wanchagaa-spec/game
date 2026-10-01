@@ -2,8 +2,11 @@
 -- egg-army-game :: สนามรบสองแถว (5E-1b — ภาพชั่วคราวพอให้ทดสอบใน Studio · โมเดลจริงทำ 5E-2)
 --
 -- ⚠️ วาดตาม **สถานะจริงจาก server** (payload.battle ใน FarmStateSync ~1 ครั้ง/วิ) ไม่จำลองอะไรเอง
---   แถวเรา + แถวศัตรู ฝั่งละไม่เกิน LINE_LENGTH (10) ตัว เดินเรียงเดี่ยวกลางเลน ระยะห่างเท่ากัน
---   **ตัวหน้าสุดของสองฝั่งยืนปะทะกัน** (ขยับฟันเฉพาะสองตัวนี้) · ตัวอื่นเดินตามรอคิว · ตัวหน้าตาย = ทั้งแถวขยับขึ้นเอง
+--   แถวเรา + แถวศัตรู ฝั่งละไม่เกิน LINE_LENGTH (10) ตัว เดินเรียงเดี่ยวกลางเลน **ช่องว่างระหว่างตัวเท่ากัน** (UNIT_GAP)
+--   **ตัวหน้าสุดของสองฝั่งยืนปะทะกัน** (ขยับฟันเฉพาะสองตัวนี้) · ตัวอื่นเดินตามรอคิว · ตัวหน้าตาย = ทั้งแถวเดินขยับขึ้นเอง
+--   **ทะยอยออกจากแท่นทีละตัว** (ผู้ใช้สั่ง): แถวเริ่มเดินทัพ = ตัวหน้าออกก่อน ตัวถัดไปโผล่จากแท่นเมื่อตัวหน้าเดินพ้นไปหนึ่งช่อง
+--     (ภาพล้วน · server ใส่ 10 ตัวเข้าแถวพร้อมกัน แต่ตีแค่ตัวหน้าสุด → ผลรบเท่ากัน) · ตัวที่ต่อท้ายระหว่างสู้ = โผล่หลังท้ายแถวหนึ่งช่องแล้วเดินเข้าที่
+--   **เดินด้วยความเร็วคงที่** = ARMY_MARCH_SPEED (ความเร็วเดินทัพของ server ตัวเดียวกัน) + เร่งตามทันถ้าค้างไกล (ไม่ใช่ lerp ที่พุ่งตอนแรก)
 --   ตามตัวด้วย `id` จาก server (เรา = เลขประจำตัวตอนปล่อย · ศัตรู = ตัวที่เท่าไรของด่าน) ไม่ใช่ตำแหน่ง
 --   **เดินทัพ** (ผู้ใช้สั่ง · server จับเวลาจริง `battle.line/marchFrom/marchRemaining`):
 --     แถวว่างแล้วปล่อยใหม่ → แถวเราเดินออกจากแท่นอัญเชิญ + แถวศัตรูเดินออกจากหน้ากำแพงพร้อมกัน เจอกันกึ่งกลางเลน
@@ -37,10 +40,12 @@ local BIG_ENEMY_SCALE = 1.7
 local MOTHER_SCALE = 1.25
 local ENEMY_WALL_GAP = 5 -- แถวศัตรู (ยังไม่เดินออกมา): ตัวท้ายแถวยืนห่างกำแพงเท่านี้
 local CLASH_GAP = 4 -- ตัวหน้าสุดสองฝั่งห่างกันเท่านี้ตอนปะทะกึ่งกลาง (ข้างละครึ่งจากจุดกึ่งกลาง)
-local UNIT_SPACING = 3.4 -- ระยะห่างระหว่างตัวในแถว (คูณขนาดเฉลี่ยของสองตัวที่ติดกัน · ตัวใหญ่เว้นมากกว่า)
+local UNIT_GAP = 5 -- ช่องว่างระหว่างตัว (ขอบถึงขอบ) เท่ากันทุกคู่ · ตัวใหญ่กินที่ตามความหนาตัวเอง
 local WALL_ATTACK_GAP = 4 -- ถึงกำแพงแล้ว ตัวหน้าสุดของเรายืนห่างกำแพงเท่านี้
-local MOVE_LERP_PER_SECOND = 6
-local MARCH_LERP_PER_SECOND = 20 -- ระหว่างเดินทัพเป้าเลื่อนทุกเฟรม → ตามให้ทัน (ห่างเป้า ≈ ความเร็ว ÷ ค่านี้)
+-- เดินด้วยความเร็วเดียวกับเดินทัพของ server (ตัวหน้าสุดถึงแนวรบพร้อม server) · ค้างห่างเป้า = เร่งเพิ่มตามระยะ (ตามทันเอง)
+local WALK_SPEED = Config.Balance.Combat.ARMY_MARCH_SPEED
+local CATCH_UP_PER_SECOND = 1.5 -- studs/วิ ที่เร่งเพิ่มต่อระยะค้าง 1 stud
+local ARRIVE_EPSILON = 0.05
 local MARCH_BOB_SPEED = 12
 local MARCH_BOB_HEIGHT = 0.35
 local SWING_SPEED = 9
@@ -64,6 +69,7 @@ local LEG_CENTER_Y = LIMB_SIZE.Y / 2
 local TORSO_CENTER_Y = LIMB_SIZE.Y + HIP_GAP + TORSO_SIZE.Y / 2
 local HEAD_CENTER_Y = LIMB_SIZE.Y + HIP_GAP + TORSO_SIZE.Y + HEAD_SIZE.Y / 2
 local MODEL_HEIGHT = HEAD_CENTER_Y + HEAD_SIZE.Y / 2
+local UNIT_DEPTH = HEAD_SIZE.Z -- ความหนาตามแนวแถว (หัวหนาสุด) — ระยะจุดกึ่งกลางถึงกัน = UNIT_GAP + ความหนาเฉลี่ย
 
 --------------------------------------------------------------------------------
 -- โฟลเดอร์ — แบบเดียวกับ WallRenderer (กัน StarterPlayerScripts→PlayerScripts ก็อปซ้อน)
@@ -96,9 +102,10 @@ type Unit = {
 	fill: Frame,
 	kind: string,
 	hp: number,
-	target: CFrame,
 	scale: number,
 	pos: number, -- ตำแหน่งในแถวตอนนี้ (1 = หน้าสุด)
+	x: number, -- ตำแหน่งบนพื้นตามแนวเลน (ไม่รวมท่าเด้ง/ฟัน) · เดินเข้าหาเป้าด้วยความเร็วคงที่
+	visible: boolean, -- ยังไม่โผล่จากแท่นอัญเชิญ = false (ทะยอยออกทีละตัว)
 }
 
 local function buildPersonModel(color: Color3, name: string): Model
@@ -164,30 +171,30 @@ local function attachHpBar(model: Model, color: Color3, scale: number): Frame
 	return fill
 end
 
-local function newUnit(kind: string, pos: number, target: CFrame, isEnemy: boolean): Unit
+-- ⚠️ ยังไม่โผล่ (visible = false) = ยังไม่ใส่ลงโลก · stepSide ใส่ให้ตอนถึงคิวออกจากแท่น
+local function newUnit(kind: string, pos: number, isEnemy: boolean, x: number, visible: boolean): Unit
 	local color = if isEnemy then ENEMY_COLOR elseif kind == "mother" then MOTHER_COLOR else CHILD_COLOR
 	local scale = if kind == "big" then BIG_ENEMY_SCALE elseif kind == "mother" then MOTHER_SCALE else 1
 	local model = buildPersonModel(color, if isEnemy then "Enemy" else "Troop")
 	if scale ~= 1 then
 		model:ScaleTo(scale)
 	end
-	model.Parent = ensureFolder()
-	-- ตัวใหม่เดินเข้าช่องจากด้านหลังแถวของตัวเอง (+Z ของโมเดล = ด้านหลัง · ภาพล้วน)
-	model:PivotTo(target * CFrame.new(0, 0, 4))
+	model.Parent = if visible then ensureFolder() else nil
 	return {
 		model = model,
 		fill = attachHpBar(model, if isEnemy then HP_ENEMY_COLOR else HP_OUR_COLOR, scale),
 		kind = kind,
 		hp = math.huge,
-		target = target,
 		scale = scale,
 		pos = pos,
+		x = x,
+		visible = visible,
 	}
 end
 
 local function removeUnit(unit: Unit, withEffect: boolean)
-	if withEffect and unit.model.Parent then
-		CombatEffects.onDefenderDeath(unit.model:GetPivot().Position + Vector3.new(0, MODEL_HEIGHT * unit.scale / 2, 0))
+	if withEffect and unit.visible and unit.model.Parent then
+		CombatEffects.onDefenderDeath(Vector3.new(unit.x, MODEL_HEIGHT * unit.scale / 2, 0))
 	end
 	unit.model:Destroy()
 end
@@ -200,7 +207,12 @@ local function scaleOf(kind: string): number
 	return if kind == "big" then BIG_ENEMY_SCALE elseif kind == "mother" then MOTHER_SCALE else 1
 end
 
--- ระยะจากตัวหน้าสุดถึงตัวที่ pos (ตัวใหญ่เว้นมากกว่า) — คิดใหม่ทุก sync จากชนิดในแถว
+-- ระยะจุดกึ่งกลางถึงจุดกึ่งกลางของสองตัวที่ติดกัน = ช่องว่างเท่ากันทุกคู่ + ความหนาเฉลี่ยของสองตัว (ตัวใหญ่หนากว่า)
+local function spacingBetween(previousScale: number, currentScale: number): number
+	return UNIT_GAP + UNIT_DEPTH * (previousScale + currentScale) / 2
+end
+
+-- ระยะจากตัวหน้าสุดถึงตัวที่ pos — คิดใหม่ทุก sync จากชนิดในแถว
 local ourOffsets: { number } = {}
 local enemyOffsets: { number } = {}
 
@@ -213,14 +225,13 @@ local function computeOffsets(entries: { any }): { number }
 	end
 	local offsets: { number } = { 0 }
 	for pos = 2, LINE_LENGTH do
-		local previous, current = scales[pos - 1] or 1, scales[pos] or 1
-		offsets[pos] = offsets[pos - 1] + UNIT_SPACING * (previous + current) / 2
+		offsets[pos] = offsets[pos - 1] + spacingBetween(scales[pos - 1] or 1, scales[pos] or 1)
 	end
 	return offsets
 end
 
 local function offsetAt(offsets: { number }, pos: number): number
-	return offsets[pos] or (pos - 1) * UNIT_SPACING
+	return offsets[pos] or (pos - 1) * spacingBetween(1, 1)
 end
 
 -- หันหน้าไปทาง +X (ฝั่งเรา) / −X (ศัตรู) — CFrame.lookAt มองตามแกน −Z ของโมเดล
@@ -289,14 +300,22 @@ local function enemyFrontX(): number
 	return home
 end
 
-local function ourTarget(pos: number): CFrame
-	local x = ourFrontX() - offsetAt(ourOffsets, pos)
-	return facing(Vector3.new(x, 0, 0), line.wall + 100)
+-- เป้าบนพื้นของตัวที่ pos (ยังไม่ตัดขอบ) — เรา: ไล่จากตัวหน้าสุดไปทางแท่น · ศัตรู: ไล่ไปทางกำแพง
+local function ourTargetX(pos: number): number
+	return ourFrontX() - offsetAt(ourOffsets, pos)
 end
 
-local function enemyTarget(pos: number): CFrame
-	local x = enemyFrontX() + offsetAt(enemyOffsets, pos)
-	return facing(Vector3.new(x, 0, 0), line.wall - 1000)
+local function enemyTargetX(pos: number): number
+	return enemyFrontX() + offsetAt(enemyOffsets, pos)
+end
+
+-- ทหารเราไม่ถอยหลังเลยแท่นอัญเชิญ (ยังไม่ถึงคิวออก = ยังไม่โผล่) · ศัตรูไม่ทะลุผิวกำแพง
+local function ourLimitX(x: number): number
+	return math.max(x, line.pedestalX)
+end
+
+local function enemyLimitX(x: number): number
+	return math.min(x, line.wall - MAP.StageWall.Thickness / 2 - 1)
 end
 
 --------------------------------------------------------------------------------
@@ -385,22 +404,43 @@ local function clearSide(side: { [number]: Unit }, withEffect: boolean)
 end
 
 -- entries = รายการจาก server ({ pos, id, kind, hp, maxHp }) · ตามตัวด้วย id → แถวขยับขึ้นแล้วตัวเดิมเดินเข้าตำแหน่งใหม่เอง
--- ตัวที่หายไป: เคยอยู่หน้าสุด = ตาย (เอฟเฟกต์) · ตัวอื่นหาย = กลับกอง/ล้างแถว (เงียบ)
-local function syncSide(side: { [number]: Unit }, entries: { any }, isEnemy: boolean, targetOf: (number) -> CFrame)
+-- ตัวที่หายไป: อยู่หน้าตัวที่รอดคนแรก = ตาย (เอฟเฟกต์ · sync ~1 วิ ตายได้หลายตัวในรอบเดียว) · อยู่หลัง = กลับกอง/ล้างแถว (เงียบ)
+-- ตัวใหม่: แถวใหม่ทั้งแถว = ยืนที่เป้าเลย · ต่อท้ายแถวที่มีอยู่ = โผล่หลังเป้าหนึ่งช่อง (ฝั่งที่มันเดินมา) แล้วเดินเข้าที่
+-- ⚠️ ทหารเราที่เป้ายังอยู่หลังแท่น = ยังไม่โผล่ (ทะยอยออกทีละตัวใน stepSide)
+local function syncSide(side: { [number]: Unit }, entries: { any }, isEnemy: boolean)
+	local oldPos: { [number]: number } = {}
+	for id, unit in side do
+		oldPos[id] = unit.pos
+	end
+	local joining = next(side) ~= nil
 	local seen: { [number]: boolean } = {}
+	local firstSurvivorOldPos = math.huge
 	for _, entry in entries do
 		local id, pos = entry.id, entry.pos
 		if type(id) == "number" and type(pos) == "number" and pos >= 1 and pos <= LINE_LENGTH then
 			seen[id] = true
-			local target = targetOf(pos)
 			local current: Unit? = side[id]
-			if not current then
-				current = newUnit(entry.kind, pos, target, isEnemy)
+			if current then
+				firstSurvivorOldPos = math.min(firstSurvivorOldPos, oldPos[id] or math.huge)
+			else
+				local scale = scaleOf(entry.kind)
+				local step = if joining then spacingBetween(scale, scale) else 0
+				local spawnX, visible
+				if isEnemy then
+					spawnX = enemyLimitX(enemyTargetX(pos) + step)
+					visible = true
+				else
+					local goal = ourTargetX(pos)
+					spawnX = ourLimitX(goal - step)
+					visible = goal >= line.pedestalX - ARRIVE_EPSILON
+				end
+				current = newUnit(entry.kind, pos, isEnemy, spawnX, visible)
+				local towardX = if isEnemy then line.wall - 1000 else line.wall + 100
+				current.model:PivotTo(facing(Vector3.new(spawnX, 0, 0), towardX))
 				side[id] = current
 			end
 			local unit = current :: Unit
 			unit.pos = pos
-			unit.target = target
 			unit.hp = entry.hp
 			local ratio = if entry.maxHp > 0 then math.clamp(entry.hp / entry.maxHp, 0, 1) else 0
 			unit.fill.Size = UDim2.fromScale(ratio, 1)
@@ -408,7 +448,7 @@ local function syncSide(side: { [number]: Unit }, entries: { any }, isEnemy: boo
 	end
 	for id, unit in side do
 		if not seen[id] then
-			removeUnit(unit, unit.pos == 1)
+			removeUnit(unit, (oldPos[id] or math.huge) < firstSurvivorOldPos)
 			side[id] = nil
 		end
 	end
@@ -416,7 +456,7 @@ end
 
 local function frontOf(side: { [number]: Unit }): Unit?
 	for _, unit in side do
-		if unit.pos == 1 then
+		if unit.pos == 1 and unit.visible then
 			return unit
 		end
 	end
@@ -463,10 +503,10 @@ function TroopRenderer.updateFromPayload(payload: any)
 	if not payload.summonEnabled then
 		clearSide(ours, false)
 	end
-	syncSide(enemies, enemyEntries, true, enemyTarget)
+	syncSide(enemies, enemyEntries, true)
 	if payload.summonEnabled then
-		-- ตัวใหม่ตอนเพิ่งเริ่มเดินทัพ = โผล่ที่แท่นอัญเชิญ (หน้าแถว ณ ตอนนี้) · ตัวที่ต่อท้ายระหว่างสู้ = โผล่ท้ายแถวแล้วเดินเข้าที่
-		syncSide(ours, ourEntries, false, ourTarget)
+		-- เพิ่งเริ่มเดินทัพ = ตัวหน้าโผล่ที่แท่นอัญเชิญ ตัวอื่นทะยอยโผล่ทีละตัว (stepSide) · ตัวที่ต่อท้ายระหว่างสู้ = โผล่หลังท้ายแถวแล้วเดินเข้าที่
+		syncSide(ours, ourEntries, false)
 	end
 
 	-- ป้อมตั้งอยู่บนกำแพงเสมอ · ยิงตัวหน้าสุดเฉพาะตอนแถวเราเดินถึงกำแพงแล้ว (สู้กันกึ่งกลาง = นอกระยะ)
@@ -476,7 +516,7 @@ function TroopRenderer.updateFromPayload(payload: any)
 		if target then
 			-- ปลายกระบอกป้อม (ตำแหน่งเดียวกับ Barrel ใน ensureTurret) → กลางตัวที่โดน
 			local muzzle = Vector3.new(wall - 5, MAP.Lane.WallHeight + 2, 0)
-			drawShot(muzzle, target.model:GetPivot().Position + Vector3.new(0, MODEL_HEIGHT * target.scale * 0.6, 0))
+			drawShot(muzzle, Vector3.new(target.x, MODEL_HEIGHT * target.scale * 0.6, 0))
 		end
 	else
 		removeTurret()
@@ -484,23 +524,40 @@ function TroopRenderer.updateFromPayload(payload: any)
 end
 
 --------------------------------------------------------------------------------
--- เฟรม — เดินทัพ (เป้าเลื่อนทุกเฟรม) · เลื่อนเข้าที่ตอนแถวขยับ · ท่าฟันเฉพาะตัวหน้าสุดที่กำลังปะทะ (ภาพล้วน)
+-- เฟรม — เดินด้วยความเร็วคงที่ (เดินทัพ · แถวขยับ) · ทะยอยโผล่จากแท่นทีละตัว · ท่าฟันเฉพาะตัวหน้าสุดที่กำลังปะทะ (ภาพล้วน)
 --------------------------------------------------------------------------------
 
--- walking = ฝั่งนี้กำลังเดินทัพ · fighting = ตัวหน้าสุดของฝั่งนี้กำลังตี (ศัตรูตรงหน้า/กำแพง)
-local function stepSide(side: { [number]: Unit }, targetOf: (number) -> CFrame, delta: number, walking: boolean, fighting: boolean)
-	local alpha = math.clamp(delta * (if walking then MARCH_LERP_PER_SECOND else MOVE_LERP_PER_SECOND), 0, 1)
+-- fighting = ตัวหน้าสุดของฝั่งนี้กำลังตี (ศัตรูตรงหน้า/กำแพง)
+local function stepSide(side: { [number]: Unit }, isEnemy: boolean, delta: number, fighting: boolean)
 	local clock = os.clock()
+	local towardX = if isEnemy then line.wall - 1000 else line.wall + 100
 	for _, unit in side do
-		if unit.model.Parent then
-			unit.target = targetOf(unit.pos)
-			-- เดิน = เด้งขึ้นลงเล็กน้อย · ปะทะ = ตัวหน้าสุดพุ่งไปข้างหน้า (−Z ของโมเดล = ทิศที่หันอยู่) เป็นจังหวะ ๆ
-			local bob = if walking then math.abs(math.sin(clock * MARCH_BOB_SPEED + unit.pos)) * MARCH_BOB_HEIGHT else 0
-			local lunge = if fighting and unit.pos == 1 then math.max(0, math.sin(clock * SWING_SPEED)) * SWING_DISTANCE else 0
-			local goal = unit.target * CFrame.new(0, bob, -lunge)
-			local current = unit.model:GetPivot()
-			unit.model:PivotTo(current:Lerp(goal, alpha))
+		local rawGoal = if isEnemy then enemyTargetX(unit.pos) else ourTargetX(unit.pos)
+		local goal = if isEnemy then enemyLimitX(rawGoal) else ourLimitX(rawGoal)
+		if not unit.visible then
+			-- ถึงคิวออกจากแท่น = เป้าเดินพ้นแท่นแล้ว (ตัวหน้าเดินห่างออกไปหนึ่งช่องพอดี → ระยะห่างเท่ากันตั้งแต่ออก)
+			if rawGoal < line.pedestalX - ARRIVE_EPSILON then
+				continue
+			end
+			unit.visible = true
+			unit.x = line.pedestalX
+			unit.model.Parent = ensureFolder()
 		end
+		if not unit.model.Parent then
+			continue
+		end
+		local distance = goal - unit.x
+		local moving = math.abs(distance) > ARRIVE_EPSILON
+		if moving then
+			local speed = WALK_SPEED + math.abs(distance) * CATCH_UP_PER_SECOND
+			local step = math.min(math.abs(distance), speed * delta)
+			unit.x += if distance > 0 then step else -step
+		end
+		-- เดิน = เด้งขึ้นลงเล็กน้อย · ปะทะ = ตัวหน้าสุดพุ่งไปข้างหน้า (−Z ของโมเดล = ทิศที่หันอยู่) เป็นจังหวะ ๆ
+		local bob = if moving then math.abs(math.sin(clock * MARCH_BOB_SPEED + unit.pos)) * MARCH_BOB_HEIGHT else 0
+		local lunge = if fighting and unit.pos == 1 and not moving then math.max(0, math.sin(clock * SWING_SPEED)) * SWING_DISTANCE else 0
+		local position = Vector3.new(unit.x, 0, 0)
+		unit.model:PivotTo(facing(position, towardX) * CFrame.new(0, bob, -lunge))
 	end
 end
 
@@ -512,10 +569,9 @@ function TroopRenderer.start()
 	ensureFolder()
 	RunService.Heartbeat:Connect(function(delta: number)
 		local marching = isMarching()
-		local enemiesWalking = marching and line.at == "middle" and not line.enemiesAtMiddle
 		local oursFighting = line.at ~= nil and not marching and (line.at == "wall" or next(enemies) ~= nil)
-		stepSide(ours, ourTarget, delta, marching, oursFighting)
-		stepSide(enemies, enemyTarget, delta, enemiesWalking, oursFighting and line.at == "middle")
+		stepSide(ours, false, delta, oursFighting)
+		stepSide(enemies, true, delta, oursFighting and line.at == "middle")
 	end)
 end
 

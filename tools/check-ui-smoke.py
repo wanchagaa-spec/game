@@ -2316,12 +2316,12 @@ do
 	}
 	check("start ไม่ error", pcall(TroopRenderer.start))
 	check("sync สองแถว (เริ่มเดินทัพ) ไม่ error", pcall(TroopRenderer.updateFromPayload, payload))
-	check("  ทหารเรา 10 ตัว", countModels("Troop"), LINE)
+	check("  ทะยอยออกทีละตัว: เพิ่งเริ่มเดินทัพ โผล่แค่ตัวหน้าสุด (อีก 9 ตัวรอคิวในแท่น)", countModels("Troop"), 1)
 	check("  ศัตรู 10 ตัว", countModels("Enemy"), LINE)
 	check("  บนจอไม่เกิน 20 ตัว", countModels("Troop") + countModels("Enemy") <= 2 * LINE, true)
 	check("  ป้อม 1 อัน (ตั้งอยู่บนกำแพง)", countModels("Turret"), 1)
-	check("  แถวเราโผล่ที่แท่นอัญเชิญเรียงไปทางหลัง", allWithin(pivotXs("Troop"), pedestalX - 45, pedestalX + 1), true)
-	check("  แถวศัตรูยืนเรียงหน้ากำแพง (ไม่ทะลุกำแพง)", allWithin(pivotXs("Enemy"), wallX - 60, wallX - 1), true)
+	check("  ตัวหน้าสุดโผล่ที่แท่นอัญเชิญ", allWithin(pivotXs("Troop"), pedestalX - 0.01, pedestalX + 0.5), true)
+	check("  แถวศัตรูยืนเรียงหน้ากำแพง (ไม่ทะลุกำแพง)", allWithin(pivotXs("Enemy"), wallX - 75, wallX - 1), true)
 	check("  เรียงเดี่ยวกลางเลน (Z = 0 ทุกตัว)", (function()
 		for _, name in { "Troop", "Enemy" } do
 			for _, child in models(name) do
@@ -2352,6 +2352,23 @@ do
 	services.RunService.Heartbeat:Fire(1 / 60)
 	check("  เฟรมเดินทัพไม่ error", true)
 
+	-- เดินทัพไปได้ ~15 studs (ตัวหน้าห่างแท่น 2 ช่องกว่า ๆ) → โผล่ 3 ตัว (ลูก · ลูก · แม่) · ที่เหลือยังรอในแท่น
+	local frontTravel = (meetX - 2) - pedestalX
+	payload.battle.marchRemaining = march * (1 - 15 / frontTravel)
+	TroopRenderer.updateFromPayload(payload)
+	services.RunService.Heartbeat:Fire(1 / 60)
+	check("  เดินพ้นแท่นไป 15 studs → โผล่ 3 ตัว (ทีละตัวเมื่อตัวหน้าเดินพ้นหนึ่งช่อง)", countModels("Troop"), 3)
+	check("  ตัวที่เพิ่งโผล่ออกจากแท่นพอดี (ไม่โผล่กลางทาง)", (function()
+		local xs = pivotXs("Troop")
+		table.sort(xs)
+		return math.abs(xs[1] - pedestalX) < 1
+	end)(), true)
+	-- เดินทัพเกือบถึง → ทุกตัวโผล่ครบ · เดินด้วยความเร็วคงที่ (ไม่วาร์ป)
+	payload.battle.marchRemaining = march * 0.05
+	TroopRenderer.updateFromPayload(payload)
+	services.RunService.Heartbeat:Fire(1 / 60)
+	check("  ใกล้ถึงกึ่งกลาง → โผล่ครบ 10 ตัว", countModels("Troop"), LINE)
+
 	-- ถึงกึ่งกลางแล้ว: ศัตรูตัวหน้าสุด (id 1) ตาย → แถวศัตรูขยับขึ้น + ตัวใหม่ (id 11) ต่อท้าย
 	--                   ตัวหน้าสุดของเรา (id 1) ตาย → แถวเราขยับขึ้น + ตัวใหม่ (id 11) ต่อท้าย
 	local deathsBefore = effects.deaths
@@ -2361,6 +2378,7 @@ do
 	payload.battle.enemies = lineOf({ "small", "small", "small", "small", "big", "small", "small", "small", "small", "small" }, 2, 7)
 	payload.battle.our = lineOf({ "child", "mother", "child", "child", "child", "child", "child", "child", "child", "child" }, 2, 9)
 	check("ตัวหน้าสุดสองฝั่งตาย แถวขยับ ไม่ error", pcall(TroopRenderer.updateFromPayload, payload))
+	services.RunService.Heartbeat:Fire(1 / 60)
 	check("  ยังเต็ม 10 ต่อฝั่ง (ตัวใหม่ต่อท้าย)", countModels("Troop") == LINE and countModels("Enemy") == LINE, true)
 	check("  เล่นเอฟเฟกต์ตายเฉพาะตัวหน้าสุดที่หายไป (สองฝั่ง = 2)", effects.deaths - deathsBefore, 2)
 	local newEnemyX
@@ -2375,6 +2393,49 @@ do
 	services.RunService.Heartbeat:Fire(1 / 60)
 	check("  เฟรมปะทะกึ่งกลางไม่ error", true)
 
+	-- เดินเข้าที่ด้วยความเร็วคงที่ (ไม่ใช่ lerp ที่พุ่ง) แล้วช่องว่างระหว่างตัวเท่ากันทุกคู่ (ตัวใหญ่/แม่กินที่ตามความหนาตัวเอง)
+	local function frontTroopX()
+		local best = -math.huge
+		for _, x in pivotXs("Troop") do
+			best = math.max(best, x)
+		end
+		return best
+	end
+	services.RunService.Heartbeat:Fire(30) -- ให้ทุกตัวเดินถึงที่
+	local settledFront = frontTroopX()
+	check("  เดินถึงที่: ตัวหน้าสุดยืนหน้าจุดปะทะ (กึ่งกลาง − 2)", math.abs(settledFront - (meetX - 2)) < 1e-6, true)
+	local function gapsOf(name)
+		local units = {}
+		for _, child in models(name) do
+			local props = rawget(child, "__props")
+			table.insert(units, { x = props.__pivot.Position.X, scale = props.__scale or 1 })
+		end
+		table.sort(units, function(a, b) return a.x < b.x end)
+		local gaps = {}
+		for index = 2, #units do
+			-- ช่องว่างขอบถึงขอบ = ระยะจุดกึ่งกลาง − ความหนาเฉลี่ย (หัว 1.2 × ขนาด)
+			table.insert(gaps, units[index].x - units[index - 1].x - 1.2 * (units[index].scale + units[index - 1].scale) / 2)
+		end
+		return gaps
+	end
+	for _, name in { "Troop", "Enemy" } do
+		local gaps = gapsOf(name)
+		local low, high = math.huge, -math.huge
+		for _, gap in gaps do
+			low, high = math.min(low, gap), math.max(high, gap)
+		end
+		check(`  {name}: ช่องว่างระหว่างตัวเท่ากันทุกคู่ (ไม่ติดกัน · ≥ 4 studs)`, #gaps == LINE - 1 and high - low < 1e-6 and low >= 4, true)
+	end
+	-- ตัวหน้าสุดของเราตายอีกตัว → แถวเดินขยับขึ้นหนึ่งช่อง: 0.1 วิแรกเดินไปได้แค่บางส่วน (ไม่วาร์ป · ไม่พุ่ง)
+	payload.battle.our = lineOf({ "mother", "child", "child", "child", "child", "child", "child", "child", "child", "child" }, 3, 9)
+	TroopRenderer.updateFromPayload(payload)
+	local beforeStep = frontTroopX()
+	services.RunService.Heartbeat:Fire(0.1)
+	local stepped = frontTroopX() - beforeStep
+	check("  แถวขยับขึ้นด้วยความเร็วเดิน (0.1 วิ ไปได้ 1–4 studs จากหนึ่งช่อง ~6)", stepped >= 1 and stepped <= 4, true)
+	check("  ความเร็วเดิน = ความเร็วเดินทัพของ server (ช้ากว่าคนวิ่ง 32)", Config.Balance.Combat.ARMY_MARCH_SPEED < 32, true)
+	services.RunService.Heartbeat:Fire(30)
+
 	-- ตัวในแถวที่ไม่ใช่หน้าสุดหายไป (เช่น ล้างคลังทาง debug) → ไม่เล่นเอฟเฟกต์ตาย
 	deathsBefore = effects.deaths
 	table.remove(payload.battle.our, 5)
@@ -2384,6 +2445,19 @@ do
 	TroopRenderer.updateFromPayload(payload)
 	check("ตัวกลางแถวหายไป → ไม่มีเอฟเฟกต์ตาย", effects.deaths, deathsBefore)
 	check("  เหลือ 9 ตัว", countModels("Troop"), LINE - 1)
+
+	-- sync ~1 วิ: ตัวหน้าสุดตาย 3 ตัวในรอบเดียว → เอฟเฟกต์ตายครบ 3 (ตัวที่อยู่หน้าตัวที่รอดคนแรก)
+	deathsBefore = effects.deaths
+	local survivors = {}
+	for index = 4, #payload.battle.our do
+		table.insert(survivors, payload.battle.our[index])
+	end
+	for pos, entry in survivors do
+		entry.pos = pos
+	end
+	payload.battle.our = survivors
+	TroopRenderer.updateFromPayload(payload)
+	check("ตายหลายตัวระหว่างสอง sync → เอฟเฟกต์ตายครบทุกตัว (3)", effects.deaths - deathsBefore, 3)
 
 	-- ศัตรูหมด → เดินต่อไปกำแพง แล้วป้อมยิงตัวหน้าสุด
 	payload.battle.enemies = {}
